@@ -21,7 +21,19 @@ enum WebDataStore {
 
     /// Cookies in the store for `CookieExporter.domains`.
     static func cookies() async -> [HTTPCookie] {
-        await shared.httpCookieStore.allCookies().filter(CookieExporter.isExported)
+        warmUp()
+        return await shared.httpCookieStore.allCookies().filter(CookieExporter.isExported)
+    }
+
+    /// A persistent store's saved cookies are only loaded once a web view uses it; until then
+    /// `allCookies()` comes back empty after a relaunch and the login looks lost. Keep one alive.
+    private static var keepAliveView: WKWebView?
+
+    private static func warmUp() {
+        guard keepAliveView == nil else { return }
+        let view = WKWebView(frame: .zero, configuration: configuration())
+        view.loadHTMLString("", baseURL: nil)
+        keepAliveView = view
     }
 
     /// Removes every cookie, cache and storage record from the store.

@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 enum SceneID {
-    static let settings = "settings"
+    static let main = "main"
 }
 
 /// Entry point: `Stow --selftest` runs the headless self-test instead of the app.
@@ -23,7 +23,8 @@ enum StowMain {
         // Two copies (e.g. a dev build and the installed app) would double every check and alarm.
         let others = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
         if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil,
-           others.contains(where: { $0.processIdentifier != getpid() }) {
+           let running = others.first(where: { $0.processIdentifier != getpid() }) {
+            running.activate()
             exit(0)
         }
         StowApp.main()
@@ -31,6 +32,7 @@ enum StowMain {
 }
 
 struct StowApp: App {
+    @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
     @State private var model: AppModel
 
     init() {
@@ -54,21 +56,25 @@ struct StowApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra {
-            MenuContent()
+        Window("Stow", id: SceneID.main) {
+            MainView()
                 .environment(model)
-        } label: {
-            MenuBarLabel()
-                .environment(model)
+                .frame(minWidth: 820, minHeight: 540)
         }
-        .menuBarExtraStyle(.window)
-
-        Window("Stow Settings", id: SceneID.settings) {
-            SettingsView()
-                .environment(model)
-        }
-        .windowResizability(.contentSize)
-        .defaultLaunchBehavior(.suppressed)
+        .defaultSize(width: 1180, height: 760)
+        .defaultLaunchBehavior(.presented)
         .restorationBehavior(.disabled)
+        .commands {
+            CommandGroup(replacing: .newItem) {
+                Button("Check Now") { Task { await model.checkNow() } }
+                    .keyboardShortcut("r")
+                    .disabled(model.isChecking)
+            }
+        }
     }
+}
+
+/// Stow keeps checking (and, later, runs the alarm) with its window closed; the Dock icon brings it back.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 }

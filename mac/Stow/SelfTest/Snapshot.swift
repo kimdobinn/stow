@@ -2,7 +2,7 @@
 import AppKit
 import SwiftUI
 
-/// `Stow --snapshot <dir>` (Debug builds only): renders the menu panel and every Settings screen
+/// `Stow --snapshot <dir>` (Debug builds only): renders every section of the main window
 /// to PNGs, using a temporary copy of the real settings and state so nothing real is changed.
 @MainActor
 enum Snapshot {
@@ -21,15 +21,9 @@ enum Snapshot {
             await model.signIn()
             NSApplication.shared.setActivationPolicy(.prohibited)
 
-            let screens: [(String, AnyView)] = [
-                ("menu", AnyView(MenuContent())),
-                ("settings", AnyView(SettingsView().frame(width: 640, height: 480))),
-                ("channels", AnyView(ChannelsTab().frame(width: 640, height: 440))),
-                ("account", AnyView(AccountTab().frame(width: 640, height: 440))),
-                ("alarm", AnyView(AlarmTab().frame(width: 640, height: 440))),
-                ("log", AnyView(LogTab().frame(width: 640, height: 440))),
-                ("subscriptions", AnyView(SubscriptionsPicker())),
-            ]
+            let screens: [(String, AnyView)] = SidebarItem.allCases.map { item in
+                (item.rawValue, AnyView(MainView(selection: item).frame(width: 1180, height: 760)))
+            } + [("subscriptions", AnyView(SubscriptionsPicker()))]
             for appearance in [NSAppearance.Name.aqua, .darkAqua] {
                 let suffix = appearance == .aqua ? "light" : "dark"
                 for (name, view) in screens {

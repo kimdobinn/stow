@@ -1,6 +1,6 @@
 # Stow for Mac
 
-A menu bar app that watches chosen YouTube channels for new long-form and members-only videos
+A Mac app that watches chosen YouTube channels for new long-form and members-only videos
 and keeps an Inbox. It stores no videos. Design notes are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Requirements
@@ -27,9 +27,13 @@ Tests (Swift Testing, hosted by the app):
 xcodebuild -project Stow.xcodeproj -scheme Stow -derivedDataPath .build test
 ```
 
-Stow lives in the menu bar (no Dock icon). On first launch it asks for notification permission
-and registers itself as a login item for the path it was launched from; turn that off in
-Settings › Account or with `"launchAtLogin": false` in settings.json.
+Stow is a regular window app with a Dock icon. Closing the window keeps it running in the
+background (checks continue); click the Dock icon to bring it back, and quit with ⌘Q. On first
+launch it asks for notification permission and registers itself as a login item for the path it
+was launched from; turn that off under Account or with `"launchAtLogin": false` in settings.json.
+
+Debug builds can render every screen to PNGs for review: `Stow --snapshot <dir>`.
+The app icon is drawn by `scripts/make-icon.swift`.
 
 ## Self-test
 

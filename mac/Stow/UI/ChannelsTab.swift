@@ -10,12 +10,13 @@ struct ChannelsTab: View {
     @State private var showsPicker = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 16) {
             addBar
             channelList
             subscriptionsBar
         }
-        .padding(16)
+        .controlSize(.large)
+        .padding(24)
         .sheet(isPresented: $showsPicker) { SubscriptionsPicker() }
     }
 
@@ -55,7 +56,7 @@ struct ChannelsTab: View {
                 ))
                 .help("Include in the morning alarm")
             }
-            .width(70)
+            .width(90)
             .alignment(.center)
             TableColumn("Phone") { channel in
                 ColumnToggle(isOn: Binding(
@@ -64,7 +65,7 @@ struct ChannelsTab: View {
                 ))
                 .help("Send new videos to the phone")
             }
-            .width(70)
+            .width(90)
             .alignment(.center)
         }
         .alternatingRowBackgrounds(.disabled)
@@ -95,7 +96,7 @@ struct ChannelsTab: View {
             Button("Choose from Subscriptions…") { showsPicker = true }
                 .disabled(!signedIn)
             if !signedIn {
-                Text("Sign in on the Account tab to choose from your subscriptions.")
+                Text("Sign in under Account to choose from your subscriptions.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -131,19 +132,19 @@ private struct ChannelCell: View {
     let channel: Channel
 
     var body: some View {
-        HStack(spacing: 10) {
-            ChannelAvatar(url: channel.avatarURL)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(channel.title).lineLimit(1)
+        HStack(spacing: 12) {
+            ChannelAvatar(url: channel.avatarURL, size: 40)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(channel.title).font(.title3).lineLimit(1)
                 if let handle = channel.handle {
                     Text(handle)
-                        .font(.caption)
+                        .font(.callout)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
     }
 }
 
@@ -155,7 +156,7 @@ private struct ColumnToggle: View {
         Toggle("", isOn: $isOn)
             .labelsHidden()
             .toggleStyle(.switch)
-            .controlSize(.small)
+            .controlSize(.regular)
     }
 }
 
