@@ -1,38 +1,43 @@
 import AppKit
 import SwiftUI
 
-/// Stow's own controls over the alarm video: a transparent panel just above mpv's fullscreen
-/// window (mpv sits at the floating level) on the same screen. It never activates Stow, so mpv
-/// keeps the menu bar and Dock hidden, but it takes the clicks and keys.
+/// The alarm's window: mpv's video (drawn in process by `MPVVideoLayer`) with Stow's controls
+/// on top. It opens filling the screen, can be resized, moved or made full screen like any
+/// window, and closing it ends the alarm.
 @MainActor
-enum PlaybackOverlay {
-    private static var panel: OverlayPanel?
+enum AlarmWindow {
+    private static var window: VideoWindow?
 
-    /// Shows the controls until `updates` ends (mpv exited). Replaces any controls already shown.
-    static func present(updates: AsyncStream<NowPlaying>, perform: @escaping @Sendable (PlaybackAction) -> Void) {
-        dismiss()
-        guard let screen = NSScreen.screens.first else { return }
+    /// Opens the window for `core` and keeps it current from `updates`; it closes when `updates`
+    /// ends (mpv stopped) or the core releases its video. Throws `.player` when the video
+    /// output can't be set up.
+    static func present(core: MPVCore, updates: AsyncStream<NowPlaying>,
+                        perform: @escaping @Sendable (PlaybackAction) -> Void) throws {
+        close(window)
         let state = PlaybackScreen(perform: perform)
-        let shown = OverlayPanel(screen: screen, state: state)
-        panel = shown
+        let videoLayer = try MPVVideoLayer(core: core)
+        let shown = VideoWindow(state: state, videoLayer: videoLayer)
+        window = shown
+        core.setVideoRelease {
+            videoLayer.release()
+            close(shown)
+        }
+        NSApp.unhide(nil)
+        shown.makeKeyAndOrderFront(nil)
+        // At alarm time Stow is usually in the background; the window still has to come first.
         shown.orderFrontRegardless()
-        shown.makeKey()
+        NSApp.activate(ignoringOtherApps: true)
         Task {
-            for await nowPlaying in updates {
-                state.update(nowPlaying)
-                // mpv can take focus when its window appears; the controls want the keys.
-                if !shown.isKeyWindow { shown.makeKey() }
-            }
-            if panel === shown { dismiss() }
+            for await nowPlaying in updates { state.update(nowPlaying) }
+            close(shown)
         }
     }
 
-    static func dismiss() {
-        guard let panel else { return }
-        self.panel = nil
-        panel.state.stopTimers()
-        panel.orderOut(nil)
-        panel.close()
+    private static func close(_ closing: VideoWindow?) {
+        guard let closing, closing.isVisible || window === closing else { return }
+        if window === closing { window = nil }
+        closing.state.stopTimers()
+        closing.forceClose()
         NSCursor.setHiddenUntilMouseMoves(false)
     }
 }
@@ -110,43 +115,65 @@ final class PlaybackScreen {
     }
 }
 
-private final class OverlayPanel: NSPanel {
+private final class VideoWindow: NSWindow, NSWindowDelegate {
     let state: PlaybackScreen
+    private let videoLayer: MPVVideoLayer
+    private var closesForReal = false
 
-    init(screen: NSScreen, state: PlaybackScreen) {
+    init(state: PlaybackScreen, videoLayer: MPVVideoLayer) {
         self.state = state
-        super.init(contentRect: screen.frame, styleMask: [.borderless, .nonactivatingPanel],
+        self.videoLayer = videoLayer
+        let screen = NSScreen.main ?? NSScreen.screens.first
+        let frame = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 720)
+        super.init(contentRect: frame, styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                    backing: .buffered, defer: false)
-        setFrame(screen.frame, display: false)
-        level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1)
-        isOpaque = false
-        backgroundColor = .clear
-        hasShadow = false
-        hidesOnDeactivate = false
-        isReleasedWhenClosed = false
-        becomesKeyOnlyIfNeeded = false
-        acceptsMouseMovedEvents = true
-        // Otherwise clicks on the (clear) background would fall through to mpv.
-        ignoresMouseEvents = false
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-        title = "Stow Alarm Controls"
+        setFrame(frame, display: false)
+        title = "Stow Alarm"
+        titleVisibility = .hidden
+        titlebarAppearsTransparent = true
+        backgroundColor = .black
         appearance = NSAppearance(named: .darkAqua)
+        isReleasedWhenClosed = false
+        acceptsMouseMovedEvents = true
+        collectionBehavior = [.fullScreenPrimary, .moveToActiveSpace]
+        minSize = NSSize(width: 640, height: 360)
+        delegate = self
 
-        let container = ActivityView(frame: NSRect(origin: .zero, size: screen.frame.size))
+        let container = ActivityView(frame: NSRect(origin: .zero, size: frame.size))
         container.onActivity = { [weak state] in state?.revealChrome() }
+        let video = NSView(frame: container.bounds)
+        video.layer = videoLayer
+        video.wantsLayer = true
+        video.autoresizingMask = [.width, .height]
+        videoLayer.contentsScale = backingScaleFactor
         let host = FirstMouseHostingView(rootView: AlarmPlaybackView(screen: state))
         host.frame = container.bounds
         host.autoresizingMask = [.width, .height]
+        container.addSubview(video)
         container.addSubview(host)
         contentView = container
     }
 
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { false }
+    /// Closing the window is "I'm awake": the alarm stops, and the window closes once mpv has.
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        if closesForReal { return true }
+        state.perform(.stop)
+        return false
+    }
 
-    /// Keys are handled here, before SwiftUI, so space never "clicks" a focused button.
+    func windowDidChangeBackingProperties(_ notification: Notification) {
+        videoLayer.contentsScale = backingScaleFactor
+    }
+
+    func forceClose() {
+        closesForReal = true
+        orderOut(nil)
+        close()
+    }
+
+    /// Keys without ⌘ are the player's (space, arrows, esc…); ⌘-shortcuts (⌘W, ⌘Q…) work as usual.
     override func sendEvent(_ event: NSEvent) {
-        if event.type == .keyDown {
+        if event.type == .keyDown, event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
             state.handleKey(code: event.keyCode, characters: event.charactersIgnoringModifiers)
             return
         }
@@ -154,7 +181,7 @@ private final class OverlayPanel: NSPanel {
     }
 }
 
-/// Reports pointer movement anywhere on the panel, even while Stow isn't the active app.
+/// Reports pointer movement anywhere in the window, even while Stow isn't the active app.
 private final class ActivityView: NSView {
     var onActivity: () -> Void = {}
 
@@ -170,7 +197,7 @@ private final class ActivityView: NSView {
     }
 }
 
-/// The first click on a button acts at once instead of only focusing the panel.
+/// The first click on a button acts at once instead of only focusing the window.
 private final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }

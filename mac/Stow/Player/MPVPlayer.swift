@@ -1,14 +1,13 @@
 import Foundation
 
-/// Fullscreen mpv (child process) driven over its JSON IPC socket: playlist, events and
-/// SponsorBlock skipping. mpv only draws the video; Stow's own controls (`PlaybackOverlay`)
-/// float over it.
+/// mpv running inside Stow (libmpv), driven over its JSON IPC socket: playlist, events and
+/// SponsorBlock skipping. With controls, the video plays in Stow's alarm window (`AlarmWindow`).
 actor MPVPlayer: AlarmPlayer {
     static let format = "bv*[height<=1080][fps<=60]+ba/b"
 
     /// Appended after the standard options, so they override them (tests: `--vo=null --ao=null --length=…`).
     private let extraArguments: [String]
-    /// Whether to show `PlaybackOverlay` over the video (off for tests and the dry run).
+    /// Whether to play in the alarm window; off (no video output) for tests and the dry run.
     private let showsControls: Bool
     private var session: MPVSession?
 
@@ -20,23 +19,28 @@ actor MPVPlayer: AlarmPlayer {
     func play(playlist: [PlayableVideo], outputDeviceUID: String?, cookiesFile: URL?) async throws -> AsyncStream<PlayerEvent> {
         await stop()
         guard !playlist.isEmpty else { throw StowError.player("Nothing to play.") }
-        let mpv = try ToolLocator.url(for: "mpv")
         let ytdlp = try ToolLocator.url(for: "yt-dlp")
         let socketDirectory = try Self.makeSocketDirectory()
         // Without cookies only members-only videos fail, so a failed copy isn't fatal.
         let cookiesCopy = cookiesFile.flatMap { try? CookieCopy.make(of: $0) }
         let socketPath = socketDirectory.appending(path: "mpv.sock").path
-        let arguments = Self.arguments(playlist: playlist, socketPath: socketPath, ytdlp: ytdlp,
-                                       outputDeviceUID: outputDeviceUID, cookiesCopy: cookiesCopy) + extraArguments
-            + ["--"] + playlist.map(\.video.watchURL.absoluteString)
-        let session = try await MPVSession.launch(executable: mpv, arguments: arguments, socketPath: socketPath,
-                                                  leftovers: [socketDirectory] + (cookiesCopy.map { [$0] } ?? []),
-                                                  playlist: playlist)
+        let options = Self.options(socketPath: socketPath, ytdlp: ytdlp, outputDeviceUID: outputDeviceUID,
+                                   cookiesCopy: cookiesCopy, drawsVideo: showsControls)
+            + extraArguments.compactMap(Self.option(fromArgument:))
+        let core = try MPVCore(options: options, leftovers: [socketDirectory] + (cookiesCopy.map { [$0] } ?? []))
+        let session = try await MPVSession.launch(process: core, socketPath: socketPath, playlist: playlist)
         self.session = session
-        if showsControls {
-            await PlaybackOverlay.present(updates: session.nowPlaying) { action in
-                Task { await session.perform(action) }
+        do {
+            // The window's video output has to exist before the first video starts.
+            if showsControls {
+                try await AlarmWindow.present(core: core, updates: session.nowPlaying) { action in
+                    Task { await session.perform(action) }
+                }
             }
+            guard core.load(playlist.map(\.video.watchURL)) else { throw StowError.player("mpv refused the playlist.") }
+        } catch {
+            await stop()
+            throw error
         }
         return session.events
     }
@@ -47,25 +51,37 @@ actor MPVPlayer: AlarmPlayer {
         await session.stop()
     }
 
-    /// Kills any mpv this app started, synchronously; called when the app quits.
+    /// Shuts down any mpv this app started, synchronously; called when the app quits.
     static func terminateAll() {
-        MPVProcess.terminateAll()
+        MPVCore.terminateAll()
     }
 
-    /// Options before the extra arguments and the URLs.
-    static func arguments(playlist: [PlayableVideo], socketPath: String, ytdlp: URL,
-                          outputDeviceUID: String?, cookiesCopy: URL?) -> [String] {
-        var arguments = [
-            "--no-config", "--terminal=no", "--idle=no", "--keep-open=no",
-            "--fs", "--native-fs=no", "--ontop", "--force-window=immediate", "--title=Stow Alarm",
-            // Stow draws the controls on the first screen (PlaybackOverlay); mpv shows only the video.
-            "--screen=0", "--fs-screen=0", "--osc=no", "--osd-level=0", "--osd-bar=no", "--cursor-autohide=always",
-            "--volume=100", "--input-ipc-server=\(socketPath)",
-            "--script-opts=ytdl_hook-ytdl_path=\(ytdlp.path)", "--ytdl-format=\(format)",
+    /// mpv options before the extra arguments. `drawsVideo` renders into Stow's alarm window;
+    /// otherwise there is no video output at all.
+    static func options(socketPath: String, ytdlp: URL, outputDeviceUID: String?, cookiesCopy: URL?,
+                        drawsVideo: Bool) -> [(String, String)] {
+        var options = [
+            ("config", "no"), ("terminal", "no"), ("idle", "once"), ("keep-open", "no"),
+            ("vo", drawsVideo ? "libmpv" : "null"), ("hwdec", "auto-safe"),
+            // Stow's window handles every key and click; mpv draws no controls or messages.
+            ("input-default-bindings", "no"), ("input-vo-keyboard", "no"), ("osc", "no"), ("osd-level", "0"),
+            ("volume", "100"), ("input-ipc-server", socketPath),
+            ("ytdl", "yes"), ("script-opts", "ytdl_hook-ytdl_path=\(ytdlp.path)"), ("ytdl-format", format),
         ]
-        if let outputDeviceUID { arguments.append("--audio-device=coreaudio/\(outputDeviceUID)") }
-        if let cookiesCopy { arguments.append("--ytdl-raw-options=cookies=\(cookiesCopy.path)") }
-        return arguments
+        if let outputDeviceUID { options.append(("audio-device", "coreaudio/\(outputDeviceUID)")) }
+        if let cookiesCopy { options.append(("ytdl-raw-options", "cookies=\(cookiesCopy.path)")) }
+        return options
+    }
+
+    /// "--name=value" → (name, value); "--name" → (name, "yes"); "--no-name" → (name, "no").
+    static func option(fromArgument argument: String) -> (String, String)? {
+        guard argument.hasPrefix("--"), argument.count > 2 else { return nil }
+        let body = argument.dropFirst(2)
+        if let equals = body.firstIndex(of: "=") {
+            return (String(body[..<equals]), String(body[body.index(after: equals)...]))
+        }
+        if body.hasPrefix("no-") { return (String(body.dropFirst(3)), "no") }
+        return (String(body), "yes")
     }
 
     /// A private (0700) folder for the IPC socket; short, because socket paths are limited to 104 bytes.

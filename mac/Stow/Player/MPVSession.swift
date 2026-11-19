@@ -9,7 +9,7 @@ actor MPVSession {
     nonisolated let nowPlaying: AsyncStream<NowPlaying>
     private let nowPlayingContinuation: AsyncStream<NowPlaying>.Continuation
     private var lastNowPlaying: NowPlaying?
-    private let process: MPVProcess
+    private let process: MPVCore
     private let socket: MPVSocket
     private var tracker: MPVPlaybackTracker
     private var nextRequestId = 1
@@ -18,10 +18,9 @@ actor MPVSession {
     private var helpers: [Task<Void, Never>] = []
     private var runTask: Task<Void, Never>?
 
-    /// Starts mpv and connects to it. Throws `.player` when it can't (mpv is then killed and its files removed).
-    static func launch(executable: URL, arguments: [String], socketPath: String, leftovers: [URL],
-                       playlist: [PlayableVideo]) async throws -> MPVSession {
-        let process = try MPVProcess(executable: executable, arguments: arguments, leftovers: leftovers)
+    /// Connects to the running `process` (its IPC socket at `socketPath`). Throws `.player` when it
+    /// can't (the core is then shut down and its files removed).
+    static func launch(process: MPVCore, socketPath: String, playlist: [PlayableVideo]) async throws -> MPVSession {
         do {
             let socket = try await MPVSocket.connect(path: socketPath, timeout: .seconds(10)) { process.isRunning }
             let session = MPVSession(process: process, socket: socket, playlist: playlist)
@@ -30,12 +29,12 @@ actor MPVSession {
         } catch {
             let exitedEarly = !process.isRunning
             process.finish()
-            if exitedEarly { throw StowError.player("mpv exited at once (code \(process.exitCode)).") }
+            if exitedEarly { throw StowError.player("mpv stopped at once.") }
             throw error
         }
     }
 
-    private init(process: MPVProcess, socket: MPVSocket, playlist: [PlayableVideo]) {
+    private init(process: MPVCore, socket: MPVSocket, playlist: [PlayableVideo]) {
         (events, continuation) = AsyncStream.makeStream(of: PlayerEvent.self)
         (nowPlaying, nowPlayingContinuation) = AsyncStream.makeStream(of: NowPlaying.self,
                                                                       bufferingPolicy: .bufferingNewest(1))

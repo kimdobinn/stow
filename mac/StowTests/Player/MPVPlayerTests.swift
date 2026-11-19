@@ -5,24 +5,37 @@ import Testing
 struct MPVPlayerTests {
     private let ytdlp = URL(filePath: "/opt/homebrew/bin/yt-dlp")
 
-    @Test func argumentsForAlarm() {
-        let arguments = MPVPlayer.arguments(playlist: [], socketPath: "/tmp/s/mpv.sock", ytdlp: ytdlp,
-                                            outputDeviceUID: "40-C1-F6-88-8F-AF:output",
-                                            cookiesCopy: URL(filePath: "/x/cookie-copies/1.txt"))
-        for expected in ["--no-config", "--idle=no", "--keep-open=no", "--fs", "--native-fs=no", "--ontop",
-                         "--force-window=immediate", "--title=Stow Alarm", "--volume=100",
-                         "--input-ipc-server=/tmp/s/mpv.sock",
-                         "--script-opts=ytdl_hook-ytdl_path=/opt/homebrew/bin/yt-dlp",
-                         "--ytdl-format=bv*[height<=1080][fps<=60]+ba/b",
-                         "--audio-device=coreaudio/40-C1-F6-88-8F-AF:output",
-                         "--ytdl-raw-options=cookies=/x/cookie-copies/1.txt"] {
-            #expect(arguments.contains(expected), "missing \(expected)")
+    private func pairs(_ options: [(String, String)]) -> [String] {
+        options.map { "\($0.0)=\($0.1)" }
+    }
+
+    @Test func optionsForAlarm() {
+        let options = pairs(MPVPlayer.options(socketPath: "/tmp/s/mpv.sock", ytdlp: ytdlp,
+                                              outputDeviceUID: "40-C1-F6-88-8F-AF:output",
+                                              cookiesCopy: URL(filePath: "/x/cookie-copies/1.txt"), drawsVideo: true))
+        for expected in ["config=no", "idle=once", "keep-open=no", "vo=libmpv", "input-default-bindings=no",
+                         "volume=100", "input-ipc-server=/tmp/s/mpv.sock",
+                         "script-opts=ytdl_hook-ytdl_path=/opt/homebrew/bin/yt-dlp",
+                         "ytdl-format=bv*[height<=1080][fps<=60]+ba/b",
+                         "audio-device=coreaudio/40-C1-F6-88-8F-AF:output",
+                         "ytdl-raw-options=cookies=/x/cookie-copies/1.txt"] {
+            #expect(options.contains(expected), "missing \(expected)")
         }
     }
 
-    @Test func defaultOutputAndNoCookies() {
-        let arguments = MPVPlayer.arguments(playlist: [], socketPath: "/s", ytdlp: ytdlp, outputDeviceUID: nil, cookiesCopy: nil)
-        #expect(!arguments.contains { $0.hasPrefix("--audio-device") || $0.hasPrefix("--ytdl-raw-options") })
+    @Test func defaultOutputNoCookiesNoVideo() {
+        let options = pairs(MPVPlayer.options(socketPath: "/s", ytdlp: ytdlp, outputDeviceUID: nil, cookiesCopy: nil,
+                                              drawsVideo: false))
+        #expect(options.contains("vo=null"))
+        #expect(!options.contains { $0.hasPrefix("audio-device") || $0.hasPrefix("ytdl-raw-options") })
+    }
+
+    @Test func parsesCommandLineStyleOptions() {
+        #expect(MPVPlayer.option(fromArgument: "--length=3")! == ("length", "3"))
+        #expect(MPVPlayer.option(fromArgument: "--script-opts=a=b")! == ("script-opts", "a=b"))
+        #expect(MPVPlayer.option(fromArgument: "--no-config")! == ("config", "no"))
+        #expect(MPVPlayer.option(fromArgument: "--fs")! == ("fs", "yes"))
+        #expect(MPVPlayer.option(fromArgument: "length") == nil)
     }
 
     @Test func emptyPlaylistThrows() async {
@@ -36,7 +49,7 @@ struct MPVPlayerTests {
 /// so it only runs with `TEST_RUNNER_STOW_MPV_TESTS=1 xcodebuild test …`.
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["STOW_MPV_TESTS"] != nil), .serialized)
 struct MPVPlayerLiveTests {
-    private static let silent = ["--vo=null", "--ao=null", "--force-window=no", "--fs=no", "--ontop=no"]
+    private static let silent = ["--vo=null", "--ao=null"]
     private let entry = PlayableVideo(video: video("-tCjS49NmyU"), duration: nil)
 
     private func cookiesFile() throws -> URL {

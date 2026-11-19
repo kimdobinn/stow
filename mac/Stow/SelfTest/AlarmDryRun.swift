@@ -39,7 +39,7 @@ enum AlarmDryRun {
         print("\nRun (trigger test; prep, then play for about \(playSeconds) s)")
         let host = DryRunHost(model: model, log: log)
         // Each video plays at most half the time, so the move to the next entry shows up too.
-        let player = MPVPlayer(extraArguments: ["--vo=null", "--ao=null", "--force-window=no", "--fs=no", "--ontop=no",
+        let player = MPVPlayer(extraArguments: ["--vo=null", "--ao=null",
                                                 "--length=\(playSeconds / 2)"])
         let runner = AlarmRunner(trigger: .test, scheduledFor: .now, services: .dryRun(player: player, log: log),
                                  host: host) { [host] phase in host.phaseChanged(phase) }

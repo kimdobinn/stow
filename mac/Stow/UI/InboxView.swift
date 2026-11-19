@@ -121,7 +121,8 @@ struct InboxView: View {
     }
 }
 
-/// A channel's header (the drag handle for reordering) and its videos in a horizontal strip.
+/// A channel's name and picture in a column on the left (the drag handle for reordering), and
+/// its videos in a horizontal strip beside it.
 private struct ChannelShelf: View {
     let channel: Channel
     let videos: [Video]
@@ -130,8 +131,10 @@ private struct ChannelShelf: View {
     let onDrop: (String) -> Void
     let onTargeted: (Bool) -> Void
 
+    static let headerWidth: CGFloat = 132
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        HStack(alignment: .top, spacing: 20) {
             header
             ScrollView(.horizontal) {
                 LazyHStack(alignment: .top, spacing: 20) {
@@ -164,15 +167,22 @@ private struct ChannelShelf: View {
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
+        VStack(spacing: 8) {
+            ChannelAvatar(url: channel.avatarURL, size: 64)
+            Text(channel.title)
+                .font(.headline)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+            Text("\(videos.count) videos")
+                .font(.callout)
+                .foregroundStyle(.secondary)
             Image(systemName: "line.3.horizontal")
                 .foregroundStyle(.tertiary)
-                .help("Drag to reorder")
-            ChannelAvatar(url: channel.avatarURL, size: 32)
-            Text(channel.title).font(.title3.weight(.semibold))
-            Text("\(videos.count)").foregroundStyle(.secondary)
-            Spacer()
+                .padding(.top, 2)
         }
+        .frame(width: Self.headerWidth)
+        .padding(.top, 28)
+        .help("Drag to reorder")
         .contentShape(Rectangle())
         .draggable(channel.id) {
             HStack(spacing: 8) {
