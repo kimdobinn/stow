@@ -7,6 +7,8 @@ import Observation
 final class AppModel {
     static let maxConcurrentChannels = 3
     static let inboxLimit = 300
+    /// Videos kept per channel for the Inbox's "Recent" feed.
+    static let recentPerChannel = 30
     static let minimumCheckIntervalMinutes = 5
     /// Checks with errors in a row before notifying, so a brief outage stays quiet.
     static let failureNotifyStreak = 3
@@ -15,6 +17,17 @@ final class AppModel {
     var channels: [Channel] { settings.channels }
     /// Newest first.
     var inbox: [InboxItem] { state.inbox }
+    /// Every channel's recent videos that aren't in the Inbox, newest first. Dismissing an
+    /// Inbox video moves it here.
+    var recentVideos: [Video] {
+        let inboxIds = Set(state.inbox.map(\.id))
+        let channelIds = Set(channels.map(\.id))
+        return state.recentVideos
+            .filter { channelIds.contains($0.key) }
+            .flatMap(\.value)
+            .filter { !inboxIds.contains($0.id) }
+            .sorted { ($0.publishedAt ?? .distantPast) > ($1.publishedAt ?? .distantPast) }
+    }
     var lastCheck: CheckResult? { state.lastCheck }
     private(set) var signInState: SignInState = .unknown
     private(set) var isChecking = false
@@ -159,10 +172,22 @@ final class AppModel {
                 sources: sources, seen: state.seenVideoIds[channel.id],
                 checkedFeeds: Set(state.checkedFeeds[channel.id] ?? []))
             state.seenVideoIds[channel.id] = diff.seenVideoIds
+            state.recentVideos[channel.id] = Self.mergeRecent(
+                state.recentVideos[channel.id] ?? [], with: sources.values.flatMap { $0 })
             state.checkedFeeds[channel.id] = FeedKind.allCases.filter(diff.checkedFeeds.contains)
             found += diff.newVideos
         }
         return addToInbox(found)
+    }
+
+    /// Fresh feed entries replace stored ones (titles change); videos that dropped out of a feed
+    /// stay until the cap pushes them out.
+    private static func mergeRecent(_ stored: [Video], with fetched: [Video]) -> [Video] {
+        var byId = Dictionary(stored.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        for video in fetched { byId[video.id] = video }
+        return Array(byId.values
+            .sorted { ($0.publishedAt ?? .distantPast) > ($1.publishedAt ?? .distantPast) }
+            .prefix(recentPerChannel))
     }
 
     /// Uses the channel's (hand-editable) title and id, whatever the feed reported.
@@ -287,6 +312,7 @@ final class AppModel {
         // Forgetting seen ids means re-adding the channel applies the first-add rule again.
         state.seenVideoIds[id] = nil
         state.checkedFeeds[id] = nil
+        state.recentVideos[id] = nil
         state.inbox.removeAll { $0.video.channelId == id }
         saveState()
         record(.info, "Removed channel \(channel.title) (\(id)).")

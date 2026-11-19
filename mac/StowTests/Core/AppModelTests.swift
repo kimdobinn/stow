@@ -39,6 +39,21 @@ struct AppModelTests {
         }
     }
 
+    @Test func recentFeedListsChannelVideosAndDismissedOnes() async throws {
+        setUpChannel()
+        let model = makeModel()
+        try await model.addChannel(input: "@JackhopkinsCEO")
+        #expect(model.recentVideos.map(\.id) == ["v3", "v4", "v5"])
+
+        model.dismissInbox(videoId: "v1")
+        #expect(model.inbox.map(\.id) == ["v2"])
+        #expect(model.recentVideos.map(\.id) == ["v1", "v3", "v4", "v5"])
+        #expect(try store.loadState().recentVideos[info.id]?.count == 5)
+
+        model.removeChannel(id: info.id)
+        #expect(model.recentVideos.isEmpty)
+    }
+
     @Test func checkFindsNewVideosAndNotifiesOnce() async throws {
         setUpChannel()
         let model = makeModel()

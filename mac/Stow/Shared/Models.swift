@@ -172,6 +172,9 @@ struct AppState: Codable, Equatable, Sendable {
     var checkedFeeds: [String: [FeedKind]]
     /// Newest first.
     var inbox: [InboxItem]
+    /// channelId -> the channel's most recent videos from its feeds (newest first, capped by Core),
+    /// for the Inbox's "Recent" feed.
+    var recentVideos: [String: [Video]]
     var lastCheck: CheckResult?
     /// Consecutive checks that had errors (other than an expired sign-in).
     var failedCheckStreak: Int
@@ -179,21 +182,23 @@ struct AppState: Codable, Equatable, Sendable {
     static let empty = AppState(seenVideoIds: [:], inbox: [], lastCheck: nil)
 
     init(seenVideoIds: [String: [String]], checkedFeeds: [String: [FeedKind]] = [:], inbox: [InboxItem],
-         lastCheck: CheckResult?, failedCheckStreak: Int = 0) {
+         recentVideos: [String: [Video]] = [:], lastCheck: CheckResult?, failedCheckStreak: Int = 0) {
         self.seenVideoIds = seenVideoIds
         self.checkedFeeds = checkedFeeds
         self.inbox = inbox
+        self.recentVideos = recentVideos
         self.lastCheck = lastCheck
         self.failedCheckStreak = failedCheckStreak
     }
 
-    private enum CodingKeys: String, CodingKey { case seenVideoIds, checkedFeeds, inbox, lastCheck, failedCheckStreak }
+    private enum CodingKeys: String, CodingKey { case seenVideoIds, checkedFeeds, inbox, recentVideos, lastCheck, failedCheckStreak }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         seenVideoIds = try c.decodeIfPresent([String: [String]].self, forKey: .seenVideoIds) ?? [:]
         checkedFeeds = try c.decodeIfPresent([String: [FeedKind]].self, forKey: .checkedFeeds) ?? [:]
         inbox = try c.decodeIfPresent([InboxItem].self, forKey: .inbox) ?? []
+        recentVideos = try c.decodeIfPresent([String: [Video]].self, forKey: .recentVideos) ?? [:]
         lastCheck = try c.decodeIfPresent(CheckResult.self, forKey: .lastCheck)
         failedCheckStreak = try c.decodeIfPresent(Int.self, forKey: .failedCheckStreak) ?? 0
     }
