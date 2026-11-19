@@ -1,16 +1,20 @@
 import Foundation
 
-/// Fullscreen mpv (child process) driven over its JSON IPC socket: playlist, events,
-/// clock/title overlay and SponsorBlock skipping.
+/// Fullscreen mpv (child process) driven over its JSON IPC socket: playlist, events and
+/// SponsorBlock skipping. mpv only draws the video; Stow's own controls (`PlaybackOverlay`)
+/// float over it.
 actor MPVPlayer: AlarmPlayer {
     static let format = "bv*[height<=1080][fps<=60]+ba/b"
 
     /// Appended after the standard options, so they override them (tests: `--vo=null --ao=null --length=…`).
     private let extraArguments: [String]
+    /// Whether to show `PlaybackOverlay` over the video (off for tests and the dry run).
+    private let showsControls: Bool
     private var session: MPVSession?
 
-    init(extraArguments: [String] = []) {
+    init(extraArguments: [String] = [], showsControls: Bool = false) {
         self.extraArguments = extraArguments
+        self.showsControls = showsControls
     }
 
     func play(playlist: [PlayableVideo], outputDeviceUID: String?, cookiesFile: URL?) async throws -> AsyncStream<PlayerEvent> {
@@ -29,6 +33,11 @@ actor MPVPlayer: AlarmPlayer {
                                                   leftovers: [socketDirectory] + (cookiesCopy.map { [$0] } ?? []),
                                                   playlist: playlist)
         self.session = session
+        if showsControls {
+            await PlaybackOverlay.present(updates: session.nowPlaying) { action in
+                Task { await session.perform(action) }
+            }
+        }
         return session.events
     }
 
@@ -49,6 +58,8 @@ actor MPVPlayer: AlarmPlayer {
         var arguments = [
             "--no-config", "--terminal=no", "--idle=no", "--keep-open=no",
             "--fs", "--native-fs=no", "--ontop", "--force-window=immediate", "--title=Stow Alarm",
+            // Stow draws the controls on the first screen (PlaybackOverlay); mpv shows only the video.
+            "--screen=0", "--fs-screen=0", "--osc=no", "--osd-level=0", "--osd-bar=no", "--cursor-autohide=always",
             "--volume=100", "--input-ipc-server=\(socketPath)",
             "--script-opts=ytdl_hook-ytdl_path=\(ytdlp.path)", "--ytdl-format=\(format)",
         ]

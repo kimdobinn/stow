@@ -1,18 +1,20 @@
 import Foundation
 
-/// One mpv run: reads its IPC events, drives the tracker, overlay and SponsorBlock seeks, and
-/// reports `PlayerEvent`s until mpv exits.
+/// One mpv run: reads its IPC events, drives the tracker and SponsorBlock seeks, and reports
+/// `PlayerEvent`s (and `NowPlaying` for the on-screen controls) until mpv exits.
 actor MPVSession {
     nonisolated let events: AsyncStream<PlayerEvent>
     private let continuation: AsyncStream<PlayerEvent>.Continuation
+    /// Every change of what the controls show; ends when mpv exits.
+    nonisolated let nowPlaying: AsyncStream<NowPlaying>
+    private let nowPlayingContinuation: AsyncStream<NowPlaying>.Continuation
+    private var lastNowPlaying: NowPlaying?
     private let process: MPVProcess
     private let socket: MPVSocket
     private var tracker: MPVPlaybackTracker
     private var nextRequestId = 1
     private var playlistPositionRequest: Int?
     private var stopRequested = false
-    private var banner: String?
-    private var bannerUntil = ContinuousClock.now
     private var helpers: [Task<Void, Never>] = []
     private var runTask: Task<Void, Never>?
 
@@ -35,6 +37,8 @@ actor MPVSession {
 
     private init(process: MPVProcess, socket: MPVSocket, playlist: [PlayableVideo]) {
         (events, continuation) = AsyncStream.makeStream(of: PlayerEvent.self)
+        (nowPlaying, nowPlayingContinuation) = AsyncStream.makeStream(of: NowPlaying.self,
+                                                                      bufferingPolicy: .bufferingNewest(1))
         self.process = process
         self.socket = socket
         tracker = MPVPlaybackTracker(playlist: playlist)
@@ -51,15 +55,27 @@ actor MPVSession {
         await runTask?.value
     }
 
+    /// Carries out a request from the on-screen controls.
+    func perform(_ action: PlaybackAction) async {
+        switch action {
+        case .setPaused(let paused): send(.setPause(paused))
+        case .seekBy(let seconds): send(.seekRelative(seconds))
+        case .seekTo(let seconds): send(.seekAbsolute(max(seconds, 0)))
+        case .next: send(.playlistNext)
+        case .stop: await stop()
+        }
+    }
+
     private func begin() {
         let lines = socket.lines()
         send(.requestLogMessages(level: "error"))
         send(.observeProperty(id: 1, name: "time-pos"))
         send(.observeProperty(id: 2, name: "duration"))
+        send(.observeProperty(id: 3, name: "pause"))
         // The first entry's start-file can come before we connected.
         playlistPositionRequest = send(.getProperty("playlist-pos"))
         runTask = Task { await self.run(lines) }
-        helpers.append(Task { await self.refreshOverlay() })
+        publishNowPlaying()
         for id in Set(tracker.playlist.map(\.video.id)) {
             helpers.append(Task {
                 let segments = await SponsorBlock.segments(videoId: id)
@@ -86,6 +102,7 @@ actor MPVSession {
             : tracker.exit(stopRequested: stopRequested, exitCode: process.exitCode)
         continuation.yield(.exited(exit))
         continuation.finish()
+        nowPlayingContinuation.finish()
     }
 
     private func receive(_ message: MPVMessage) {
@@ -97,6 +114,14 @@ actor MPVSession {
         case .event(let event):
             perform(tracker.handle(event))
         }
+        publishNowPlaying()
+    }
+
+    private func publishNowPlaying() {
+        let current = tracker.nowPlaying
+        guard current != lastNowPlaying else { return }
+        lastNowPlaying = current
+        nowPlayingContinuation.yield(current)
     }
 
     private func perform(_ effects: [MPVPlaybackTracker.Effect]) {
@@ -106,35 +131,12 @@ actor MPVSession {
                 continuation.yield(event)
             case .send(let command):
                 send(command)
-            case .showBanner(let text):
-                banner = text
-                bannerUntil = .now + OSDOverlay.bannerDuration
-                drawOverlay()
-                helpers.append(Task {
-                    try? await Task.sleep(for: OSDOverlay.bannerDuration)
-                    self.drawOverlay()
-                })
             }
         }
     }
 
     private func setSegments(_ segments: [SponsorSegment], videoId: String) {
         tracker.setSegments(segments, videoId: videoId)
-    }
-
-    /// Keeps the clock current: redraws at each minute boundary, at least every 15 s.
-    private func refreshOverlay() async {
-        while !Task.isCancelled {
-            drawOverlay()
-            let second = Double(Calendar.current.component(.second, from: .now))
-            let wait = min(OSDOverlay.refreshInterval, .seconds(max(60 - second, 1)))
-            try? await Task.sleep(for: wait)
-        }
-    }
-
-    private func drawOverlay() {
-        if banner != nil, ContinuousClock.now >= bannerUntil { banner = nil }
-        send(.osdOverlay(id: OSDOverlay.id, ass: OSDOverlay.text(time: .now, banner: banner), resY: OSDOverlay.resolutionY))
     }
 
     /// Fire-and-forget; a failed write means mpv is exiting, which `run` reports.

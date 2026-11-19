@@ -5,6 +5,7 @@ enum MPVArgument: Encodable, Equatable, Sendable {
     case string(String)
     case int(Int)
     case double(Double)
+    case bool(Bool)
 
     func encode(to encoder: any Encoder) throws {
         var container = encoder.singleValueContainer()
@@ -12,6 +13,7 @@ enum MPVArgument: Encodable, Equatable, Sendable {
         case .string(let value): try container.encode(value)
         case .int(let value): try container.encode(value)
         case .double(let value): try container.encode(value)
+        case .bool(let value): try container.encode(value)
         }
     }
 }
@@ -22,8 +24,9 @@ enum MPVCommand: Equatable, Sendable {
     case getProperty(String)
     case requestLogMessages(level: String)
     case seekAbsolute(TimeInterval)
-    /// ASS text drawn over the video, in a coordinate space `resY` pixels high (width follows the aspect ratio).
-    case osdOverlay(id: Int, ass: String, resY: Int)
+    case seekRelative(TimeInterval)
+    case setPause(Bool)
+    case playlistNext
     case quit
 
     var arguments: [MPVArgument] {
@@ -32,8 +35,9 @@ enum MPVCommand: Equatable, Sendable {
         case .getProperty(let name): [.string("get_property"), .string(name)]
         case .requestLogMessages(let level): [.string("request_log_messages"), .string(level)]
         case .seekAbsolute(let seconds): [.string("seek"), .double(seconds), .string("absolute")]
-        case .osdOverlay(let id, let ass, let resY):
-            [.string("osd-overlay"), .int(id), .string("ass-events"), .string(ass), .int(0), .int(resY)]
+        case .seekRelative(let seconds): [.string("seek"), .double(seconds), .string("relative")]
+        case .setPause(let paused): [.string("set_property"), .string("pause"), .bool(paused)]
+        case .playlistNext: [.string("playlist-next")]
         case .quit: [.string("quit")]
         }
     }
@@ -50,6 +54,8 @@ enum MPVEvent: Equatable, Sendable {
     case endFile(entryId: Int?, reason: MPVEndReason, error: String?)
     /// A numeric observed property; nil when it became unavailable.
     case propertyChange(name: String, value: Double?)
+    /// A boolean observed property (e.g. `pause`).
+    case flagChange(name: String, value: Bool)
     case logMessage(level: String, prefix: String, text: String)
     case other(String)
 }
@@ -95,7 +101,11 @@ enum MPVIPC {
                             reason: (object["reason"] as? String).flatMap(MPVEndReason.init) ?? .unknown,
                             error: object["file_error"] as? String)
         case "property-change":
-            return .propertyChange(name: object["name"] as? String ?? "", value: number(object["data"]))
+            let name = object["name"] as? String ?? ""
+            if let flag = object["data"] as? NSNumber, CFGetTypeID(flag) == CFBooleanGetTypeID() {
+                return .flagChange(name: name, value: flag.boolValue)
+            }
+            return .propertyChange(name: name, value: number(object["data"]))
         case "log-message":
             return .logMessage(level: object["level"] as? String ?? "",
                                prefix: object["prefix"] as? String ?? "",

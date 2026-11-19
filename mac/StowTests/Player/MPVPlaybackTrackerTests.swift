@@ -15,10 +15,29 @@ struct MPVPlaybackTrackerTests {
         var tracker = MPVPlaybackTracker(playlist: playlist)
         #expect(tracker.handle(.startFile(entryId: 1)).isEmpty)
         #expect(tracker.handle(.propertyChange(name: "time-pos", value: 0)).isEmpty)
-        #expect(tracker.handle(.playbackRestart) == [.emit(.started(index: 0, videoId: "a")),
-                                                     .showBanner("1/3 · Video a · Feed title")])
+        #expect(tracker.handle(.playbackRestart) == [.emit(.started(index: 0, videoId: "a"))])
         #expect(tracker.handle(.playbackRestart).isEmpty)
         #expect(tracker.startedCount == 1)
+    }
+
+    @Test func nowPlayingFollowsLoadingPlaybackAndPause() {
+        var tracker = MPVPlaybackTracker(playlist: playlist)
+        #expect(tracker.nowPlaying == NowPlaying(index: 0, count: 3, video: video("a"), isLoading: true, isPaused: false,
+                                                 position: 0, duration: 600, upNext: video("b")))
+        _ = tracker.handle(.startFile(entryId: 1))
+        _ = tracker.handle(.propertyChange(name: "duration", value: 605))
+        _ = tracker.handle(.playbackRestart)
+        _ = tracker.handle(.propertyChange(name: "time-pos", value: 42.7))
+        _ = tracker.handle(.flagChange(name: "pause", value: true))
+        #expect(tracker.nowPlaying == NowPlaying(index: 0, count: 3, video: video("a"), isLoading: false, isPaused: true,
+                                                 position: 42, duration: 605, upNext: video("b")))
+
+        // Between entries the next one shows as loading; the last has nothing up next.
+        _ = tracker.handle(.endFile(entryId: 1, reason: .eof, error: nil))
+        #expect(tracker.nowPlaying.index == 1 && tracker.nowPlaying.isLoading && tracker.nowPlaying.duration == nil)
+        _ = tracker.handle(.startFile(entryId: 3))
+        _ = tracker.handle(.playbackRestart)
+        #expect(tracker.nowPlaying.index == 2 && !tracker.nowPlaying.isLoading && tracker.nowPlaying.upNext == nil)
     }
 
     @Test func endReportsFurthestPositionAndDuration() {

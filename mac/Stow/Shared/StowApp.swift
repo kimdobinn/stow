@@ -24,6 +24,11 @@ enum StowMain {
             Task { exit(await Snapshot.run() ? 0 : 1) }
             NSApplication.shared.run()
         }
+        if CommandLine.arguments.contains(PlaybackDemo.argument) {
+            setvbuf(stdout, nil, _IOLBF, 0)
+            Task { exit(await PlaybackDemo.run() ? 0 : 1) }
+            NSApplication.shared.run()
+        }
         #endif
         // Two copies (e.g. a dev build and the installed app) would double every check and alarm.
         let others = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
@@ -47,7 +52,7 @@ struct StowApp: App {
             return
         }
         let alarmServices = AlarmServices(
-            player: MPVPlayer(), sound: AlarmSound(), outputs: CoreAudioOutputs(), speaker: BluetoothSpeaker(),
+            player: MPVPlayer(showsControls: true), sound: AlarmSound(), outputs: CoreAudioOutputs(), speaker: BluetoothSpeaker(),
             keepAlive: KeepAlive(), power: PowerAssertions(), videoDetails: YTDLPVideoDetails())
         let model = AppModel(youtube: YouTubeClient(), account: AccountManager(), alarmServices: alarmServices)
         Self.cleanUpChildProcesses()

@@ -26,15 +26,23 @@ struct MPVIPCTests {
         #expect(command[2] as? String == "absolute")
     }
 
-    @Test func encodesOverlayTextVerbatim() throws {
-        let ass = "{\\an9}08:00\n{\\an7}1/3 · \"Title\" · 채널"
-        let command = try #require(try json(.osdOverlay(id: 1, ass: ass, resY: 720))["command"] as? [Any])
-        #expect(command[0] as? String == "osd-overlay")
-        #expect(command[1] as? Int == 1)
-        #expect(command[2] as? String == "ass-events")
-        #expect(command[3] as? String == ass)
-        #expect(command[4] as? Int == 0)
-        #expect(command[5] as? Int == 720)
+    @Test func encodesControlCommands() throws {
+        let pause = try #require(try json(.setPause(true))["command"] as? [Any])
+        #expect(pause[0] as? String == "set_property")
+        #expect(pause[1] as? String == "pause")
+        #expect((pause[2] as? NSNumber).map { CFGetTypeID($0) == CFBooleanGetTypeID() && $0.boolValue } == true)
+        let seek = try #require(try json(.seekRelative(-10))["command"] as? [Any])
+        #expect(seek[0] as? String == "seek")
+        #expect((seek[1] as? NSNumber)?.doubleValue == -10)
+        #expect(seek[2] as? String == "relative")
+        #expect(try json(.playlistNext)["command"] as? [String] == ["playlist-next"])
+    }
+
+    @Test func parsesBooleanPropertiesAsFlags() {
+        #expect(parse(#"{"event":"property-change","id":3,"name":"pause","data":true}"#)
+                == .event(.flagChange(name: "pause", value: true)))
+        #expect(parse(#"{"event":"property-change","id":1,"name":"time-pos","data":12.5}"#)
+                == .event(.propertyChange(name: "time-pos", value: 12.5)))
     }
 
     private func parse(_ line: String) -> MPVMessage? {

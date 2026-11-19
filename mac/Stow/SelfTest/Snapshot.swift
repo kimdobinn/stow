@@ -31,7 +31,7 @@ enum Snapshot {
                 Screen(name: "alarm-full", view: AnyView(AlarmTab().frame(width: 980, height: 1900))),
                 Screen(name: "alarm-running", view: AnyView(MainView(selection: .alarm).frame(width: 1180, height: 760)),
                        phase: samplePlayingPhase(model)),
-            ]
+            ] + playbackScreens(model)
             for appearance in [NSAppearance.Name.aqua, .darkAqua] {
                 let suffix = appearance == .aqua ? "light" : "dark"
                 for screen in screens {
@@ -83,6 +83,34 @@ enum Snapshot {
     private static func samplePlayingPhase(_ model: AppModel) -> AlarmPhase {
         let video = model.inbox.first?.video ?? model.recentVideos.first ?? InboxItem.preview.video
         return .playing(index: 0, count: 3, video: video)
+    }
+
+    /// The alarm's fullscreen controls over a video thumbnail, at the first screen's size.
+    private static func playbackScreens(_ model: AppModel) -> [Screen] {
+        let videos = Array((model.inbox.map(\.video) + model.recentVideos).prefix(3))
+        guard videos.count == 3 else { return [] }
+        let size = NSScreen.screens.first?.frame.size ?? CGSize(width: 1920, height: 1080)
+        let image = URL(string: "https://i.ytimg.com/vi/\(videos[0].id)/maxresdefault.jpg").flatMap(NSImage.init(contentsOf:))
+        func screen(_ name: String, _ nowPlaying: NowPlaying) -> Screen {
+            let state = PlaybackScreen(nowPlaying: nowPlaying, showsChrome: true) { _ in }
+            let view = AlarmPlaybackView(screen: state)
+                .background {
+                    if let image, !nowPlaying.isLoading {
+                        Image(nsImage: image).resizable().aspectRatio(contentMode: .fit)
+                    }
+                }
+                .background(.black)
+                .frame(width: size.width, height: size.height)
+            return Screen(name: name, view: AnyView(view))
+        }
+        let playing = NowPlaying(index: 0, count: 3, video: videos[0], isLoading: false, isPaused: false,
+                                 position: 130, duration: 870, upNext: videos[1])
+        var paused = playing
+        paused.isPaused = true
+        var loading = playing
+        loading.isLoading = true
+        return [screen("playback-playing", playing), screen("playback-paused", paused),
+                screen("playback-loading", loading)]
     }
 
     private static func render(_ view: some View, appearance: NSAppearance.Name, to url: URL) async throws {

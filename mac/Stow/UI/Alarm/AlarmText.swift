@@ -134,6 +134,15 @@ enum AlarmText {
         return choices
     }
 
+    // MARK: Playback screen
+
+    /// "0:07", "12:05", "1:02:03", like YouTube's player.
+    static func playbackTime(_ seconds: TimeInterval) -> String {
+        let total = max(0, Int(seconds.isFinite ? seconds : 0))
+        let hours = total / 3600, minutes = total / 60 % 60, rest = total % 60
+        return hours > 0 ? String(format: "%d:%02d:%02d", hours, minutes, rest) : String(format: "%d:%02d", minutes, rest)
+    }
+
     private static func style(_ calendar: Calendar) -> Date.FormatStyle {
         Date.FormatStyle(locale: calendar.locale ?? .current, calendar: calendar, timeZone: calendar.timeZone)
     }

@@ -1,12 +1,11 @@
 import Foundation
 
-/// Turns mpv's IPC events into `PlayerEvent`s, SponsorBlock seeks and overlay banners.
-/// Pure state machine; MPVSession performs the effects.
+/// Turns mpv's IPC events into `PlayerEvent`s, SponsorBlock seeks and what the on-screen
+/// controls show. Pure state machine; MPVSession performs the effects.
 struct MPVPlaybackTracker {
     enum Effect: Equatable {
         case emit(PlayerEvent)
         case send(MPVCommand)
-        case showBanner(String)
     }
 
     let playlist: [PlayableVideo]
@@ -15,6 +14,11 @@ struct MPVPlaybackTracker {
     private(set) var currentIndex: Int?
     private var currentStarted = false
     private var furthest: TimeInterval = 0
+    /// The latest playback position, for the controls (`furthest` is for "watched").
+    private var position: TimeInterval = 0
+    /// The entry the controls show: the current one, or the next one between entries.
+    private var shownIndex = 0
+    private(set) var isPaused = false
     private var duration: TimeInterval?
     private var skipped: Set<Int> = []
     private var entryError: String?
@@ -41,14 +45,17 @@ struct MPVPlaybackTracker {
             currentStarted = true
             startedCount += 1
             let entry = playlist[index]
-            return [.emit(.started(index: index, videoId: entry.video.id)),
-                    .showBanner(OSDOverlay.banner(index: index, count: playlist.count, video: entry.video))]
+            return [.emit(.started(index: index, videoId: entry.video.id))]
         case .propertyChange("duration", let value):
             if let value { duration = value }
             return []
         case .propertyChange("time-pos", let value):
             guard let value, currentStarted else { return [] }
+            position = value
             return progress(to: value)
+        case .flagChange("pause", let value):
+            isPaused = value
+            return []
         case .endFile(let entryId, let reason, let error):
             return endEntry(index(of: entryId) ?? currentIndex, reason: reason, error: error)
         case .logMessage("error", let prefix, let text):
@@ -59,6 +66,17 @@ struct MPVPlaybackTracker {
         default:
             return []
         }
+    }
+
+    /// What the on-screen controls show; positions are whole seconds so it changes once a second.
+    var nowPlaying: NowPlaying {
+        let index = min(shownIndex, playlist.count - 1)
+        let isPlaying = currentIndex == index && currentStarted
+        return NowPlaying(index: index, count: playlist.count, video: playlist[index].video,
+                          isLoading: !isPlaying, isPaused: isPaused,
+                          position: isPlaying ? position.rounded(.down) : 0,
+                          duration: (isPlaying ? duration : nil) ?? playlist[index].duration,
+                          upNext: playlist.indices.contains(index + 1) ? playlist[index + 1].video : nil)
     }
 
     /// The exit to report once mpv is gone.
@@ -76,8 +94,10 @@ struct MPVPlaybackTracker {
 
     private mutating func beginEntry(_ index: Int) {
         currentIndex = index
+        shownIndex = index
         currentStarted = false
         furthest = 0
+        position = 0
         duration = nil
         skipped = []
         entryError = nil
@@ -100,6 +120,7 @@ struct MPVPlaybackTracker {
         defer { currentIndex = nil }
         if reason == .quit { userQuit = true }
         guard let index else { return [] }
+        shownIndex = min(index + 1, playlist.count - 1)
         let entry = playlist[index]
         if index == currentIndex, currentStarted {
             return [.emit(.videoEnded(videoId: entry.video.id, position: furthest, duration: duration ?? entry.duration))]

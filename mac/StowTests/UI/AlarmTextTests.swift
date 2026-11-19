@@ -113,4 +113,12 @@ struct AlarmTextTests {
                 == SpeakerChoice(name: "JBL Go 3", address: "40-C1-F6-88-8F-AF").id)
         #expect(SpeakerChoice(name: "Mi Monitor", address: nil).id == SpeakerChoice(name: "mi monitor", address: nil).id)
     }
+
+    @Test func playbackTimeLooksLikeYouTube() {
+        #expect(AlarmText.playbackTime(7.9) == "0:07")
+        #expect(AlarmText.playbackTime(725) == "12:05")
+        #expect(AlarmText.playbackTime(3723) == "1:02:03")
+        #expect(AlarmText.playbackTime(-3) == "0:00")
+        #expect(AlarmText.playbackTime(.nan) == "0:00")
+    }
 }
