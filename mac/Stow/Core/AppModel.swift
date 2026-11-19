@@ -21,14 +21,17 @@ final class AppModel {
     var channels: [Channel] { settings.channels }
     /// Newest first.
     var inbox: [InboxItem] { state.inbox }
-    /// Every channel's recent videos that aren't in the Inbox, newest first. Dismissing an
-    /// Inbox video moves it here.
+    /// Every channel's recent videos that aren't in the Inbox, newest first.
     var recentVideos: [Video] {
+        channels.flatMap { recentVideos(channelId: $0.id) }
+            .sorted { ($0.publishedAt ?? .distantPast) > ($1.publishedAt ?? .distantPast) }
+    }
+
+    /// One channel's recent videos that aren't in the Inbox, newest first. Dismissing an Inbox
+    /// video moves it here.
+    func recentVideos(channelId: String) -> [Video] {
         let inboxIds = Set(state.inbox.map(\.id))
-        let channelIds = Set(channels.map(\.id))
-        return state.recentVideos
-            .filter { channelIds.contains($0.key) }
-            .flatMap(\.value)
+        return (state.recentVideos[channelId] ?? [])
             .filter { !inboxIds.contains($0.id) }
             .sorted { ($0.publishedAt ?? .distantPast) > ($1.publishedAt ?? .distantPast) }
     }
@@ -336,6 +339,18 @@ final class AppModel {
         state.inbox.removeAll { $0.video.channelId == id }
         saveState()
         record(.info, "Removed channel \(channel.title) (\(id)).")
+    }
+
+    /// Moves a channel to just before `target` (or to the end when `target` is nil). The channel
+    /// order is shared by the Inbox's Recent rows and the Channels list.
+    func moveChannel(id: String, before target: String?) {
+        guard id != target else { return }
+        updateSettings { settings in
+            guard let from = settings.channels.firstIndex(where: { $0.id == id }) else { return }
+            let channel = settings.channels.remove(at: from)
+            let to = target.flatMap { t in settings.channels.firstIndex(where: { $0.id == t }) } ?? settings.channels.endIndex
+            settings.channels.insert(channel, at: to)
+        }
     }
 
     func setMorning(_ on: Bool, channelId: String) {

@@ -6,6 +6,26 @@ final class BluetoothSpeaker: SpeakerService {
     /// Connection attempts in flight; IOBluetooth messages them on the main run loop.
     private var pendingConnections: Set<ConnectionAttempt> = []
 
+    /// IOBluetooth's first call sets up a shared coordinator that blocks until the main run loop
+    /// answers it (and, the very first time, until the user answers the Bluetooth permission
+    /// prompt). Made on the main thread before the app is running, that call never returns, so
+    /// it's made once on a background thread and every other call waits for it.
+    private static let warmUp = Task.detached(priority: .userInitiated) {
+        _ = IOBluetoothDevice.pairedDevices()
+    }
+    private static var isReady = false
+
+    init() {
+        Task { await Self.ready() }
+    }
+
+    private static func ready() async {
+        guard !isReady else { return }
+        await warmUp.value
+        isReady = true
+    }
+
+    /// Empty until IOBluetooth is ready (see `warmUp`); the Alarm section refreshes every few seconds.
     func pairedAudioDevices() -> [BluetoothAudioDevice] {
         Self.pairedDevices()
             .filter { BluetoothAddress.isAudio(classOfDevice: $0.classOfDevice) }
@@ -23,6 +43,7 @@ final class BluetoothSpeaker: SpeakerService {
     /// Opens a baseband connection (macOS then connects the audio profiles, and the CoreAudio
     /// output appears a few seconds later) and polls until connected, failed or `timeout`.
     func connect(address: String, timeout: Duration) async -> Bool {
+        await Self.ready()
         guard let device = Self.device(address: address) else { return false }
         if device.isConnected() { return true }
         let attempt = ConnectionAttempt { [weak self] in self?.pendingConnections.remove($0) }
@@ -42,15 +63,23 @@ final class BluetoothSpeaker: SpeakerService {
 
     func changes() -> AsyncStream<Void> {
         AsyncStream { continuation in
-            let observer = ConnectionObserver { continuation.yield() }
-            continuation.onTermination = { _ in
-                Task { @MainActor in observer.invalidate() }
+            let setUp = Task { @MainActor in
+                await Self.ready()
+                guard !Task.isCancelled else { return }
+                let observer = ConnectionObserver { continuation.yield() }
+                continuation.onTermination = { _ in
+                    Task { @MainActor in observer.invalidate() }
+                }
+                // Devices may have connected while IOBluetooth was getting ready.
+                continuation.yield()
             }
+            continuation.onTermination = { _ in setUp.cancel() }
         }
     }
 
     private static func pairedDevices() -> [IOBluetoothDevice] {
-        (IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice]) ?? []
+        guard isReady else { return [] }
+        return (IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice]) ?? []
     }
 
     private static func device(address: String) -> IOBluetoothDevice? {

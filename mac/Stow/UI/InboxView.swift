@@ -1,12 +1,15 @@
 import SwiftUI
 
-/// A YouTube-style feed: "New" videos first (✕ moves one down into the feed), then every
-/// channel's recent videos. Chips at the top filter by channel.
+/// A YouTube-style feed: "New" videos first (✕ moves one down into Recent), then one row of
+/// recent videos per channel, reorderable by dragging. Chips at the top filter by channel.
 struct InboxView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
     @State private var confirmsClear = false
     @State private var channelFilter: Channel.ID?
+    /// The Recent row a channel is being dragged over. Kept here (not per row) so it can be
+    /// cleared when the order changes: a row that moves never gets its "drag exited" callback.
+    @State private var dropTarget: Channel.ID?
 
     private let columns = [GridItem(.adaptive(minimum: 280, maximum: 420), spacing: 20, alignment: .top)]
 
@@ -28,8 +31,12 @@ struct InboxView: View {
         model.inbox.map(\.video).filter(matchesFilter)
     }
 
-    private var recentVideos: [Video] {
-        model.recentVideos.filter(matchesFilter)
+    /// Channels with recent videos, in the user's order.
+    private var shelves: [(channel: Channel, videos: [Video])] {
+        model.channels
+            .filter { channelFilter == nil || $0.id == channelFilter }
+            .map { ($0, model.recentVideos(channelId: $0.id)) }
+            .filter { !$0.videos.isEmpty }
     }
 
     private func matchesFilter(_ video: Video) -> Bool {
@@ -48,16 +55,45 @@ struct InboxView: View {
                     if !newVideos.isEmpty {
                         section("New", count: newVideos.count, videos: newVideos, dismissible: true)
                     }
-                    if recentVideos.isEmpty && newVideos.isEmpty {
+                    if shelves.isEmpty && newVideos.isEmpty {
                         ContentUnavailableView("No Videos Yet", systemImage: "tray",
                                                description: Text("Videos appear after the next check."))
                             .frame(maxWidth: .infinity, minHeight: 300)
-                    } else if !recentVideos.isEmpty {
-                        section("Recent", count: nil, videos: recentVideos, dismissible: false)
+                    } else if !shelves.isEmpty {
+                        recent
                     }
                 }
                 .padding(24)
             }
+        }
+    }
+
+    /// One row per channel; drag a row's header to reorder (saved as the channel order).
+    private var recent: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Recent").font(.title2.weight(.bold))
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(shelves, id: \.channel.id) { shelf in
+                    ChannelShelf(channel: shelf.channel, videos: shelf.videos,
+                                 isDropTarget: dropTarget == shelf.channel.id) { video in
+                        openURL(video.watchURL)
+                    } onDrop: { droppedId in
+                        dropTarget = nil
+                        withAnimation(.snappy) { model.moveChannel(id: droppedId, before: shelf.channel.id) }
+                    } onTargeted: { targeted in
+                        if targeted {
+                            dropTarget = shelf.channel.id
+                        } else if dropTarget == shelf.channel.id {
+                            dropTarget = nil
+                        }
+                    }
+                }
+            }
+        }
+        .onChange(of: model.channels.map(\.id)) { dropTarget = nil }
+        // Hover events only arrive when no drag is in progress, so any of them means a drag is over.
+        .onContinuousHover { _ in
+            if dropTarget != nil { dropTarget = nil }
         }
     }
 
@@ -81,6 +117,70 @@ struct InboxView: View {
                               onDismiss: dismissible ? { model.dismissInbox(videoId: video.id) } : nil)
                 }
             }
+        }
+    }
+}
+
+/// A channel's header (the drag handle for reordering) and its videos in a horizontal strip.
+private struct ChannelShelf: View {
+    let channel: Channel
+    let videos: [Video]
+    let isDropTarget: Bool
+    let onOpen: (Video) -> Void
+    let onDrop: (String) -> Void
+    let onTargeted: (Bool) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            header
+            ScrollView(.horizontal) {
+                LazyHStack(alignment: .top, spacing: 20) {
+                    ForEach(videos) { video in
+                        VideoCard(video: video, onOpen: { onOpen(video) }, onDismiss: nil)
+                            .frame(width: 300)
+                    }
+                }
+                .padding(.bottom, 12)
+            }
+            .scrollIndicators(.automatic)
+        }
+        .padding(.vertical, 8)
+        // Highlight bleeds past the content so rows stay aligned with the New grid.
+        .background {
+            RoundedRectangle(cornerRadius: 12)
+                .fill(isDropTarget ? Color.accentColor.opacity(0.12) : .clear)
+                .padding(-10)
+        }
+        .overlay(alignment: .top) {
+            if isDropTarget {
+                Capsule().fill(Color.accentColor).frame(height: 3).offset(y: -6)
+            }
+        }
+        .dropDestination(for: String.self) { ids, _ in
+            guard let id = ids.first, id != channel.id else { return false }
+            onDrop(id)
+            return true
+        } isTargeted: { onTargeted($0) }
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "line.3.horizontal")
+                .foregroundStyle(.tertiary)
+                .help("Drag to reorder")
+            ChannelAvatar(url: channel.avatarURL, size: 32)
+            Text(channel.title).font(.title3.weight(.semibold))
+            Text("\(videos.count)").foregroundStyle(.secondary)
+            Spacer()
+        }
+        .contentShape(Rectangle())
+        .draggable(channel.id) {
+            HStack(spacing: 8) {
+                ChannelAvatar(url: channel.avatarURL, size: 24)
+                Text(channel.title).font(.headline)
+            }
+            .padding(8)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
         }
     }
 }

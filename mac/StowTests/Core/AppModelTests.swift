@@ -54,6 +54,22 @@ struct AppModelTests {
         #expect(model.recentVideos.isEmpty)
     }
 
+    @Test func moveChannelReordersAndPersists() async throws {
+        let ids = ["UCa", "UCb", "UCc"]
+        for id in ids {
+            youtube.channels.withLock { $0[id] = ChannelInfo(id: id, title: id, handle: nil, avatarURL: nil) }
+        }
+        let model = makeModel()
+        for id in ids { try await model.addChannel(input: id) }
+
+        model.moveChannel(id: "UCc", before: "UCa")
+        #expect(model.channels.map(\.id) == ["UCc", "UCa", "UCb"])
+        model.moveChannel(id: "UCc", before: nil)
+        #expect(model.channels.map(\.id) == ["UCa", "UCb", "UCc"])
+        model.moveChannel(id: "UCa", before: "UCc")
+        #expect(try store.loadSettings().channels.map(\.id) == ["UCb", "UCa", "UCc"])
+    }
+
     @Test func checkFindsNewVideosAndNotifiesOnce() async throws {
         setUpChannel()
         let model = makeModel()
