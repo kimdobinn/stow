@@ -29,8 +29,10 @@ struct MPVPlaybackTrackerTests {
         _ = tracker.handle(.playbackRestart)
         _ = tracker.handle(.propertyChange(name: "time-pos", value: 42.7))
         _ = tracker.handle(.flagChange(name: "pause", value: true))
+        _ = tracker.handle(.propertyChange(name: "volume", value: 64.6))
+        _ = tracker.handle(.flagChange(name: "mute", value: true))
         #expect(tracker.nowPlaying == NowPlaying(index: 0, count: 3, video: video("a"), isLoading: false, isPaused: true,
-                                                 position: 42, duration: 605, upNext: video("b")))
+                                                 position: 42, duration: 605, upNext: video("b"), volume: 65, isMuted: true))
 
         // Between entries the next one shows as loading; the last has nothing up next.
         _ = tracker.handle(.endFile(entryId: 1, reason: .eof, error: nil))

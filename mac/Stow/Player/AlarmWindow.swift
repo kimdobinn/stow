@@ -48,6 +48,7 @@ enum AlarmWindow {
 final class PlaybackScreen {
     static let chromeTimeout: Duration = .seconds(4)
     static let seekStep: TimeInterval = 10
+    static let volumeStep: Double = 5
 
     private(set) var nowPlaying: NowPlaying?
     private(set) var showsChrome = true
@@ -90,7 +91,18 @@ final class PlaybackScreen {
         perform(.setPaused(!nowPlaying.isPaused))
     }
 
-    /// Keyboard: space pauses, ←/→ seek 10 s, N skips, esc or return ends the alarm.
+    func changeVolume(by step: Double) {
+        guard let nowPlaying else { return }
+        if nowPlaying.isMuted { perform(.setMuted(false)) }
+        perform(.setVolume(nowPlaying.volume + step))
+    }
+
+    func toggleMute() {
+        guard let nowPlaying else { return }
+        perform(.setMuted(!nowPlaying.isMuted))
+    }
+
+    /// Keyboard: space pauses, ←/→ seek 10 s, ↑/↓ volume, M mutes, N skips, esc or return ends the alarm.
     /// Every key also brings up the controls.
     func handleKey(code: UInt16, characters: String?) {
         revealChrome()
@@ -99,8 +111,14 @@ final class PlaybackScreen {
         case 49: togglePause()
         case 123: perform(.seekBy(-Self.seekStep))
         case 124: perform(.seekBy(Self.seekStep))
+        case 126: changeVolume(by: Self.volumeStep)
+        case 125: changeVolume(by: -Self.volumeStep)
         default:
-            if characters?.lowercased() == "n", nowPlaying?.upNext != nil { perform(.next) }
+            switch characters?.lowercased() {
+            case "n": if nowPlaying?.upNext != nil { perform(.next) }
+            case "m": toggleMute()
+            default: break
+            }
         }
     }
 

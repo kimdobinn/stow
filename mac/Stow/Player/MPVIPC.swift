@@ -26,6 +26,8 @@ enum MPVCommand: Equatable, Sendable {
     case seekAbsolute(TimeInterval)
     case seekRelative(TimeInterval)
     case setPause(Bool)
+    case setVolume(Double)
+    case setMute(Bool)
     case playlistNext
     case quit
 
@@ -37,6 +39,8 @@ enum MPVCommand: Equatable, Sendable {
         case .seekAbsolute(let seconds): [.string("seek"), .double(seconds), .string("absolute")]
         case .seekRelative(let seconds): [.string("seek"), .double(seconds), .string("relative")]
         case .setPause(let paused): [.string("set_property"), .string("pause"), .bool(paused)]
+        case .setVolume(let volume): [.string("set_property"), .string("volume"), .double(volume)]
+        case .setMute(let muted): [.string("set_property"), .string("mute"), .bool(muted)]
         case .playlistNext: [.string("playlist-next")]
         case .quit: [.string("quit")]
         }

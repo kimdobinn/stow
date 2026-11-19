@@ -19,6 +19,8 @@ struct MPVPlaybackTracker {
     /// The entry the controls show: the current one, or the next one between entries.
     private var shownIndex = 0
     private(set) var isPaused = false
+    private var volume: Double = 100
+    private var isMuted = false
     private var duration: TimeInterval?
     private var skipped: Set<Int> = []
     private var entryError: String?
@@ -56,6 +58,12 @@ struct MPVPlaybackTracker {
         case .flagChange("pause", let value):
             isPaused = value
             return []
+        case .propertyChange("volume", let value):
+            if let value { volume = value }
+            return []
+        case .flagChange("mute", let value):
+            isMuted = value
+            return []
         case .endFile(let entryId, let reason, let error):
             return endEntry(index(of: entryId) ?? currentIndex, reason: reason, error: error)
         case .logMessage("error", let prefix, let text):
@@ -76,7 +84,8 @@ struct MPVPlaybackTracker {
                           isLoading: !isPlaying, isPaused: isPaused,
                           position: isPlaying ? position.rounded(.down) : 0,
                           duration: (isPlaying ? duration : nil) ?? playlist[index].duration,
-                          upNext: playlist.indices.contains(index + 1) ? playlist[index + 1].video : nil)
+                          upNext: playlist.indices.contains(index + 1) ? playlist[index + 1].video : nil,
+                          volume: volume.rounded(), isMuted: isMuted)
     }
 
     /// The exit to report once mpv is gone.

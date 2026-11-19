@@ -13,6 +13,9 @@ struct NowPlaying: Equatable, Sendable {
     var position: TimeInterval
     var duration: TimeInterval?
     var upNext: Video?
+    /// mpv's own volume, 0–100 (on top of the output device's volume, which the alarm sets).
+    var volume: Double = 100
+    var isMuted = false
 }
 
 /// What the on-screen controls ask the player to do.
@@ -21,6 +24,8 @@ enum PlaybackAction: Equatable, Sendable {
     case seekBy(TimeInterval)
     case seekTo(TimeInterval)
     case next
+    case setVolume(Double)
+    case setMuted(Bool)
     /// "I'm awake": end the alarm.
     case stop
 }

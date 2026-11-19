@@ -61,6 +61,8 @@ actor MPVSession {
         case .seekBy(let seconds): send(.seekRelative(seconds))
         case .seekTo(let seconds): send(.seekAbsolute(max(seconds, 0)))
         case .next: send(.playlistNext)
+        case .setVolume(let volume): send(.setVolume(min(max(volume, 0), 100).rounded()))
+        case .setMuted(let muted): send(.setMute(muted))
         case .stop: await stop()
         }
     }
@@ -71,6 +73,8 @@ actor MPVSession {
         send(.observeProperty(id: 1, name: "time-pos"))
         send(.observeProperty(id: 2, name: "duration"))
         send(.observeProperty(id: 3, name: "pause"))
+        send(.observeProperty(id: 4, name: "volume"))
+        send(.observeProperty(id: 5, name: "mute"))
         // The first entry's start-file can come before we connected.
         playlistPositionRequest = send(.getProperty("playlist-pos"))
         runTask = Task { await self.run(lines) }

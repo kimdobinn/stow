@@ -157,6 +157,14 @@ struct AlarmPlaybackView: View {
                 .disabled(nowPlaying.upNext == nil)
                 .opacity(nowPlaying.upNext == nil ? 0.35 : 1)
 
+                VolumeControl(volume: nowPlaying.volume, isMuted: nowPlaying.isMuted,
+                              onToggleMute: { screen.toggleMute() },
+                              onChange: { volume in
+                                  if nowPlaying.isMuted { screen.perform(.setMuted(false)) }
+                                  screen.perform(.setVolume(volume))
+                              })
+                    .padding(.leading, 6)
+
                 Text(timeText(nowPlaying))
                     .font(.system(size: 21, weight: .medium))
                     .monospacedDigit()
@@ -296,11 +304,74 @@ private struct PlaybackProgressBar: View {
     }
 }
 
+/// A speaker button (mute) and a slider for mpv's volume; the slider follows drags at once and
+/// mpv's reported volume otherwise.
+private struct VolumeControl: View {
+    let volume: Double
+    let isMuted: Bool
+    let onToggleMute: () -> Void
+    let onChange: (Double) -> Void
+    @State private var dragging: Double?
+    @State private var isHovered = false
+
+    private var shown: Double { isMuted ? 0 : (dragging ?? volume) }
+
+    private var symbol: String {
+        switch shown {
+        case 0: "speaker.slash.fill"
+        case ..<34: "speaker.wave.1.fill"
+        case ..<67: "speaker.wave.2.fill"
+        default: "speaker.wave.3.fill"
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ControlButton(systemImage: symbol, help: isMuted ? "Unmute (M)" : "Mute (M)", size: 24, action: onToggleMute)
+                .frame(width: 56)
+            GeometryReader { proxy in
+                let width = proxy.size.width
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.white.opacity(0.28))
+                    Capsule().fill(.white).frame(width: width * shown / 100)
+                }
+                .frame(height: isHovered || dragging != nil ? 8 : 5)
+                .overlay(alignment: .leading) {
+                    Circle()
+                        .fill(.white)
+                        .frame(width: 18, height: 18)
+                        .shadow(color: .black.opacity(0.4), radius: 4)
+                        .offset(x: width * shown / 100 - 9)
+                }
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        let level = (min(max(value.location.x / max(width, 1), 0), 1) * 100).rounded()
+                        dragging = level
+                        onChange(level)
+                    }
+                    .onEnded { _ in dragging = nil })
+            }
+            .frame(width: 150, height: 28)
+            Text("\(Int(shown))")
+                .font(.system(size: 17, weight: .medium))
+                .monospacedDigit()
+                .opacity(0.75)
+                .frame(width: 40, alignment: .leading)
+        }
+        .onHover { isHovered = $0 }
+        .animation(.easeOut(duration: 0.15), value: isHovered)
+        .help("Volume (↑ ↓)")
+    }
+}
+
 private struct KeyboardHints: View {
     var body: some View {
         HStack(spacing: 18) {
             hint("space", "pause")
             hint("← →", "10 s")
+            hint("↑ ↓", "volume")
             hint("N", "next")
             hint("esc", "I'm awake")
         }
