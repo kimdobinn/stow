@@ -72,7 +72,7 @@ struct InboxView: View {
     private var recent: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Recent").font(.title2.weight(.bold))
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 16) {
                 ForEach(shelves, id: \.channel.id) { shelf in
                     ChannelShelf(channel: shelf.channel, videos: shelf.videos,
                                  isDropTarget: dropTarget == shelf.channel.id) { video in
@@ -133,30 +133,39 @@ private struct ChannelShelf: View {
 
     static let headerWidth: CGFloat = 132
 
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 16, style: .continuous) }
+
+    /// A soft card per channel: its column, a hairline, then the videos scrolling inside the card.
     var body: some View {
-        HStack(alignment: .top, spacing: 20) {
+        HStack(alignment: .center, spacing: 0) {
             header
+                .padding(.horizontal, 14)
+            Rectangle()
+                .fill(.separator)
+                .frame(width: 1)
+                .padding(.vertical, 24)
             ScrollView(.horizontal) {
-                LazyHStack(alignment: .top, spacing: 20) {
+                LazyHStack(alignment: .top, spacing: 18) {
                     ForEach(videos) { video in
                         VideoCard(video: video, onOpen: { onOpen(video) }, onDismiss: nil)
-                            .frame(width: 300)
+                            .frame(width: 290)
                     }
                 }
-                .padding(.bottom, 12)
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 22)
             }
             .scrollIndicators(.automatic)
         }
-        .padding(.vertical, 8)
-        // Highlight bleeds past the content so rows stay aligned with the New grid.
-        .background {
-            RoundedRectangle(cornerRadius: 12)
-                .fill(isDropTarget ? Color.accentColor.opacity(0.12) : .clear)
-                .padding(-10)
+        .background(isDropTarget ? Color.accentColor.opacity(0.08) : Color.primary.opacity(0.035), in: shape)
+        .clipShape(shape)
+        .overlay {
+            shape.strokeBorder(isDropTarget ? Color.accentColor : Color.primary.opacity(0.08),
+                               lineWidth: isDropTarget ? 2 : 1)
         }
         .overlay(alignment: .top) {
             if isDropTarget {
-                Capsule().fill(Color.accentColor).frame(height: 3).offset(y: -6)
+                Capsule().fill(Color.accentColor).frame(height: 3).offset(y: -9)
             }
         }
         .dropDestination(for: String.self) { ids, _ in
@@ -181,7 +190,6 @@ private struct ChannelShelf: View {
                 .padding(.top, 2)
         }
         .frame(width: Self.headerWidth)
-        .padding(.top, 28)
         .help("Drag to reorder")
         .contentShape(Rectangle())
         .draggable(channel.id) {
