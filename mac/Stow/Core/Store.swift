@@ -17,12 +17,16 @@ struct Store {
     var logFile: URL { directory.appending(path: AppPaths.logFile.lastPathComponent) }
 
     /// Returns `.default` when the file doesn't exist; throws when it exists but is malformed.
-    func loadSettings() throws -> AppSettings {
-        try load(settingsFile) ?? .default
+    /// Values replaced by their defaults are added to `issues`.
+    func loadSettings(issues: SettingsIssues? = nil) throws -> AppSettings {
+        let decoder = Self.decoder()
+        decoder.userInfo[.settingsIssues] = issues
+        return try load(settingsFile, decoder: decoder) ?? .default
     }
 
-    /// Keeps keys this version doesn't know, at the top level and per channel (by id), so hand-added
-    /// notes and sections written by a newer build survive a save.
+    /// Keeps keys this version doesn't know, at the top level, inside object sections such as
+    /// "alarm", and per channel (by id), so hand-added notes and keys written by a newer build
+    /// survive a save. Known sections must therefore encode every key they own (nil as null).
     func save(_ settings: AppSettings) throws {
         var object = try Self.jsonObject(Self.encoder().encode(settings))
         if let data = try? Data(contentsOf: settingsFile), let existing = try? Self.jsonObject(data) {
@@ -66,14 +70,14 @@ struct Store {
         return destination
     }
 
-    private func load<T: Decodable>(_ file: URL) throws -> T? {
+    private func load<T: Decodable>(_ file: URL, decoder: JSONDecoder = Store.decoder()) throws -> T? {
         let data: Data
         do {
             data = try Data(contentsOf: file)
         } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
             return nil
         }
-        return try Self.decoder().decode(T.self, from: data)
+        return try decoder.decode(T.self, from: data)
     }
 
     private func write<T: Encodable>(_ value: T, to file: URL) throws {
@@ -91,7 +95,10 @@ struct Store {
     }
 
     private static func merge(_ settings: [String: Any], over existing: [String: Any]) -> [String: Any] {
-        var merged = existing.merging(settings) { _, new in new }
+        var merged = existing.merging(settings) { old, new in
+            guard let old = old as? [String: Any], let new = new as? [String: Any] else { return new }
+            return old.merging(new) { _, new in new }
+        }
         let oldChannels = existing["channels"] as? [[String: Any]] ?? []
         if let channels = settings["channels"] as? [[String: Any]] {
             merged["channels"] = channels.map { channel in

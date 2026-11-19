@@ -12,6 +12,10 @@ final class AppModel {
     static let minimumCheckIntervalMinutes = 5
     /// Checks with errors in a row before notifying, so a brief outage stays quiet.
     static let failureNotifyStreak = 3
+    static let alarmPlayedLimit = 500
+    static let watchedLimit = 2000
+    /// A settings.json this fresh that doesn't decode may be half-written; it's read again later.
+    static let settingsSettleTime: TimeInterval = 2
 
     /// In settings.json order.
     var channels: [Channel] { settings.channels }
@@ -38,6 +42,9 @@ final class AppModel {
     private var settings = AppSettings.default
     private var state = AppState.empty
 
+    /// The morning alarm (Core/Alarm). The UI uses it through AppModel+Alarm.swift.
+    @ObservationIgnored let alarm: AlarmController
+
     @ObservationIgnored private let youtube: any YouTubeService
     @ObservationIgnored private let account: any AccountService
     @ObservationIgnored private let store: Store
@@ -52,24 +59,37 @@ final class AppModel {
     /// settings.json's modification date when last read or written, to pick up hand edits.
     @ObservationIgnored private var settingsStamp: Date?
 
-    convenience init(youtube: any YouTubeService, account: any AccountService) {
-        self.init(youtube: youtube, account: account, store: Store(), notifier: Notifier(), cookiesFile: AppPaths.cookiesFile)
+    convenience init(youtube: any YouTubeService, account: any AccountService, alarmServices: AlarmServices) {
+        self.init(youtube: youtube, account: account, store: Store(), notifier: Notifier(),
+                  cookiesFile: AppPaths.cookiesFile, alarmServices: alarmServices)
     }
 
-    init(youtube: any YouTubeService, account: any AccountService, store: Store, notifier: any UserNotifying, cookiesFile: URL) {
+    /// With inert alarm services, for tests, previews and the self-test.
+    convenience init(youtube: any YouTubeService, account: any AccountService, store: Store, notifier: any UserNotifying,
+                     cookiesFile: URL) {
+        self.init(youtube: youtube, account: account, store: store, notifier: notifier,
+                  cookiesFile: cookiesFile, alarmServices: .inert)
+    }
+
+    init(youtube: any YouTubeService, account: any AccountService, store: Store, notifier: any UserNotifying,
+         cookiesFile: URL, alarmServices: AlarmServices) {
         self.youtube = youtube
         self.account = account
         self.store = store
         self.notifier = notifier
         self.cookiesFile = cookiesFile
+        alarm = AlarmController(services: alarmServices)
+        alarm.host = self
     }
 
     /// Called once at launch: loads JSON files, applies launch-at-login, requests
-    /// notification permission, refreshes sign-in state, starts the scheduler and runs a first check.
+    /// notification permission, refreshes sign-in state, starts the check scheduler and the
+    /// alarm, and runs a first check.
     func start() {
         load()
         applyLoginItem(settings.launchAtLogin)
         scheduleChecks()
+        alarm.start()
         Task {
             if !(await notifier.requestAuthorization()) {
                 record(.warning, "Notifications are off for Stow (System Settings › Notifications).")
@@ -82,7 +102,7 @@ final class AppModel {
     func load() {
         let savedLog = read(store.logFile, store.loadLog) ?? []
         log += savedLog.reversed()
-        settings = read(store.settingsFile, store.loadSettings) ?? .default
+        settings = loadSettings() ?? .default
         settingsStamp = store.modificationDate(of: store.settingsFile)
         // Write the defaults so a fresh install has a settings.json to hand-edit.
         if settingsStamp == nil { updateSettings { _ in } }
@@ -376,6 +396,16 @@ final class AppModel {
         saveState()
     }
 
+    // MARK: Alarm
+
+    var alarmSettings: AlarmSettings { settings.alarm }
+    var lastAlarmRun: AlarmRunRecord? { state.lastAlarmRun }
+
+    /// Saves right away; the alarm re-plans. Sliders should call this when editing ends.
+    func updateAlarmSettings(_ change: (inout AlarmSettings) -> Void) {
+        updateSettings { change(&$0.alarm) }
+    }
+
     // MARK: Launch at login
 
     func setLaunchAtLogin(_ on: Bool) {
@@ -415,13 +445,27 @@ final class AppModel {
     private func reloadSettingsIfEdited() {
         let stamp = store.modificationDate(of: store.settingsFile)
         guard stamp != settingsStamp else { return }
+        if let stamp, Date.now.timeIntervalSince(stamp) < Self.settingsSettleTime, (try? store.loadSettings()) == nil { return }
         // A broken edit is moved aside by `read`; keep the settings we have rather than defaults.
-        if let edited = read(store.settingsFile, store.loadSettings) {
+        if let edited = loadSettings() {
             settings = edited
             record(.info, "Reloaded settings.json after it was edited.")
             if scheduler != nil { scheduleChecks() }
+            alarm.settingsDidChange()
         }
         settingsStamp = store.modificationDate(of: store.settingsFile)
+    }
+
+    /// settings.json, reporting values that were replaced by defaults or ignored.
+    private func loadSettings() -> AppSettings? {
+        let issues = SettingsIssues()
+        let loaded = read(store.settingsFile) { try store.loadSettings(issues: issues) }
+        if !issues.messages.isEmpty {
+            let message = "settings.json: " + issues.messages.joined(separator: " ")
+            record(.warning, message)
+            notifier.notifyProblem(title: "Some settings in settings.json couldn't be used", body: message)
+        }
+        return loaded
     }
 
     /// (Re)starts the scheduler when the check interval changed.
@@ -445,6 +489,7 @@ final class AppModel {
             record(.error, "Couldn't save settings.json: \(error.logDescription)")
         }
         settingsStamp = store.modificationDate(of: store.settingsFile)
+        alarm.settingsDidChange()
     }
 
     private func saveState() {
@@ -468,5 +513,53 @@ final class AppModel {
         } catch {
             log.insert(LogEntry(level: .error, message: "Couldn't save log.json: \(error.logDescription)"), at: 0)
         }
+    }
+}
+
+extension AppModel: AlarmHost {
+    func currentSettings() -> AppSettings {
+        reloadSettingsIfEdited()
+        return settings
+    }
+
+    var currentState: AppState { state }
+
+    var playbackCookiesFile: URL? {
+        guard signInState != .signedOut, FileManager.default.fileExists(atPath: cookiesFile.path) else { return nil }
+        return cookiesFile
+    }
+
+    func refreshForAlarm() async {
+        await check(.alarm)
+        // A check that was already running queued this one and returned at once.
+        while isChecking { try? await Task.sleep(for: .milliseconds(500)) }
+    }
+
+    func recordAlarmRun(_ run: AlarmRunRecord, watchedIds: [String]) {
+        state.lastAlarmRun = run
+        if run.trigger == .scheduled {
+            state.lastScheduledAlarm = max(state.lastScheduledAlarm ?? run.scheduledFor, run.scheduledFor)
+        }
+        // A test run only uses up the videos it played to the end, so it doesn't take the morning's.
+        let used = run.trigger == .scheduled ? run.videoIds : watchedIds
+        state.alarmPlayedIds = Self.prepending(used, to: state.alarmPlayedIds, limit: Self.alarmPlayedLimit)
+        state.watchedIds = Self.prepending(watchedIds, to: state.watchedIds, limit: Self.watchedLimit)
+        let played = Set(used)
+        state.inbox.removeAll { played.contains($0.id) }
+        saveState()
+    }
+
+    func logAlarm(_ level: LogLevel, _ message: String) {
+        record(level, message)
+    }
+
+    func notifyAlarmProblem(title: String, body: String) {
+        notifier.notifyProblem(title: title, body: body)
+    }
+
+    /// `ids` first (in their order), then the rest of `list` without duplicates, capped.
+    private static func prepending(_ ids: [String], to list: [String], limit: Int) -> [String] {
+        var seen = Set<String>()
+        return Array((ids + list).filter { seen.insert($0).inserted }.prefix(limit))
     }
 }

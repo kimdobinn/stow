@@ -19,6 +19,12 @@ targets:
     platform: macOS
     sources:
       - path: Stow
+    dependencies:
+      - sdk: AVFoundation.framework
+      - sdk: AudioToolbox.framework
+      - sdk: CoreAudio.framework
+      - sdk: IOBluetooth.framework
+      - sdk: IOKit.framework
     info:
       path: Stow/Info.plist
       properties:
@@ -26,6 +32,7 @@ targets:
         CFBundleShortVersionString: "0.1.0"
         CFBundleVersion: "1"
         LSApplicationCategoryType: public.app-category.utilities
+        NSBluetoothAlwaysUsageDescription: Stow connects your Bluetooth speaker before the morning alarm and keeps it from powering off.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.stow.mac

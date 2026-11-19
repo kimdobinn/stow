@@ -29,7 +29,7 @@ final class AccountManager: AccountService {
         signInWindow?.close()
         await WebDataStore.removeAll()
         removeCookiesFile()
-        MembersFetcher.removeCopies(for: cookiesFile)
+        CookieCopy.removeAll(for: cookiesFile)
     }
 
     func fetchSubscriptions() async throws -> [ChannelInfo] {

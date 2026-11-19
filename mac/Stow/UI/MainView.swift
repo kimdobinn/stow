@@ -68,6 +68,7 @@ struct MainView: View {
     private var toolbar: some ToolbarContent {
         ToolbarItem(placement: .status) {
             HStack(spacing: 10) {
+                AlarmStatusIndicator()
                 CheckStatusLine()
                 SignInBadge(state: model.signInState)
             }

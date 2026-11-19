@@ -9,9 +9,8 @@ struct MembersFetcher: Sendable {
     /// Returns no videos when the channel has no members playlist. Live and upcoming entries are
     /// dropped. Throws `.notSignedIn` when the cookies file is missing.
     func fetch(channelId: String, cookiesFile: URL) async throws -> MembersFeed {
-        // yt-dlp writes the cookie jar back on exit; give it a private copy so parallel runs
-        // can't clobber each other or the file Account owns.
-        let cookies = try Self.privateCopy(of: cookiesFile)
+        // Parallel runs must not clobber each other or the file Account owns.
+        let cookies = try CookieCopy.make(of: cookiesFile)
         defer { try? FileManager.default.removeItem(at: cookies) }
 
         let playlistId = PlaylistID.membersOnly(channelId: channelId)
@@ -43,17 +42,6 @@ struct MembersFetcher: Sendable {
             corrected.channelTitle = original.channelTitle
             return corrected
         }
-    }
-
-    /// Where the per-run copies of `cookiesFile` live: a 0700 folder next to it, so they never
-    /// sit in a shared temporary directory and can be swept with the sign-in.
-    static func copiesDirectory(for cookiesFile: URL) -> URL {
-        cookiesFile.deletingLastPathComponent().appending(path: "cookie-copies", directoryHint: .isDirectory)
-    }
-
-    /// Deletes copies left behind by runs that never finished (the app quit mid-check).
-    static func removeCopies(for cookiesFile: URL) {
-        try? FileManager.default.removeItem(at: copiesDirectory(for: cookiesFile))
     }
 
     /// Parses yt-dlp -J playlist output. Entries get `isMembersOnly = true`.
@@ -90,17 +78,6 @@ struct MembersFetcher: Sendable {
         case "was_live", "post_live": .wasLive
         default: .unknown
         }
-    }
-
-    private static func privateCopy(of cookiesFile: URL) throws -> URL {
-        guard FileManager.default.fileExists(atPath: cookiesFile.path) else { throw StowError.notSignedIn }
-        let directory = copiesDirectory(for: cookiesFile)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
-                                                attributes: [.posixPermissions: 0o700])
-        let copy = directory.appending(path: "\(UUID().uuidString).txt")
-        try FileManager.default.copyItem(at: cookiesFile, to: copy)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: copy.path)
-        return copy
     }
 }
 

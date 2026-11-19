@@ -15,23 +15,33 @@ enum Snapshot {
             return false
         }
         let output = URL(filePath: args[index + 1], directoryHint: .isDirectory)
+        let scratch = FileManager.default.temporaryDirectory.appending(path: "stow-snapshot-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: scratch) }
         do {
             try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
-            let model = try makeModel()
+            let model = try makeModel(in: scratch)
             await model.signIn()
             NSApplication.shared.setActivationPolicy(.prohibited)
 
-            let screens: [(String, AnyView)] = SidebarItem.allCases.map { item in
-                (item.rawValue, AnyView(MainView(selection: item).frame(width: 1180, height: 760)))
-            } + [("subscriptions", AnyView(SubscriptionsPicker()))]
+            let screens: [Screen] = SidebarItem.allCases.map { item in
+                Screen(name: item.rawValue, view: AnyView(MainView(selection: item).frame(width: 1180, height: 760)))
+            } + [
+                Screen(name: "subscriptions", view: AnyView(SubscriptionsPicker())),
+                // The whole Alarm form, which scrolls in the window.
+                Screen(name: "alarm-full", view: AnyView(AlarmTab().frame(width: 980, height: 1900))),
+                Screen(name: "alarm-running", view: AnyView(MainView(selection: .alarm).frame(width: 1180, height: 760)),
+                       phase: samplePlayingPhase(model)),
+            ]
             for appearance in [NSAppearance.Name.aqua, .darkAqua] {
                 let suffix = appearance == .aqua ? "light" : "dark"
-                for (name, view) in screens {
-                    let url = output.appending(path: "\(name)-\(suffix).png")
-                    try await render(view.environment(model), appearance: appearance, to: url)
+                for screen in screens {
+                    model.previewAlarmPhase(screen.phase)
+                    let url = output.appending(path: "\(screen.name)-\(suffix).png")
+                    try await render(screen.view.environment(model), appearance: appearance, to: url)
                     print(url.path)
                 }
             }
+            model.previewAlarmPhase(.idle)
             return true
         } catch {
             print("Snapshot failed: \(error)")
@@ -39,8 +49,7 @@ enum Snapshot {
         }
     }
 
-    private static func makeModel() throws -> AppModel {
-        let directory = FileManager.default.temporaryDirectory.appending(path: "stow-snapshot-\(UUID().uuidString)")
+    private static func makeModel(in directory: URL) throws -> AppModel {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         for file in [AppPaths.settingsFile, AppPaths.stateFile, AppPaths.logFile]
         where FileManager.default.fileExists(atPath: file.path) {
@@ -48,9 +57,32 @@ enum Snapshot {
         }
         let model = AppModel(youtube: YouTubeClient(), account: SnapshotAccount(),
                              store: Store(directory: directory), notifier: SilentNotifier(),
-                             cookiesFile: directory.appending(path: "cookies.txt"))
+                             cookiesFile: directory.appending(path: "cookies.txt"), alarmServices: .sample)
         model.load()
+        addSampleAlarmRun(to: model)
         return model
+    }
+
+    private struct Screen {
+        var name: String
+        var view: AnyView
+        var phase: AlarmPhase = .idle
+    }
+
+    /// A finished test run of two recent videos, so "Last Alarm" shows up (temporary store only).
+    private static func addSampleAlarmRun(to model: AppModel) {
+        guard model.lastAlarmRun == nil else { return }
+        let start = Calendar.current.date(bySettingHour: 8, minute: 0, second: 0, of: .now) ?? .now
+        let run = AlarmRunRecord(trigger: .test, scheduledFor: start, startedAt: start,
+                                 endedAt: start.addingTimeInterval(24 * 60),
+                                 videoIds: model.recentVideos.prefix(2).map(\.id),
+                                 output: "JBL Go 3", outcome: .played)
+        model.recordAlarmRun(run, watchedIds: [])
+    }
+
+    private static func samplePlayingPhase(_ model: AppModel) -> AlarmPhase {
+        let video = model.inbox.first?.video ?? model.recentVideos.first ?? InboxItem.preview.video
+        return .playing(index: 0, count: 3, video: video)
     }
 
     private static func render(_ view: some View, appearance: NSAppearance.Name, to url: URL) async throws {

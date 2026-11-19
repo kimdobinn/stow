@@ -5,13 +5,18 @@ enum SceneID {
     static let main = "main"
 }
 
-/// Entry point: `Stow --selftest` runs the headless self-test instead of the app.
+/// Entry point: `Stow --selftest` and `Stow --alarm-dryrun` run headless checks instead of the app.
 @main
 @MainActor
 enum StowMain {
     static func main() {
         if CommandLine.arguments.contains(SelfTest.argument) {
             Task { exit(await SelfTest.run() ? 0 : 1) }
+            dispatchMain()
+        }
+        if CommandLine.arguments.contains(AlarmDryRun.argument) {
+            setvbuf(stdout, nil, _IOLBF, 0)
+            Task { exit(await AlarmDryRun.run() ? 0 : 1) }
             dispatchMain()
         }
         #if DEBUG
@@ -36,22 +41,28 @@ struct StowApp: App {
     @State private var model: AppModel
 
     init() {
-        let model = AppModel(youtube: YouTubeClient(), account: AccountManager())
-        // Unit tests are hosted by the app; don't touch the network or real files then.
-        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil {
-            Self.cleanUpCookieCopies()
-            model.start()
+        // Unit tests are hosted by the app; don't touch the network, real files or audio devices then.
+        guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else {
+            _model = State(initialValue: AppModel(youtube: YouTubeClient(), account: AccountManager(), alarmServices: .inert))
+            return
         }
+        let alarmServices = AlarmServices(
+            player: MPVPlayer(), sound: AlarmSound(), outputs: CoreAudioOutputs(), speaker: BluetoothSpeaker(),
+            keepAlive: KeepAlive(), power: PowerAssertions(), videoDetails: YTDLPVideoDetails())
+        let model = AppModel(youtube: YouTubeClient(), account: AccountManager(), alarmServices: alarmServices)
+        Self.cleanUpChildProcesses()
+        model.start()
         _model = State(initialValue: model)
     }
 
-    /// yt-dlp's cookie copies must not outlive a run: remove any left by a previous quit, and on
-    /// quit stop yt-dlp first so it can't write its copy back afterwards.
-    private static func cleanUpCookieCopies() {
-        MembersFetcher.removeCopies(for: AppPaths.cookiesFile)
+    /// Cookie copies must not outlive a run: remove any left by a previous quit, and on quit stop
+    /// yt-dlp and mpv first so they can't write their copies back afterwards.
+    private static func cleanUpChildProcesses() {
+        CookieCopy.removeAll(for: AppPaths.cookiesFile)
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: nil) { _ in
             ProcessRunner.terminateAll()
-            MembersFetcher.removeCopies(for: AppPaths.cookiesFile)
+            MPVPlayer.terminateAll()
+            CookieCopy.removeAll(for: AppPaths.cookiesFile)
         }
     }
 
@@ -69,12 +80,15 @@ struct StowApp: App {
                 Button("Check Now") { Task { await model.checkNow() } }
                     .keyboardShortcut("r")
                     .disabled(model.isChecking)
+                Button("Stop Alarm") { model.stopAlarm() }
+                    .keyboardShortcut(".")
+                    .disabled(!model.isAlarmRunning)
             }
         }
     }
 }
 
-/// Stow keeps checking (and, later, runs the alarm) with its window closed; the Dock icon brings it back.
+/// Stow keeps checking and runs the alarm with its window closed; the Dock icon brings it back.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 }

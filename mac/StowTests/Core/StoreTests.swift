@@ -37,15 +37,20 @@ struct StoreTests {
 
     @Test func savingSettingsKeepsUnknownKeys() throws {
         try FileManager.default.createDirectory(at: store.directory, withIntermediateDirectories: true)
-        let json = #"{"alarm": {"time": "08:00"}, "channels": [{"id": "UCeUP5Kb-EDDplwAi0H02XlA", "note": "keep"}, {"id": "UCgone"}]}"#
+        let json = #"{"alarm": {"time": "07:00", "snooze": 5}, "phoneSync": {"on": true}, "channels": [{"id": "UCeUP5Kb-EDDplwAi0H02XlA", "note": "keep"}, {"id": "UCgone"}]}"#
         try Data(json.utf8).write(to: store.settingsFile)
         var settings = try store.loadSettings()
         settings.channels[0].phone = false
         settings.channels.removeLast()
+        settings.alarm.volume = 40
         try store.save(settings)
 
         let saved = try JSONSerialization.jsonObject(with: Data(contentsOf: store.settingsFile)) as? [String: Any]
-        #expect((saved?["alarm"] as? [String: String]) == ["time": "08:00"])
+        #expect((saved?["phoneSync"] as? [String: Bool]) == ["on": true])
+        let alarm = saved?["alarm"] as? [String: Any]
+        #expect(alarm?["time"] as? String == "07:00")
+        #expect(alarm?["volume"] as? Int == 40)
+        #expect(alarm?["snooze"] as? Int == 5)
         let channels = saved?["channels"] as? [[String: Any]]
         #expect(channels?.count == 1)
         #expect(channels?.first?["note"] as? String == "keep")

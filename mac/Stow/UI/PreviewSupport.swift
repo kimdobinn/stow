@@ -23,7 +23,7 @@ private final class PreviewAccount: AccountService {
 }
 
 extension AppModel {
-    static var preview: AppModel { AppModel(youtube: PreviewYouTube(), account: PreviewAccount()) }
+    static var preview: AppModel { AppModel(youtube: PreviewYouTube(), account: PreviewAccount(), alarmServices: .sample) }
 }
 
 extension InboxItem {

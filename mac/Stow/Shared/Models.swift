@@ -84,6 +84,8 @@ struct InboxItem: Codable, Hashable, Identifiable, Sendable {
 
 enum CheckTrigger: String, Codable, Sendable {
     case launch, scheduled, wake, manual, channelAdded, signIn
+    /// The alarm's prep step refreshing feeds before it picks videos.
+    case alarm
 }
 
 struct CheckResult: Codable, Equatable, Sendable {
@@ -125,24 +127,26 @@ enum SignInState: String, Codable, Sendable {
     case expired
 }
 
-/// settings.json. New top-level sections (alarm, fallback rules) are added as new keys
-/// with defaults so older files keep decoding.
+/// settings.json. New top-level sections are added as new keys with defaults so older files keep decoding.
 struct AppSettings: Codable, Equatable, Sendable {
     var schemaVersion: Int
     var channels: [Channel]
     var checkIntervalMinutes: Int
     var launchAtLogin: Bool
+    var alarm: AlarmSettings
 
     static let `default` = AppSettings(schemaVersion: 1, channels: [], checkIntervalMinutes: 30, launchAtLogin: true)
 
-    init(schemaVersion: Int, channels: [Channel], checkIntervalMinutes: Int, launchAtLogin: Bool) {
+    init(schemaVersion: Int, channels: [Channel], checkIntervalMinutes: Int, launchAtLogin: Bool,
+         alarm: AlarmSettings = .default) {
         self.schemaVersion = schemaVersion
         self.channels = channels
         self.checkIntervalMinutes = checkIntervalMinutes
         self.launchAtLogin = launchAtLogin
+        self.alarm = alarm
     }
 
-    private enum CodingKeys: String, CodingKey { case schemaVersion, channels, checkIntervalMinutes, launchAtLogin }
+    private enum CodingKeys: String, CodingKey { case schemaVersion, channels, checkIntervalMinutes, launchAtLogin, alarm }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -151,6 +155,13 @@ struct AppSettings: Codable, Equatable, Sendable {
         channels = try c.decodeIfPresent([Channel].self, forKey: .channels) ?? d.channels
         checkIntervalMinutes = try c.decodeIfPresent(Int.self, forKey: .checkIntervalMinutes) ?? d.checkIntervalMinutes
         launchAtLogin = try c.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? d.launchAtLogin
+        // A hand edit that breaks "alarm" (e.g. not an object) must not cost the channel list.
+        do {
+            alarm = try c.decodeIfPresent(AlarmSettings.self, forKey: .alarm) ?? d.alarm
+        } catch {
+            alarm = d.alarm
+            decoder.settingsIssues?.add("\"alarm\" isn't an object; using the default alarm settings.")
+        }
     }
 }
 
@@ -178,20 +189,38 @@ struct AppState: Codable, Equatable, Sendable {
     var lastCheck: CheckResult?
     /// Consecutive checks that had errors (other than an expired sign-in).
     var failedCheckStreak: Int
+    /// Videos the alarm started, newest first (capped by Core). The alarm never picks these
+    /// again, except through a `replayLatest` fallback rule.
+    var alarmPlayedIds: [String]
+    /// Videos played to at least 90%, newest first (capped by Core), for syncing with the phone.
+    var watchedIds: [String]
+    var lastAlarmRun: AlarmRunRecord?
+    /// The alarm time of the newest scheduled run (played or skipped), so a test run that
+    /// replaces `lastAlarmRun` can't make that alarm fire again after a relaunch.
+    var lastScheduledAlarm: Date?
 
     static let empty = AppState(seenVideoIds: [:], inbox: [], lastCheck: nil)
 
     init(seenVideoIds: [String: [String]], checkedFeeds: [String: [FeedKind]] = [:], inbox: [InboxItem],
-         recentVideos: [String: [Video]] = [:], lastCheck: CheckResult?, failedCheckStreak: Int = 0) {
+         recentVideos: [String: [Video]] = [:], lastCheck: CheckResult?, failedCheckStreak: Int = 0,
+         alarmPlayedIds: [String] = [], watchedIds: [String] = [], lastAlarmRun: AlarmRunRecord? = nil,
+         lastScheduledAlarm: Date? = nil) {
         self.seenVideoIds = seenVideoIds
         self.checkedFeeds = checkedFeeds
         self.inbox = inbox
         self.recentVideos = recentVideos
         self.lastCheck = lastCheck
         self.failedCheckStreak = failedCheckStreak
+        self.alarmPlayedIds = alarmPlayedIds
+        self.watchedIds = watchedIds
+        self.lastAlarmRun = lastAlarmRun
+        self.lastScheduledAlarm = lastScheduledAlarm
     }
 
-    private enum CodingKeys: String, CodingKey { case seenVideoIds, checkedFeeds, inbox, recentVideos, lastCheck, failedCheckStreak }
+    private enum CodingKeys: String, CodingKey {
+        case seenVideoIds, checkedFeeds, inbox, recentVideos, lastCheck, failedCheckStreak, alarmPlayedIds, watchedIds, lastAlarmRun,
+             lastScheduledAlarm
+    }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -201,6 +230,12 @@ struct AppState: Codable, Equatable, Sendable {
         recentVideos = try c.decodeIfPresent([String: [Video]].self, forKey: .recentVideos) ?? [:]
         lastCheck = try c.decodeIfPresent(CheckResult.self, forKey: .lastCheck)
         failedCheckStreak = try c.decodeIfPresent(Int.self, forKey: .failedCheckStreak) ?? 0
+        alarmPlayedIds = try c.decodeIfPresent([String].self, forKey: .alarmPlayedIds) ?? []
+        watchedIds = try c.decodeIfPresent([String].self, forKey: .watchedIds) ?? []
+        // Written by a newer build with an outcome this one doesn't know: forget it, keep the rest.
+        lastAlarmRun = try? c.decodeIfPresent(AlarmRunRecord.self, forKey: .lastAlarmRun)
+        lastScheduledAlarm = (try? c.decodeIfPresent(Date.self, forKey: .lastScheduledAlarm))
+            ?? lastAlarmRun.flatMap { $0.trigger == .scheduled ? $0.scheduledFor : nil }
     }
 }
 
@@ -216,6 +251,13 @@ enum StowError: Error, Equatable, LocalizedError {
     case channelAlreadyAdded(String)
     case network(String)
     case parse(String)
+    /// No CoreAudio output matches (name or UID).
+    case audioDeviceNotFound(String)
+    /// A CoreAudio / AVFoundation call failed.
+    case audio(String)
+    /// mpv couldn't start or its IPC connection failed.
+    case player(String)
+    case bluetooth(String)
 
     var errorDescription: String? {
         switch self {
@@ -229,6 +271,10 @@ enum StowError: Error, Equatable, LocalizedError {
         case .channelAlreadyAdded(let title): "\(title) is already added."
         case .network(let message): "Network error: \(message)"
         case .parse(let message): "Unexpected response: \(message)"
+        case .audioDeviceNotFound(let name): "Audio output not found: \(name)"
+        case .audio(let message): "Audio error: \(message)"
+        case .player(let message): "Player error: \(message)"
+        case .bluetooth(let message): "Bluetooth error: \(message)"
         }
     }
 }
