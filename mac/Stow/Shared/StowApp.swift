@@ -14,6 +14,12 @@ enum StowMain {
             Task { exit(await SelfTest.run() ? 0 : 1) }
             dispatchMain()
         }
+        #if DEBUG
+        if CommandLine.arguments.contains(Snapshot.argument) {
+            Task { exit(await Snapshot.run() ? 0 : 1) }
+            NSApplication.shared.run()
+        }
+        #endif
         // Two copies (e.g. a dev build and the installed app) would double every check and alarm.
         let others = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
         if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil,

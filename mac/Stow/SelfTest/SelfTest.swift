@@ -147,7 +147,7 @@ enum SelfTest {
 
 /// An account whose state never changes; the self-test must not touch the real web data store.
 @MainActor
-private final class FixedAccount: AccountService {
+final class FixedAccount: AccountService {
     let state: SignInState
 
     init(state: SignInState) {
@@ -161,7 +161,7 @@ private final class FixedAccount: AccountService {
 }
 
 @MainActor
-private final class SilentNotifier: UserNotifying {
+final class SilentNotifier: UserNotifying {
     func requestAuthorization() async -> Bool { true }
     func notifyNewVideos(_ videos: [Video]) {}
     func notifyProblem(title: String, body: String) {}

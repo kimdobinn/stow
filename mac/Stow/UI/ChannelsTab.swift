@@ -44,11 +44,30 @@ struct ChannelsTab: View {
     }
 
     private var channelList: some View {
-        List(selection: $selection) {
-            ForEach(model.channels) { channel in
-                ChannelRow(channel: channel)
+        Table(model.channels, selection: $selection) {
+            TableColumn("Channel") { channel in
+                ChannelCell(channel: channel)
             }
+            TableColumn("Morning") { channel in
+                ColumnToggle(isOn: Binding(
+                    get: { channel.morning },
+                    set: { model.setMorning($0, channelId: channel.id) }
+                ))
+                .help("Include in the morning alarm")
+            }
+            .width(70)
+            .alignment(.center)
+            TableColumn("Phone") { channel in
+                ColumnToggle(isOn: Binding(
+                    get: { channel.phone },
+                    set: { model.setPhone($0, channelId: channel.id) }
+                ))
+                .help("Send new videos to the phone")
+            }
+            .width(70)
+            .alignment(.center)
         }
+        .alternatingRowBackgrounds(.disabled)
         .contextMenu(forSelectionType: Channel.ID.self) { ids in
             if ids.count == 1, let channel = model.channels.first(where: { ids.contains($0.id) }) {
                 Link("Open on YouTube", destination: channel.url)
@@ -108,8 +127,7 @@ struct ChannelsTab: View {
     }
 }
 
-private struct ChannelRow: View {
-    @Environment(AppModel.self) private var model
+private struct ChannelCell: View {
     let channel: Channel
 
     var body: some View {
@@ -124,21 +142,20 @@ private struct ChannelRow: View {
                         .lineLimit(1)
                 }
             }
-            Spacer()
-            Toggle("Morning", isOn: Binding(
-                get: { channel.morning },
-                set: { model.setMorning($0, channelId: channel.id) }
-            ))
-            .help("Include in the morning alarm")
-            Toggle("Phone", isOn: Binding(
-                get: { channel.phone },
-                set: { model.setPhone($0, channelId: channel.id) }
-            ))
-            .help("Send new videos to the phone")
         }
-        .toggleStyle(.switch)
-        .controlSize(.mini)
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
+    }
+}
+
+/// A switch whose column header is its label.
+private struct ColumnToggle: View {
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Toggle("", isOn: $isOn)
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .controlSize(.small)
     }
 }
 

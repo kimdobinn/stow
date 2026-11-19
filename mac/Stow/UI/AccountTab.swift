@@ -9,15 +9,18 @@ struct AccountTab: View {
     var body: some View {
         Form {
             Section("YouTube") {
-                LabeledContent("Status") {
-                    SignInBadge(state: model.signInState)
-                }
-                HStack {
-                    if isBusy {
-                        ProgressView().controlSize(.small)
+                LabeledContent {
+                    HStack(spacing: 8) {
+                        if isBusy {
+                            ProgressView().controlSize(.small)
+                        }
+                        buttons
                     }
-                    Spacer()
-                    buttons
+                } label: {
+                    HStack(spacing: 8) {
+                        Text("Status")
+                        SignInBadge(state: model.signInState)
+                    }
                 }
                 Text("Used for members-only videos and recommendations. The sign-in is kept separate from Safari.")
                     .font(.callout)
