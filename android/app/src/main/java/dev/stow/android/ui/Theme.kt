@@ -43,6 +43,9 @@ private val Dark = StowColors(
 
 val LocalStowColors = staticCompositionLocalOf { Light }
 
+/** Calm mode: titles only, no thumbnails. */
+val LocalCalm = androidx.compose.runtime.compositionLocalOf { false }
+
 object Stow {
     val colors: StowColors @Composable get() = LocalStowColors.current
 }

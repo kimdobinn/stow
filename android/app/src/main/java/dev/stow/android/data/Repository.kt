@@ -32,6 +32,7 @@ class Repository(private val context: Context) {
     val local = LocalStore(context)
     val remote = Remote()
     val playlistStore = PlaylistStore(context)
+    val stats = WatchStats(context)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var observing: Job? = null
@@ -48,11 +49,11 @@ class Repository(private val context: Context) {
     val playlists: StateFlow<List<Playlist>> get() = playlistStore.playlists
 
     /** Every known video (sent to the phone or recent on a channel), by id. */
-    val items: StateFlow<Map<String, VideoItem>> = combine(sent, _channels, local.videos) { sent, channels, local ->
+    val items: StateFlow<Map<String, VideoItem>> = combine(sent, _channels, local.videos, prefs.watchedHere) { sent, channels, local, watchedHere ->
         val result = LinkedHashMap<String, VideoItem>()
         for (channel in channels) {
             for (recent in channel.recent) {
-                result[recent.video.id] = VideoItem(recent.video, null, local[recent.video.id], recent.watched)
+                result[recent.video.id] = VideoItem(recent.video, null, local[recent.video.id], recent.watched || recent.video.id in watchedHere)
             }
         }
         for (video in sent) {
@@ -206,7 +207,13 @@ class Repository(private val context: Context) {
     }
 
     fun setWatched(id: String, watched: Boolean) {
-        if (item(id)?.sent == null) return
+        val item = item(id)
+        if (watched && item?.watched == false) item.video.channelId.takeIf { it.isNotEmpty() }?.let(stats::addFinished)
+        if (item?.sent == null) {
+            // Streamed without ever being sent: remember it here only.
+            prefs.setWatchedHere(id, watched)
+            return
+        }
         if (demo) {
             sent.value = sent.value.map { if (it.video.id == id) it.copy(watched = watched) else it }
             return
@@ -235,6 +242,13 @@ class Repository(private val context: Context) {
         YtDlp.deleteFiles(context, id)
         local.update(id) { it?.copy(state = DownloadState.DELETED, filePath = null, sizeBytes = 0, progress = 0, error = null) }
         if (item(id)?.sent != null) scope.launch { runCatching { remote.reportDownload(id, "deleted") } }
+    }
+
+    /** The YouTube cookies (members-only videos) as a temporary cookies.txt; the caller deletes it. */
+    suspend fun cookiesFile(): File? {
+        val key = prefs.pairingKey ?: return null
+        val data = runCatching { remote.cookies(key) }.onFailure { Log.w(TAG, "No cookies", it) }.getOrNull() ?: return null
+        return File(context.cacheDir, "cookies-${java.util.UUID.randomUUID()}.txt").apply { writeBytes(data) }
     }
 
     // Playlists

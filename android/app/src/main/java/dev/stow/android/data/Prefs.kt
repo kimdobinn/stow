@@ -35,6 +35,36 @@ class Prefs(context: Context) {
         _groupByChannel.value = on
     }
 
+        private fun flag(key: String, default: Boolean) = MutableStateFlow(prefs.getBoolean(key, default))
+    private fun set(flow: MutableStateFlow<Boolean>, key: String, on: Boolean) {
+        prefs.edit().putBoolean(key, on).apply()
+        flow.value = on
+    }
+
+    /** Play the next video when one ends (off: stop with a "done" screen). PlaybackService reads it too. */
+    private val _autoplay = flag(KEY_AUTOPLAY, false)
+    val autoplay: StateFlow<Boolean> = _autoplay.asStateFlow()
+    fun setAutoplay(on: Boolean) = set(_autoplay, KEY_AUTOPLAY, on)
+
+    /** Titles only: no thumbnails anywhere. */
+    private val _calm = flag(KEY_CALM, false)
+    val calm: StateFlow<Boolean> = _calm.asStateFlow()
+    fun setCalm(on: Boolean) = set(_calm, KEY_CALM, on)
+
+    /** The app in black and white (not the video itself). */
+    private val _grayscale = flag(KEY_GRAYSCALE, false)
+    val grayscale: StateFlow<Boolean> = _grayscale.asStateFlow()
+    fun setGrayscale(on: Boolean) = set(_grayscale, KEY_GRAYSCALE, on)
+
+    /** Videos marked watched on the phone that were never sent to it (streamed). */
+    private val _watchedHere = MutableStateFlow(prefs.getStringSet(KEY_WATCHED_HERE, emptySet()).orEmpty().toSet())
+    val watchedHere: StateFlow<Set<String>> = _watchedHere.asStateFlow()
+    fun setWatchedHere(id: String, watched: Boolean) {
+        val updated = if (watched) _watchedHere.value + id else _watchedHere.value - id
+        prefs.edit().putStringSet(KEY_WATCHED_HERE, updated).apply()
+        _watchedHere.value = updated
+    }
+
         /** The Firebase project the Mac paired this phone with, once paired. */
     val pairedProject: String? get() = prefs.getString(KEY_PROJECT, null)
 
@@ -54,12 +84,16 @@ class Prefs(context: Context) {
         get() = prefs.getLong(KEY_YTDLP_UPDATE, 0)
         set(value) { prefs.edit().putLong(KEY_YTDLP_UPDATE, value).apply() }
 
-    private companion object {
+    companion object {
         const val KEY_WIFI_ONLY = "wifiOnly"
         const val KEY_PROJECT = "pairedProject"
         const val KEY_KEY = "pairingKey"
         const val KEY_YTDLP_UPDATE = "lastYtDlpUpdate"
         const val KEY_SORT = "downloadSort"
+        const val KEY_AUTOPLAY = "autoplay"
+        const val KEY_CALM = "calm"
+        const val KEY_GRAYSCALE = "grayscale"
+        const val KEY_WATCHED_HERE = "watchedHere"
         const val KEY_GROUP = "groupByChannel"
     }
 }

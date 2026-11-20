@@ -39,7 +39,7 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
 
         // Cookies only for members-only videos: sharing the session from a second IP more than
         // needed risks YouTube rotating it on the Mac too.
-        val cookies = if (video.isMembersOnly) cookiesFile() else null
+        val cookies = if (video.isMembersOnly) repository.cookiesFile() else null
         try {
             var lastShown = 0L
             val file = YtDlp.download(applicationContext, video, cookies) { percent ->
@@ -57,6 +57,10 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
             }
             runCatching { repository.remote.reportDownload(id, "downloaded") }
             return Result.success()
+        } catch (e: com.yausername.youtubedl_android.YoutubeDL.CanceledException) {
+            // Stopped (deleted, network rule changed, app shut down): not a failure.
+            repository.local.update(id) { it?.takeIf { v -> v.state == DownloadState.DOWNLOADING }?.copy(state = DownloadState.QUEUED, error = null) ?: it }
+            return Result.retry()
         } catch (e: CancellationException) {
             YtDlp.cancel(id)
             repository.local.update(id) { it?.takeIf { v -> v.state == DownloadState.DOWNLOADING }?.copy(state = DownloadState.QUEUED) ?: it }
@@ -76,11 +80,6 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
         }
     }
 
-    private suspend fun cookiesFile(): File? {
-        val key = repository.prefs.pairingKey ?: return null
-        val data = runCatching { repository.remote.cookies(key) }.onFailure { Log.w("Stow", "No cookies", it) }.getOrNull() ?: return null
-        return File(applicationContext.cacheDir, "cookies-${UUID.randomUUID()}.txt").apply { writeBytes(data) }
-    }
 
     private fun durationMs(file: File): Long = runCatching {
         MediaMetadataRetriever().use { retriever ->

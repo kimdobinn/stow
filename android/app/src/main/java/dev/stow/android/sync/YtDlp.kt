@@ -85,6 +85,36 @@ object YtDlp {
             }?.maxByOrNull { it.length() } ?: error("yt-dlp finished but no file was found")
         }
 
+    /** Where to stream a video from: video URL, separate audio URL (HD), and the HTTP headers. */
+    data class Stream(val videoUrl: String, val audioUrl: String?, val headers: Map<String, String>)
+
+    /** Resolves the same format a download would pick, without downloading (a few seconds). */
+    suspend fun stream(context: Context, video: Video, cookies: File?): Stream = withContext(Dispatchers.IO) {
+        ensureReady(context)
+        val request = YoutubeDLRequest(video.watchUrl).apply {
+            addOption("-j")
+            addOption("-S", "res:1080,fps,vcodec:h264,acodec:m4a")
+            addOption("-f", "bv*+ba/b")
+            addOption("--no-playlist")
+            if (cookies != null) addOption("--cookies", cookies.absolutePath)
+        }
+        val response = YoutubeDL.getInstance().execute(request, "stream-${video.id}")
+        if (response.exitCode != 0) error(summary(response.err))
+        val info = org.json.JSONObject(response.out.lineSequence().first { it.trimStart().startsWith("{") })
+        fun headers(o: org.json.JSONObject) = o.optJSONObject("http_headers")?.let { h ->
+            h.keys().asSequence().associateWith { h.getString(it) }
+        }.orEmpty()
+        val formats = info.optJSONArray("requested_formats")
+        if (formats != null && formats.length() >= 2) {
+            val parts = (0 until formats.length()).map { formats.getJSONObject(it) }
+            val videoPart = parts.firstOrNull { it.optString("vcodec") != "none" } ?: parts[0]
+            val audioPart = parts.firstOrNull { it.optString("vcodec") == "none" } ?: parts[1]
+            Stream(videoPart.getString("url"), audioPart.getString("url"), headers(videoPart))
+        } else {
+            Stream(info.getString("url"), null, headers(info))
+        }
+    }
+
     fun cancel(id: String) {
         runCatching { YoutubeDL.getInstance().destroyProcessById(id) }
     }

@@ -188,15 +188,8 @@ fun VideoMenu(item: VideoItem, actions: VideoActions, expanded: Boolean, onDismi
     }
 }
 
-/** Tapping a video plays it when downloaded, otherwise starts the download. */
-fun VideoActions.open(item: VideoItem) {
-    when {
-        item.isPlayable -> play(item)
-        item.state == DownloadState.DOWNLOADING -> notify("Still downloading · ${item.local?.progress ?: 0}%")
-        item.isDownloading -> notify("Waiting to download")
-        else -> download(item)
-    }
-}
+/** Tapping a video plays it: from the phone when downloaded, otherwise streamed. */
+fun VideoActions.open(item: VideoItem) = play(item)
 
 /** Home and Subscriptions: a full-width thumbnail with the channel avatar and title below. */
 @OptIn(ExperimentalFoundationApi::class)
@@ -208,21 +201,25 @@ fun VideoCard(item: VideoItem, avatarUrl: String?, actions: VideoActions) {
         haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
         menu = true
     })) {
-        Thumbnail(item, Modifier.fillMaxWidth()) {
-            if (!item.isPlayable && !item.isDownloading) {
-                DownloadBadge(Modifier.align(Alignment.TopEnd).padding(8.dp))
+        val calm = LocalCalm.current
+        if (!calm) {
+            Thumbnail(item, Modifier.fillMaxWidth()) {
+                if (!item.isPlayable && !item.isDownloading) {
+                    DownloadBadge(Modifier.align(Alignment.TopEnd).padding(8.dp).clickable { actions.download(item) })
+                }
             }
         }
-        Row(Modifier.padding(start = 12.dp, top = 12.dp, bottom = 20.dp)) {
+        Row(Modifier.padding(start = 12.dp, top = 12.dp, bottom = if (calm) 12.dp else 20.dp)) {
             ChannelAvatar(avatarUrl, 36.dp, Modifier.clickable { actions.openChannel(item.video.channelId) }, name = item.video.channelTitle)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(item.video.title, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 2,
                      overflow = TextOverflow.Ellipsis, color = Stow.colors.text, lineHeight = 20.sp)
                 Spacer(Modifier.height(3.dp))
-                Text(Format.meta(item), fontSize = 12.sp, color = Stow.colors.secondaryText, maxLines = 1)
+                Text(Format.meta(item, withDuration = calm), fontSize = 12.sp, color = Stow.colors.secondaryText, maxLines = 1)
                 Spacer(Modifier.height(3.dp))
                 DownloadStatus(item)
+                if (calm && item.progress > 0.01f) WatchedLine(item.progress)
             }
             Box {
                 IconButton(onClick = { menu = true }) {
@@ -247,24 +244,42 @@ fun VideoRow(item: VideoItem, actions: VideoActions, showChannel: Boolean = true
         })
             .padding(start = 12.dp, top = 6.dp, bottom = 6.dp),
     ) {
-        Thumbnail(item, Modifier.width(168.dp), rounded = 8.dp)
-        Spacer(Modifier.width(12.dp))
+        val calm = LocalCalm.current
+        if (!calm) {
+            Thumbnail(item, Modifier.width(168.dp), rounded = 8.dp)
+            Spacer(Modifier.width(12.dp))
+        }
         Column(Modifier.weight(1f).padding(top = 2.dp)) {
             Text(item.video.title, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 2,
                  overflow = TextOverflow.Ellipsis, color = Stow.colors.text, lineHeight = 19.sp)
             Spacer(Modifier.height(3.dp))
-            Text(if (showChannel) Format.meta(item) else Format.ago(item.video.publishedAt),
+            Text(if (showChannel) Format.meta(item, withDuration = calm)
+                 else listOfNotNull(Format.ago(item.video.publishedAt), item.durationMs.takeIf { calm && it > 0 }?.let(Format::duration)).joinToString(" · "),
                  fontSize = 12.sp, color = Stow.colors.secondaryText, maxLines = 2)
             Spacer(Modifier.height(3.dp))
             DownloadStatus(item)
+            if (calm && item.progress > 0.01f) WatchedLine(item.progress)
         }
         if (trailing != null) trailing()
+        if (!item.isPlayable && !item.isDownloading) {
+            IconButton(onClick = { actions.download(item) }) {
+                Icon(Icons.Outlined.Download, contentDescription = "Download", tint = Stow.colors.text, modifier = Modifier.size(20.dp))
+            }
+        }
         Box {
             IconButton(onClick = { menu = true }) {
                 Icon(Icons.Filled.MoreVert, contentDescription = "More", tint = Stow.colors.text, modifier = Modifier.size(20.dp))
             }
             VideoMenu(item, actions, menu) { menu = false }
         }
+    }
+}
+
+/** In calm mode, how far you got shows as a thin line under the text. */
+@Composable
+private fun WatchedLine(fraction: Float) {
+    Box(Modifier.padding(top = 6.dp).width(120.dp).height(3.dp).background(Stow.colors.chip)) {
+        Box(Modifier.fillMaxWidth(fraction).height(3.dp).background(ProgressRed))
     }
 }
 

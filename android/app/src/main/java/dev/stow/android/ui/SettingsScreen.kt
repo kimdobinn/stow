@@ -12,7 +12,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.BarChart
+import androidx.compose.material.icons.outlined.Contrast
 import androidx.compose.material.icons.outlined.DeleteSweep
+import androidx.compose.material.icons.outlined.HideImage
+import androidx.compose.material.icons.outlined.PlayCircle
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.material.icons.outlined.LinkOff
 import androidx.compose.material.icons.outlined.SdStorage
 import androidx.compose.material.icons.outlined.SystemUpdateAlt
@@ -46,7 +51,10 @@ import kotlinx.coroutines.withContext
 
 /** Downloads, the downloader and the pairing, in YouTube's plain settings style. */
 @Composable
-fun SettingsScreen(repository: Repository, wifiOnly: Boolean, onBack: () -> Unit) {
+fun SettingsScreen(repository: Repository, wifiOnly: Boolean, onReport: () -> Unit, onBack: () -> Unit) {
+    val autoplay by repository.prefs.autoplay.collectAsStateWithLifecycle()
+    val calm by repository.prefs.calm.collectAsStateWithLifecycle()
+    val grayscale by repository.prefs.grayscale.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var storage by remember { mutableStateOf<Long?>(null) }
@@ -65,6 +73,21 @@ fun SettingsScreen(repository: Repository, wifiOnly: Boolean, onBack: () -> Unit
     Column(Modifier.fillMaxSize()) {
         BackTopBar("Settings", onBack)
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+            Group("Watching")
+            SettingRow(Icons.Outlined.BarChart, "Your week", "Time watched per day and channel", onClick = onReport)
+            SettingRow(Icons.Outlined.PlayCircle, "Autoplay next video", if (autoplay) "Plays the next video in the list" else "Stops at the end of each video",
+                       onClick = { repository.prefs.setAutoplay(!autoplay) }) {
+                Switch(checked = autoplay, onCheckedChange = repository.prefs::setAutoplay)
+            }
+            SettingRow(Icons.Outlined.HideImage, "Calm mode", "Titles only, no thumbnails",
+                       onClick = { repository.prefs.setCalm(!calm) }) {
+                Switch(checked = calm, onCheckedChange = repository.prefs::setCalm)
+            }
+            SettingRow(Icons.Outlined.Contrast, "Black and white", "The app in grayscale (videos stay in color)",
+                       onClick = { repository.prefs.setGrayscale(!grayscale) }) {
+                Switch(checked = grayscale, onCheckedChange = repository.prefs::setGrayscale)
+            }
+            HorizontalDivider(color = Stow.colors.divider)
             Group("Downloads")
             SettingRow(Icons.Outlined.Wifi, "Download on Wi-Fi only", if (wifiOnly) "Waits for Wi-Fi" else "Also uses mobile data",
                        onClick = { repository.setWifiOnly(!wifiOnly) }) {

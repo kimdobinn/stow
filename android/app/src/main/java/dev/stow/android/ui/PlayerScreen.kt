@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material3.AlertDialog
@@ -142,6 +143,8 @@ fun PlayerScreen(
     BackHandler { if (landscape) setFullscreen(false) else onCollapse() }
 
     val player = controller
+    val resolving = connection.resolving.collectAsStateCompat().value
+    val streamError = connection.error.collectAsStateCompat().value
     val queue = connection.queue.collectAsStateCompat().value
     val index = queue.indexOf(current?.id)
     var dragDown by remember { mutableFloatStateOf(0f) }
@@ -169,16 +172,35 @@ fun PlayerScreen(
                 update = { it.player = player },
                 modifier = Modifier.fillMaxSize(),
             )
-            if (player != null) {
+            if (player != null && resolving == null && streamError == null) {
                 PlayerControls(
                     player = player,
                     fullscreen = landscape,
                     hasPrevious = index > 0,
                     hasNext = index in 0 until queue.lastIndex,
+                    nextTitle = upNext.firstOrNull()?.video?.title,
+                    onDone = { connection.stop(); onCollapse() },
                     onFullscreen = { setFullscreen(!landscape) },
                     onCollapse = { if (landscape) setFullscreen(false) else onCollapse() },
                     onSettings = { speedDialog = true },
                 )
+            }
+            when {
+                streamError != null -> Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(streamError, color = Color.White, fontSize = 13.sp, maxLines = 4, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    Spacer(Modifier.height(12.dp))
+                    if (current != null) PillButton("Try again", null, onClick = { connection.play(listOf(current), current) })
+                }
+                resolving != null -> Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                    androidx.compose.material3.CircularProgressIndicator(Modifier.size(40.dp), color = Color.White, strokeWidth = 3.dp)
+                    Spacer(Modifier.height(10.dp))
+                    Text("Getting the video from YouTube…", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+                }
+            }
+            if (resolving != null || streamError != null) {
+                IconButton(onClick = onCollapse, modifier = Modifier.align(Alignment.TopStart).padding(4.dp)) {
+                    Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Minimize", tint = Color.White)
+                }
             }
         }
     }
@@ -222,13 +244,16 @@ fun PlayerScreen(
                     }
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (current.sent != null) {
-                            PillButton(if (current.watched) "Watched" else "Mark watched", if (current.watched) Icons.Filled.Check else null,
-                                       onClick = { actions.setWatched(current, !current.watched) })
+                        PillButton(if (current.watched) "Watched" else "Mark watched", if (current.watched) Icons.Filled.Check else null,
+                                   onClick = { actions.setWatched(current, !current.watched) })
+                        when {
+                            current.isPlayable -> {}
+                            current.isDownloading -> PillButton("Downloading ${current.local?.progress ?: 0}%", Icons.Outlined.Download, onClick = {})
+                            else -> PillButton("Download", Icons.Outlined.Download, onClick = { actions.download(current) })
                         }
                         PillButton("Save", Icons.AutoMirrored.Outlined.PlaylistAdd, onClick = { actions.saveToPlaylist(current) })
                         PillButton("Speed", Icons.Outlined.Speed, onClick = { speedDialog = true })
-                        PillButton("Delete", Icons.Outlined.Delete, onClick = { confirmDelete = true })
+                        if (current.isPlayable) PillButton("Delete", Icons.Outlined.Delete, onClick = { confirmDelete = true })
                     }
                 }
                 if (upNext.isNotEmpty()) {
@@ -282,6 +307,8 @@ private fun PlayerControls(
     fullscreen: Boolean,
     hasPrevious: Boolean,
     hasNext: Boolean,
+    nextTitle: String?,
+    onDone: () -> Unit,
     onFullscreen: () -> Unit,
     onCollapse: () -> Unit,
     onSettings: () -> Unit,
@@ -305,8 +332,9 @@ private fun PlayerControls(
             buffered = player.bufferedPosition
             playing = player.isPlaying || (player.playWhenReady && player.playbackState == Player.STATE_BUFFERING)
             buffering = player.playWhenReady && player.playbackState == Player.STATE_BUFFERING
-            ended = player.playbackState == Player.STATE_ENDED
-            if (ended) visible = true
+            // With autoplay off the player pauses at the end of each video instead of moving on.
+            ended = player.playbackState == Player.STATE_ENDED ||
+                (duration > 0 && !player.playWhenReady && position >= duration - 600)
             if (visible && playing && scrubbing == null && System.currentTimeMillis() - lastTouch > 3_000) visible = false
             skip?.let { if (System.currentTimeMillis() - it.third > 800) skip = null }
             delay(200)
@@ -374,6 +402,13 @@ private fun PlayerControls(
                 }
             }
         }
+        if (ended && scrubbing == null) {
+            DoneOverlay(nextTitle = nextTitle.takeIf { hasNext },
+                onReplay = { player.seekTo(0); player.play() },
+                onNext = { player.seekToNextMediaItem(); player.play() },
+                onClose = onDone)
+            return@BoxWithConstraints
+        }
         // The seek bar: thin at the bottom edge, with a red scrubber while the controls show.
         val fraction = scrubbing ?: if (duration > 0) position.toFloat() / duration else 0f
         val bufferedFraction = if (duration > 0) buffered.toFloat() / duration else 0f
@@ -410,6 +445,37 @@ private fun PlayerControls(
     }
 }
 
+/** The end of a video: no countdown into the next one, just a calm stop. */
+@Composable
+private fun DoneOverlay(nextTitle: String?, onReplay: () -> Unit, onNext: () -> Unit, onClose: () -> Unit) {
+    Column(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.8f)).padding(16.dp),
+           horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Icon(Icons.Filled.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(32.dp))
+        Spacer(Modifier.height(6.dp))
+        Text("You're done", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(14.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            DarkPill("Replay", Icons.Filled.Replay, onReplay)
+            DarkPill("Close", Icons.Filled.Close, onClose)
+        }
+        if (nextTitle != null) {
+            Spacer(Modifier.height(10.dp))
+            Text("Next: $nextTitle", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, maxLines = 1,
+                 overflow = TextOverflow.Ellipsis, modifier = Modifier.clickable(onClick = onNext).padding(6.dp))
+        }
+    }
+}
+
+@Composable
+private fun DarkPill(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+    Row(Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.18f)).clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
 @Composable
 private fun RoundControl(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, size: androidx.compose.ui.unit.Dp,
                          enabled: Boolean = true, onClick: () -> Unit) {
@@ -433,8 +499,10 @@ fun MiniPlayer(connection: PlayerConnection, item: VideoItem, onOpen: () -> Unit
     }
     Column(Modifier.fillMaxWidth().background(Stow.colors.raised).clickable(onClick = onOpen)) {
         Row(Modifier.fillMaxWidth().height(60.dp), verticalAlignment = Alignment.CenterVertically) {
-            AsyncImage(model = item.video.thumbnailUrl, contentDescription = null, contentScale = ContentScale.Crop,
-                       modifier = Modifier.fillMaxHeight().aspectRatio(16f / 9f).background(Color.Black))
+            if (!LocalCalm.current) {
+                AsyncImage(model = item.video.thumbnailUrl, contentDescription = null, contentScale = ContentScale.Crop,
+                           modifier = Modifier.fillMaxHeight().aspectRatio(16f / 9f).background(Color.Black))
+            }
             Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                 Text(item.video.title, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Stow.colors.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(item.video.channelTitle, fontSize = 12.sp, color = Stow.colors.secondaryText, maxLines = 1)

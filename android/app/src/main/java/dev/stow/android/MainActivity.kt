@@ -68,6 +68,9 @@ import dev.stow.android.ui.SubscriptionsScreen
 import dev.stow.android.ui.VideoActions
 import dev.stow.android.ui.sortedFor
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.graphics.asComposeRenderEffect
+import androidx.compose.ui.graphics.graphicsLayer
+import dev.stow.android.ui.ReportScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -123,6 +126,10 @@ class MainActivity : ComponentActivity() {
         val current by player.current.collectAsStateWithLifecycle()
         val queue by player.queue.collectAsStateWithLifecycle()
         val route = nav.currentBackStackEntryAsState().value?.destination?.route
+        val calm by repository.prefs.calm.collectAsStateWithLifecycle()
+        val grayscale by repository.prefs.grayscale.collectAsStateWithLifecycle()
+        val statsVersion by repository.stats.changes.collectAsStateWithLifecycle()
+        val todaySeconds = remember(statsVersion) { repository.stats.day(java.time.LocalDate.now()).seconds }
         var saving by remember { mutableStateOf<VideoItem?>(null) }
         var storage by remember { mutableStateOf("") }
         val snackbar = remember { androidx.compose.material3.SnackbarHostState() }
@@ -147,8 +154,10 @@ class MainActivity : ComponentActivity() {
         val actions = VideoActions(
             play = { item ->
                 // Plays within the list you're looking at: the rest of it becomes Up next.
-                val context = when (route) {
-                    "downloads" -> all.filter { it.isPlayable }.sortedFor(sort)
+                // A video that isn't downloaded streams on its own.
+                val context = when {
+                    !item.isPlayable -> listOf(item)
+                    route == "downloads" -> all.filter { it.isPlayable }.sortedFor(sort)
                     else -> feed.filter { it.isPlayable }
                 }
                 play(context, item)
@@ -183,7 +192,13 @@ class MainActivity : ComponentActivity() {
         )
         val watching = route == "watch"
 
-        Column(Modifier.fillMaxSize()) {
+        val gray = if (grayscale) Modifier.graphicsLayer {
+            renderEffect = android.graphics.RenderEffect.createColorFilterEffect(
+                android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix().apply { setSaturation(0f) })
+            ).asComposeRenderEffect()
+        } else Modifier
+        androidx.compose.runtime.CompositionLocalProvider(dev.stow.android.ui.LocalCalm provides calm) {
+        Column(Modifier.fillMaxSize().then(gray)) {
             Box(Modifier.weight(1f)) {
                 androidx.compose.material3.SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).zIndex(1f)) { data ->
                     androidx.compose.material3.Snackbar(data, containerColor = androidx.compose.ui.graphics.Color(0xFF323232),
@@ -191,7 +206,8 @@ class MainActivity : ComponentActivity() {
                 }
                 NavHost(nav, startDestination = "home") {
                     composable("home") {
-                        HomeScreen(feed, channels, actions, onSearch = { nav.navigate("search") }, onSettings = { nav.navigate("settings") })
+                        HomeScreen(feed, channels, actions, todaySeconds = todaySeconds, onReport = { nav.navigate("report") },
+                                   onSearch = { nav.navigate("search") }, onSettings = { nav.navigate("settings") })
                     }
                     composable("subscriptions") {
                         SubscriptionsScreen(feed, channels, actions, onAllChannels = { nav.navigate("channels") },
@@ -243,7 +259,15 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                     composable("search") { SearchScreen(feed, actions, onBack = { nav.popBackStack() }) }
-                    composable("settings") { SettingsScreen(repository, wifiOnly, onBack = { nav.popBackStack() }) }
+                    composable("settings") {
+                        SettingsScreen(repository, wifiOnly, onReport = { nav.navigate("report") }, onBack = { nav.popBackStack() })
+                    }
+                    composable("report") {
+                        val week = remember(statsVersion) { repository.stats.week() }
+                        val lastWeek = remember(statsVersion) { repository.stats.week(java.time.LocalDate.now().minusDays(7)) }
+                        ReportScreen(week, lastWeek, channels, dev.stow.android.ui.skippedChannels(channels, itemsById.values),
+                                     onAutoDownloadOff = { setAutoDownload(it, false) }, onBack = { nav.popBackStack() })
+                    }
                     composable("watch") {
                         val item = current?.let { itemsById[it] }
                         val index = queue.indexOf(current)
@@ -267,6 +291,7 @@ class MainActivity : ComponentActivity() {
                 if (playing != null) MiniPlayer(player, playing, onOpen = { nav.navigate("watch") { launchSingleTop = true } })
                 BottomBar(tabs, route, nav)
             }
+        }
         }
 
         saving?.let { item ->

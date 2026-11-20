@@ -12,6 +12,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import dev.stow.android.data.Repository
 import dev.stow.android.data.VideoItem
+import dev.stow.android.sync.YtDlp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -45,6 +46,15 @@ class PlayerConnection(private val context: Context, private val repository: Rep
 
     private val markedWatched = mutableSetOf<String>()
 
+    /** The video whose stream is being looked up (a few seconds), if any. */
+    private val _resolving = MutableStateFlow<String?>(null)
+    val resolving: StateFlow<String?> = _resolving.asStateFlow()
+
+    /** Why the last stream couldn't start; cleared by the next play. */
+    private val _error = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error.asStateFlow()
+    private var lastTick = 0L
+
     init {
         val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
         val future = MediaController.Builder(context, token).buildAsync()
@@ -75,9 +85,15 @@ class PlayerConnection(private val context: Context, private val repository: Rep
         }
     }
 
-    /** Plays `items` (the downloaded ones) from `start`, resuming where you left off. */
+    /**
+     * Plays `items` (the downloaded ones) from `start`, resuming where you left off. A video
+     * that isn't downloaded streams on its own.
+     */
     fun play(items: List<VideoItem>, start: VideoItem) {
         val controller = _controller.value ?: return
+        _error.value = null
+        if (!start.isPlayable) return stream(start)
+        _resolving.value = null
         val playable = items.filter { it.isPlayable }.ifEmpty { listOf(start) }
         val index = playable.indexOfFirst { it.id == start.id }.coerceAtLeast(0)
         if (_current.value == start.id && _queue.value == playable.map { it.id }) {
@@ -92,6 +108,43 @@ class PlayerConnection(private val context: Context, private val repository: Rep
         controller.play()
         _queue.value = playable.map { it.id }
         _current.value = start.id
+    }
+
+    /** Looks the stream up with yt-dlp, then plays video and audio straight from YouTube. */
+    private fun stream(item: VideoItem) {
+        val controller = _controller.value ?: return
+        if (_current.value == item.id && controller.currentMediaItem?.mediaId == item.id) {
+            controller.play()
+            return
+        }
+        savePosition()
+        controller.stop()
+        controller.clearMediaItems()
+        _current.value = item.id
+        _queue.value = listOf(item.id)
+        _resolving.value = item.id
+        scope.launch {
+            val cookies = if (item.video.isMembersOnly) repository.cookiesFile() else null
+            try {
+                val stream = YtDlp.stream(context, item.video, cookies)
+                if (_resolving.value != item.id) return@launch
+                val media = MediaItem.Builder()
+                    .setMediaId(item.id)
+                    .setUri(stream.videoUrl)
+                    .setMediaMetadata(metadata(item))
+                    .setRequestMetadata(MediaItem.RequestMetadata.Builder()
+                        .setExtras(StreamSourceFactory.extras(stream.audioUrl, stream.headers)).build())
+                    .build()
+                controller.setMediaItem(media, item.local?.positionMs ?: 0)
+                controller.prepare()
+                controller.play()
+            } catch (e: Exception) {
+                if (_resolving.value == item.id) _error.value = "Couldn't stream this video. ${e.message.orEmpty()}".trim()
+            } finally {
+                cookies?.delete()
+                if (_resolving.value == item.id) _resolving.value = null
+            }
+        }
     }
 
     fun togglePlay() {
@@ -109,6 +162,8 @@ class PlayerConnection(private val context: Context, private val repository: Rep
     /** Stops playback and closes the mini-player. */
     fun stop() {
         savePosition()
+        _resolving.value = null
+        _error.value = null
         _controller.value?.run {
             stop()
             clearMediaItems()
@@ -120,11 +175,13 @@ class PlayerConnection(private val context: Context, private val repository: Rep
     private fun mediaItem(item: VideoItem): MediaItem = MediaItem.Builder()
         .setMediaId(item.id)
         .setUri(Uri.fromFile(File(item.local?.filePath ?: "")))
-        .setMediaMetadata(MediaMetadata.Builder()
-            .setTitle(item.video.title)
-            .setArtist(item.video.channelTitle)
-            .setArtworkUri(item.video.thumbnailUrl?.let(Uri::parse))
-            .build())
+        .setMediaMetadata(metadata(item))
+        .build()
+
+    private fun metadata(item: VideoItem) = MediaMetadata.Builder()
+        .setTitle(item.video.title)
+        .setArtist(item.video.channelTitle)
+        .setArtworkUri(item.video.thumbnailUrl?.let(Uri::parse))
         .build()
 
     private fun savePosition() {
@@ -133,9 +190,19 @@ class PlayerConnection(private val context: Context, private val repository: Rep
         repository.savePosition(id, controller.currentPosition, controller.duration.coerceAtLeast(0))
     }
 
+    /** Wall-clock time actually spent watching, per channel, for the weekly report. */
+    private fun countWatchTime(controller: MediaController, id: String) {
+        val now = System.currentTimeMillis()
+        val elapsed = if (lastTick == 0L) 0L else (now - lastTick).coerceAtMost(5_000)
+        lastTick = now
+        if (!controller.isPlaying || elapsed <= 0) return
+        repository.item(id)?.video?.channelId?.takeIf { it.isNotEmpty() }?.let { repository.stats.addSeconds(it, elapsed / 1000) }
+    }
+
     private fun track() {
         val controller = _controller.value ?: return
         val id = controller.currentMediaItem?.mediaId ?: return
+        countWatchTime(controller, id)
         val duration = controller.duration
         if (duration <= 0) return
         if (controller.isPlaying) savePosition()

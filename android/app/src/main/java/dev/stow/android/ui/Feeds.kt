@@ -94,21 +94,26 @@ fun Refreshable(content: @Composable () -> Unit) {
     PullToRefreshBox(isRefreshing = refreshing, onRefresh = { refreshing = true }, modifier = Modifier.fillMaxSize()) { content() }
 }
 
-private enum class HomeFilter(val label: String) { ALL("All"), DOWNLOADED("Downloaded"), UNWATCHED("Unwatched") }
+private enum class HomeFilter(val label: String) { ALL("All"), DOWNLOADED("Downloaded") }
 
-/** Everything new from your channels, newest first, like YouTube's Home. */
+/**
+ * What's new from your channels, newest first, then a clear end: "You're all caught up".
+ * Watched videos stay folded away below it unless you ask for them.
+ */
 @Composable
-fun HomeScreen(feed: List<VideoItem>, channels: List<Channel>, actions: VideoActions, onSearch: () -> Unit, onSettings: () -> Unit) {
+fun HomeScreen(
+    feed: List<VideoItem>, channels: List<Channel>, actions: VideoActions, todaySeconds: Long,
+    onReport: () -> Unit, onSearch: () -> Unit, onSettings: () -> Unit,
+) {
     var filter by rememberSaveable { mutableStateOf(HomeFilter.ALL) }
     var channelId by rememberSaveable { mutableStateOf<String?>(null) }
+    var showWatched by rememberSaveable { mutableStateOf(false) }
     val avatars = channels.associate { it.id to it.avatarUrl }
-    val shown = feed.filter { item ->
-        (channelId == null || item.video.channelId == channelId) && when (filter) {
-            HomeFilter.ALL -> true
-            HomeFilter.DOWNLOADED -> item.isPlayable
-            HomeFilter.UNWATCHED -> !item.watched
-        }
+    val matching = feed.filter { item ->
+        (channelId == null || item.video.channelId == channelId) && (filter == HomeFilter.ALL || item.isPlayable)
     }
+    val fresh = matching.filter { !it.watched }
+    val watched = matching.filter { it.watched }
     Column(Modifier.fillMaxSize()) {
         LogoTopBar(onSearch, onSettings)
         ChipRow {
@@ -121,8 +126,34 @@ fun HomeScreen(feed: List<VideoItem>, channels: List<Channel>, actions: VideoAct
         }
         Refreshable {
             LazyColumn(Modifier.fillMaxSize()) {
-                if (shown.isEmpty()) item { EmptyState("Nothing here yet. Videos from your channels show up after the Mac's next check.") }
-                items(shown, key = { it.id }) { VideoCard(it, avatars[it.video.channelId], actions) }
+                items(fresh, key = { it.id }) { VideoCard(it, avatars[it.video.channelId], actions) }
+                item(key = "caught-up") {
+                    CaughtUp(todaySeconds, watched.size, showWatched, onToggle = { showWatched = !showWatched }, onReport = onReport)
+                }
+                if (showWatched) items(watched, key = { "w-" + it.id }) { VideoCard(it, avatars[it.video.channelId], actions) }
+            }
+        }
+    }
+}
+
+/** The end of Home, instead of an endless feed. */
+@Composable
+private fun CaughtUp(todaySeconds: Long, watchedCount: Int, showingWatched: Boolean, onToggle: () -> Unit, onReport: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.size(56.dp).clip(CircleShape).background(Stow.colors.chip), contentAlignment = Alignment.Center) {
+            Icon(Icons.Filled.Check, contentDescription = null, tint = Stow.colors.text, modifier = Modifier.size(30.dp))
+        }
+        Spacer(Modifier.height(12.dp))
+        Text("You're all caught up", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Stow.colors.text)
+        Spacer(Modifier.height(4.dp))
+        Text("That's everything new from your channels.", fontSize = 14.sp, color = Stow.colors.secondaryText, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(4.dp))
+        Text("Watched today: ${Format.minutes(todaySeconds)}", fontSize = 13.sp, color = Stow.colors.secondaryText,
+             modifier = Modifier.clickable(onClick = onReport).padding(4.dp))
+        if (watchedCount > 0) {
+            Spacer(Modifier.height(8.dp))
+            TextButton(onClick = onToggle) {
+                Text(if (showingWatched) "Hide watched videos" else "Show watched videos ($watchedCount)", color = Color3D())
             }
         }
     }

@@ -9,9 +9,18 @@ object Format {
     fun count(n: Int, noun: String): String = "$n ${if (n == 1) noun else noun + "s"}"
 
     /** "Channel · 3 days ago" (· "Members only"). */
-    fun meta(item: VideoItem): String =
-        listOf(item.video.channelTitle, ago(item.video.publishedAt), if (item.video.isMembersOnly) "Members only" else "")
+    fun meta(item: VideoItem, withDuration: Boolean = false): String =
+        listOf(item.video.channelTitle, ago(item.video.publishedAt),
+               if (withDuration && item.durationMs > 0) duration(item.durationMs) else "",
+               if (item.video.isMembersOnly) "Members only" else "")
             .filter { it.isNotEmpty() }.joinToString(" · ")
+
+    /** "1 h 5 min", "42 min", "0 min". */
+    fun minutes(seconds: Long): String {
+        if (seconds in 1..59) return "<1 min"
+        val minutes = seconds / 60
+        return if (minutes >= 60) "${minutes / 60} h ${minutes % 60} min" else "$minutes min"
+    }
 
     fun duration(ms: Long): String {
         val total = ms / 1000
