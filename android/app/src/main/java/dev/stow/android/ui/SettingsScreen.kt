@@ -1,24 +1,28 @@
 package dev.stow.android.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.outlined.DeleteSweep
+import androidx.compose.material.icons.outlined.LinkOff
+import androidx.compose.material.icons.outlined.SdStorage
+import androidx.compose.material.icons.outlined.SystemUpdateAlt
+import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -26,9 +30,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.stow.android.data.DownloadState
 import dev.stow.android.data.Repository
 import dev.stow.android.sync.YtDlp
@@ -36,7 +44,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-@OptIn(ExperimentalMaterial3Api::class)
+/** Downloads, the downloader and the pairing, in YouTube's plain settings style. */
 @Composable
 fun SettingsScreen(repository: Repository, wifiOnly: Boolean, onBack: () -> Unit) {
     val context = LocalContext.current
@@ -54,51 +62,32 @@ fun SettingsScreen(repository: Repository, wifiOnly: Boolean, onBack: () -> Unit
         }
     }
 
-    Scaffold(topBar = {
-        TopAppBar(
-            title = { Text("Settings") },
-            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
-        )
-    }) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())) {
-            Header("Downloads")
-            ListItem(
-                headlineContent = { Text("Download on Wi-Fi only") },
-                supportingContent = { Text(if (wifiOnly) "Waits for Wi-Fi" else "Also uses mobile data") },
-                trailingContent = { Switch(checked = wifiOnly, onCheckedChange = repository::setWifiOnly) },
-            )
-            ListItem(
-                headlineContent = { Text("Storage used") },
-                supportingContent = { Text(storage?.let(Format::bytes) ?: "…") },
-            )
-            ListItem(
-                headlineContent = { Text("Delete watched downloads") },
-                supportingContent = { Text("Frees space; they stay in the list as deleted") },
-                modifier = Modifier.padding(0.dp),
-                trailingContent = { TextButton(onClick = { confirmDeleteWatched = true }) { Text("Delete") } },
-            )
-            HorizontalDivider()
-            Header("Downloader")
-            ListItem(
-                headlineContent = { Text("yt-dlp") },
-                supportingContent = { Text(if (updating) "Updating…" else ytdlp ?: "…") },
-                trailingContent = {
-                    TextButton(enabled = !updating, onClick = {
-                        updating = true
-                        scope.launch {
-                            YtDlp.updateIfDue(context, repository.prefs, force = true)
-                            updating = false
-                        }
-                    }) { Text("Update") }
-                },
-            )
-            HorizontalDivider()
-            Header("Mac")
-            ListItem(
-                headlineContent = { Text("Paired") },
-                supportingContent = { Text("Firebase project ${repository.prefs.pairedProject ?: "–"}") },
-                trailingContent = { TextButton(onClick = { confirmUnpair = true }) { Text("Unpair") } },
-            )
+    Column(Modifier.fillMaxSize()) {
+        BackTopBar("Settings", onBack)
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+            Group("Downloads")
+            SettingRow(Icons.Outlined.Wifi, "Download on Wi-Fi only", if (wifiOnly) "Waits for Wi-Fi" else "Also uses mobile data",
+                       onClick = { repository.setWifiOnly(!wifiOnly) }) {
+                Switch(checked = wifiOnly, onCheckedChange = repository::setWifiOnly)
+            }
+            SettingRow(Icons.Outlined.SdStorage, "Storage used", storage?.let(Format::bytes) ?: "…")
+            SettingRow(Icons.Outlined.DeleteSweep, "Delete watched downloads", "Frees space; videos stay in your lists",
+                       onClick = { confirmDeleteWatched = true })
+            HorizontalDivider(color = Stow.colors.divider)
+            Group("Downloader")
+            SettingRow(Icons.Outlined.SystemUpdateAlt, "Update yt-dlp",
+                       if (updating) "Updating…" else "Version ${ytdlp ?: "…"} · checks daily by itself",
+                       onClick = if (updating) null else ({
+                           updating = true
+                           scope.launch {
+                               YtDlp.updateIfDue(context, repository.prefs, force = true)
+                               updating = false
+                           }
+                       }))
+            HorizontalDivider(color = Stow.colors.divider)
+            Group("Mac")
+            SettingRow(Icons.Outlined.LinkOff, "Unpair this phone", "Paired with Firebase project ${repository.prefs.pairedProject ?: "–"}",
+                       onClick = { confirmUnpair = true })
         }
     }
 
@@ -130,11 +119,22 @@ fun SettingsScreen(repository: Repository, wifiOnly: Boolean, onBack: () -> Unit
 }
 
 @Composable
-private fun Header(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 4.dp),
-    )
+private fun Group(text: String) {
+    Text(text, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Stow.colors.secondaryText,
+         modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 4.dp))
+}
+
+@Composable
+private fun SettingRow(icon: ImageVector, title: String, subtitle: String, onClick: (() -> Unit)? = null,
+                       trailing: (@Composable () -> Unit)? = null) {
+    Row(Modifier.fillMaxWidth().then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, contentDescription = null, tint = Stow.colors.text, modifier = Modifier.size(24.dp))
+        Spacer(Modifier.width(20.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, fontSize = 16.sp, color = Stow.colors.text)
+            Text(subtitle, fontSize = 13.sp, color = Stow.colors.secondaryText)
+        }
+        trailing?.invoke()
+    }
 }

@@ -67,7 +67,9 @@ import dev.stow.android.ui.StowTheme
 import dev.stow.android.ui.SubscriptionsScreen
 import dev.stow.android.ui.VideoActions
 import dev.stow.android.ui.sortedFor
+import androidx.compose.ui.zIndex
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
@@ -123,6 +125,14 @@ class MainActivity : ComponentActivity() {
         val route = nav.currentBackStackEntryAsState().value?.destination?.route
         var saving by remember { mutableStateOf<VideoItem?>(null) }
         var storage by remember { mutableStateOf("") }
+        val snackbar = remember { androidx.compose.material3.SnackbarHostState() }
+        val scope = androidx.compose.runtime.rememberCoroutineScope()
+        fun notify(message: String) {
+            scope.launch {
+                snackbar.currentSnackbarData?.dismiss()
+                snackbar.showSnackbar(message, duration = androidx.compose.material3.SnackbarDuration.Short)
+            }
+        }
 
         val all = itemsById.values.toList()
         val feed = all.sortedByDescending { it.video.publishedAt?.time ?: it.sent?.sentAt?.time ?: 0 }
@@ -143,12 +153,28 @@ class MainActivity : ComponentActivity() {
                 }
                 play(context, item)
             },
-            download = repository::download,
-            delete = { item -> if (item.id == current) player.stop(); repository.deleteDownload(item.id) },
-            setWatched = { item, watched -> repository.setWatched(item.id, watched) },
+            download = { item ->
+                repository.download(item)
+                notify(if (item.state == dev.stow.android.data.DownloadState.FAILED) "Retrying download" else "Downloading")
+            },
+            delete = { item ->
+                if (item.id == current) player.stop()
+                repository.deleteDownload(item.id)
+                notify(if (item.isPlayable) "Deleted from downloads" else "Download canceled")
+            },
+            setWatched = { item, watched ->
+                repository.setWatched(item.id, watched)
+                notify(if (watched) "Marked as watched" else "Marked as unwatched")
+            },
             saveToPlaylist = { saving = it },
             openChannel = { id -> nav.navigate("channel/$id") },
+            notify = ::notify,
         )
+        fun setAutoDownload(channelId: String, on: Boolean) {
+            repository.setAutoDownload(channelId, on)
+            val name = channels.firstOrNull { it.id == channelId }?.title ?: "this channel"
+            notify(if (on) "New uploads from $name will download automatically" else "Auto-download off for $name")
+        }
 
         val tabs = listOf(
             Tab("home", "Home", Icons.Filled.Home, Icons.Outlined.Home),
@@ -159,6 +185,10 @@ class MainActivity : ComponentActivity() {
 
         Column(Modifier.fillMaxSize()) {
             Box(Modifier.weight(1f)) {
+                androidx.compose.material3.SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).zIndex(1f)) { data ->
+                    androidx.compose.material3.Snackbar(data, containerColor = androidx.compose.ui.graphics.Color(0xFF323232),
+                        contentColor = androidx.compose.ui.graphics.Color.White, shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                }
                 NavHost(nav, startDestination = "home") {
                     composable("home") {
                         HomeScreen(feed, channels, actions, onSearch = { nav.navigate("search") }, onSettings = { nav.navigate("settings") })
@@ -173,19 +203,19 @@ class MainActivity : ComponentActivity() {
                             sort = sort, groupByChannel = group, storageText = storage, actions = actions,
                             onSort = repository.prefs::setDownloadSort, onGroup = repository.prefs::setGroupByChannel,
                             onOpenPlaylist = { nav.navigate("playlist/$it") },
-                            onNewPlaylist = { repository.createPlaylist(it) },
+                            onNewPlaylist = { repository.createPlaylist(it); notify("Created “$it”") },
                             onSearch = { nav.navigate("search") }, onSettings = { nav.navigate("settings") },
                         )
                     }
                     composable("channels") {
                         ChannelsScreen(channels, onOpen = { nav.navigate("channel/$it") },
-                                       onAutoDownload = repository::setAutoDownload, onBack = { nav.popBackStack() })
+                                       onAutoDownload = ::setAutoDownload, onBack = { nav.popBackStack() })
                     }
                     composable("channel/{id}") { entry ->
                         val id = entry.arguments?.getString("id")
                         val channel = channels.firstOrNull { it.id == id }
                         val videos = channel?.recent?.mapNotNull { itemsById[it.video.id] }.orEmpty()
-                        ChannelScreen(channel, videos, actions, onAutoDownload = { on -> id?.let { repository.setAutoDownload(it, on) } },
+                        ChannelScreen(channel, videos, actions, onAutoDownload = { on -> id?.let { setAutoDownload(it, on) } },
                                       onBack = { nav.popBackStack() })
                     }
                     composable("playlist/{id}") { entry ->
@@ -195,7 +225,9 @@ class MainActivity : ComponentActivity() {
                             playlist = playlist, videos = videos,
                             actions = actions.copy(
                                 play = { item -> play(videos, item) },
-                                removeFromPlaylist = { item -> playlist?.let { repository.playlistStore.remove(it.id, item.id) } },
+                                removeFromPlaylist = { item ->
+                                    playlist?.let { repository.playlistStore.remove(it.id, item.id); notify("Removed from ${it.name}") }
+                                },
                                 move = { item, by -> playlist?.let { repository.playlistStore.move(it.id, item.id, by) } },
                             ),
                             onPlayAll = { shuffle ->
@@ -203,7 +235,10 @@ class MainActivity : ComponentActivity() {
                                 list.firstOrNull()?.let { play(list, it) }
                             },
                             onRename = { name -> playlist?.let { repository.playlistStore.rename(it.id, name) } },
-                            onDelete = { playlist?.let { repository.playlistStore.delete(it.id) }; nav.popBackStack() },
+                            onDelete = {
+                                playlist?.let { repository.playlistStore.delete(it.id); notify("Deleted “${it.name}”") }
+                                nav.popBackStack()
+                            },
                             onBack = { nav.popBackStack() },
                         )
                     }
@@ -221,6 +256,7 @@ class MainActivity : ComponentActivity() {
                                 player.play(queue.mapNotNull { itemsById[it] }, next)
                             }),
                             onCollapse = { nav.popBackStack() },
+                            onAutoDownload = ::setAutoDownload,
                         )
                         LaunchedEffect(current) { if (current == null) nav.popBackStack() }
                     }
@@ -238,8 +274,9 @@ class MainActivity : ComponentActivity() {
                 item = itemsById[item.id] ?: item, playlists = playlists,
                 onToggle = { playlist, add ->
                     if (add) repository.addToPlaylist(playlist.id, item) else repository.playlistStore.remove(playlist.id, item.id)
+                    notify(if (add) "Saved to ${playlist.name}" else "Removed from ${playlist.name}")
                 },
-                onCreate = { name -> repository.createPlaylist(name, item) },
+                onCreate = { name -> repository.createPlaylist(name, item); notify("Saved to $name") },
                 onDismiss = { saving = null },
             )
         }

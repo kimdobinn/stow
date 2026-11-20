@@ -12,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -43,6 +44,7 @@ import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.outlined.Delete
@@ -104,6 +106,7 @@ fun PlayerScreen(
     channel: Channel?,
     actions: VideoActions,
     onCollapse: () -> Unit,
+    onAutoDownload: (String, Boolean) -> Unit,
 ) {
     val context = LocalContext.current
     val activity = context as? Activity
@@ -138,8 +141,18 @@ fun PlayerScreen(
     val player = controller
     val queue = connection.queue.collectAsStateCompat().value
     val index = queue.indexOf(current?.id)
+    var dragDown by remember { mutableFloatStateOf(0f) }
     val video: @Composable (Modifier) -> Unit = { modifier ->
-        Box(modifier.background(Color.Black)) {
+        Box(modifier.background(Color.Black)
+            // Swipe the video down to shrink it into the mini-player, like YouTube.
+            .then(if (landscape) Modifier else Modifier.pointerInput(Unit) {
+                detectVerticalDragGestures(
+                    onDragEnd = { if (dragDown > 120.dp.toPx()) onCollapse(); dragDown = 0f },
+                    onDragCancel = { dragDown = 0f },
+                    onVerticalDrag = { _, amount -> dragDown = (dragDown + amount).coerceAtLeast(0f) },
+                )
+            })
+            .offset { IntOffset(0, (dragDown * 0.5f).roundToInt()) }) {
             AndroidView(
                 factory = { ctx ->
                     PlayerView(ctx).apply {
@@ -179,17 +192,29 @@ fun PlayerScreen(
                     Column(Modifier.padding(horizontal = 12.dp, vertical = 12.dp)) {
                         Text(current.video.title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Stow.colors.text, lineHeight = 24.sp)
                         Spacer(Modifier.height(4.dp))
-                        Text(listOf(Format.ago(current.video.publishedAt), if (current.video.isMembersOnly) "Members only" else "")
+                        Text(listOf(Format.ago(current.video.publishedAt),
+                                    current.durationMs.takeIf { it > 0 }?.let(Format::duration) ?: "",
+                                    if (current.video.isMembersOnly) "Members only" else "")
                                  .filter { it.isNotEmpty() }.joinToString(" · "),
                              fontSize = 12.sp, color = Stow.colors.secondaryText)
                     }
                     Row(Modifier.fillMaxWidth().clickable { actions.openChannel(current.video.channelId) }
                             .padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        ChannelAvatar(channel?.avatarUrl, 36.dp)
+                        ChannelAvatar(channel?.avatarUrl, 36.dp, name = current.video.channelTitle)
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(current.video.channelTitle, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Stow.colors.text, maxLines = 1)
-                            if (channel?.autoDownload == true) Text("Auto-downloading", fontSize = 12.sp, color = Stow.colors.secondaryText)
+                            channel?.let {
+                                Text(Format.count(it.recent.size, "recent video"), fontSize = 12.sp, color = Stow.colors.secondaryText)
+                            }
+                        }
+                        // Where YouTube puts Subscribe.
+                        if (channel != null) {
+                            if (channel.autoDownload) {
+                                PillButton("Auto-downloading", Icons.Filled.Check, onClick = { onAutoDownload(channel.id, false) })
+                            } else {
+                                PillButton("Auto-download", null, onClick = { onAutoDownload(channel.id, true) }, filled = true)
+                            }
                         }
                     }
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp),
@@ -264,7 +289,10 @@ private fun PlayerControls(
     var buffered by remember { mutableLongStateOf(0L) }
     var playing by remember { mutableStateOf(player.isPlaying) }
     var scrubbing by remember { mutableStateOf<Float?>(null) }
-    var skip by remember { mutableStateOf<Pair<Boolean, Long>?>(null) } // (forward?, at time)
+    // A run of double-taps on one side: which side, how many seconds, when the last one was.
+    var skip by remember { mutableStateOf<Triple<Boolean, Int, Long>?>(null) }
+    var buffering by remember { mutableStateOf(false) }
+    var ended by remember { mutableStateOf(false) }
     var lastTouch by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
     LaunchedEffect(player) {
@@ -273,8 +301,11 @@ private fun PlayerControls(
             duration = player.duration.coerceAtLeast(0)
             buffered = player.bufferedPosition
             playing = player.isPlaying || (player.playWhenReady && player.playbackState == Player.STATE_BUFFERING)
+            buffering = player.playWhenReady && player.playbackState == Player.STATE_BUFFERING
+            ended = player.playbackState == Player.STATE_ENDED
+            if (ended) visible = true
             if (visible && playing && scrubbing == null && System.currentTimeMillis() - lastTouch > 3_000) visible = false
-            skip?.let { if (System.currentTimeMillis() - it.second > 700) skip = null }
+            skip?.let { if (System.currentTimeMillis() - it.third > 800) skip = null }
             delay(200)
         }
     }
@@ -285,17 +316,29 @@ private fun PlayerControls(
             onDoubleTap = { offset ->
                 val forward = offset.x > size.width / 2
                 player.seekTo((player.currentPosition + if (forward) 10_000 else -10_000).coerceIn(0, player.duration.coerceAtLeast(0)))
-                skip = forward to System.currentTimeMillis()
-                lastTouch = System.currentTimeMillis()
+                val now = System.currentTimeMillis()
+                val previous = skip?.takeIf { it.first == forward && now - it.third < 800 }
+                skip = Triple(forward, (previous?.second ?: 0) + 10, now)
+                lastTouch = now
             },
         )
     }) {
         val width = constraints.maxWidth.toFloat()
-        skip?.let { (forward, _) ->
-            Box(Modifier.fillMaxHeight().width(maxWidth / 2.6f).align(if (forward) Alignment.CenterEnd else Alignment.CenterStart)
-                    .background(Color.White.copy(alpha = 0.12f), CircleShape), contentAlignment = Alignment.Center) {
-                Text(if (forward) "+10 seconds" else "−10 seconds", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        skip?.let { (forward, seconds, _) ->
+            // YouTube's half-moon on the tapped side, with arrows and the running total.
+            val shape = if (forward) androidx.compose.foundation.shape.RoundedCornerShape(topStartPercent = 50, bottomStartPercent = 50)
+                        else androidx.compose.foundation.shape.RoundedCornerShape(topEndPercent = 50, bottomEndPercent = 50)
+            Box(Modifier.fillMaxHeight().width(maxWidth / 2.4f).align(if (forward) Alignment.CenterEnd else Alignment.CenterStart)
+                    .clip(shape).background(Color.White.copy(alpha = 0.16f)), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(if (forward) "▶▶▶" else "◀◀◀", color = Color.White, fontSize = 12.sp, letterSpacing = (-2).sp)
+                    Spacer(Modifier.height(4.dp))
+                    Text("$seconds seconds", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                }
             }
+        }
+        if (buffering) {
+            androidx.compose.material3.CircularProgressIndicator(Modifier.align(Alignment.Center).size(44.dp), color = Color.White, strokeWidth = 3.dp)
         }
         AnimatedVisibility(visible, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.fillMaxSize()) {
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f))) {
@@ -307,7 +350,8 @@ private fun PlayerControls(
                 Row(Modifier.align(Alignment.Center), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(36.dp)) {
                     RoundControl(Icons.Filled.SkipPrevious, "Previous", 44.dp, enabled = hasPrevious) { player.seekToPreviousMediaItem(); lastTouch = System.currentTimeMillis() }
-                    RoundControl(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (playing) "Pause" else "Play", 60.dp) {
+                    RoundControl(when { ended -> Icons.Filled.Replay; playing -> Icons.Filled.Pause; else -> Icons.Filled.PlayArrow },
+                                 when { ended -> "Replay"; playing -> "Pause"; else -> "Play" }, 60.dp) {
                         if (player.isPlaying) player.pause() else {
                             if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
                             player.play()

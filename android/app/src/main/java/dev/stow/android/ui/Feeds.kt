@@ -149,7 +149,7 @@ fun SubscriptionsScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         val ring = if (selected == channel.id) Modifier.border(2.dp, Stow.colors.text, CircleShape).padding(3.dp) else Modifier.padding(3.dp)
-                        Box(ring) { ChannelAvatar(channel.avatarUrl, 52.dp) }
+                        Box(ring) { ChannelAvatar(channel.avatarUrl, 52.dp, name = channel.title) }
                         Spacer(Modifier.height(4.dp))
                         Text(channel.title, fontSize = 11.sp, color = if (selected == null || selected == channel.id) Stow.colors.text else Stow.colors.secondaryText,
                              maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
@@ -190,7 +190,7 @@ fun ChannelsScreen(channels: List<Channel>, onOpen: (String) -> Unit, onAutoDown
             items(channels, key = { it.id }) { channel ->
                 Row(Modifier.fillMaxWidth().clickable { onOpen(channel.id) }.padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically) {
-                    ChannelAvatar(channel.avatarUrl, 48.dp)
+                    ChannelAvatar(channel.avatarUrl, 48.dp, name = channel.title)
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
                         Text(channel.title, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Stow.colors.text, maxLines = 1)
@@ -218,7 +218,7 @@ fun ChannelScreen(channel: Channel?, videos: List<VideoItem>, actions: VideoActi
         LazyColumn(Modifier.fillMaxSize()) {
             item {
                 Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    ChannelAvatar(channel.avatarUrl, 72.dp)
+                    ChannelAvatar(channel.avatarUrl, 72.dp, name = channel.title)
                     Spacer(Modifier.width(16.dp))
                     Column {
                         Text(channel.title, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Stow.colors.text)

@@ -148,7 +148,7 @@ fun DownloadsScreen(
                         item(key = "g-$channelId") {
                             Row(Modifier.fillMaxWidth().clickable { actions.openChannel(channelId) }.padding(horizontal = 12.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically) {
-                                ChannelAvatar(avatars[channelId], 28.dp)
+                                ChannelAvatar(avatars[channelId], 28.dp, name = list.first().video.channelTitle)
                                 Spacer(Modifier.width(10.dp))
                                 Text(list.first().video.channelTitle, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Stow.colors.text,
                                      modifier = Modifier.weight(1f))

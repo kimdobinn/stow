@@ -67,20 +67,23 @@ fun StowLogo() {
     }
 }
 
+/** The channel's picture, or its initial on a colored circle until (or unless) one loads. */
 @Composable
-fun ChannelAvatar(url: String?, size: Dp, modifier: Modifier = Modifier) {
-    AsyncImage(
-        model = url,
-        contentDescription = null,
-        contentScale = ContentScale.Crop,
-        modifier = modifier.size(size).clip(CircleShape).background(Stow.colors.chip),
-    )
+fun ChannelAvatar(url: String?, size: Dp, modifier: Modifier = Modifier, name: String = "") {
+    val hue = (name.hashCode() and 0x7fffffff) % 360
+    Box(modifier.size(size).clip(CircleShape).background(Color.hsl(hue.toFloat(), 0.45f, 0.5f)), contentAlignment = Alignment.Center) {
+        Text(name.firstOrNull()?.uppercase() ?: "", color = Color.White, fontWeight = FontWeight.Medium,
+             fontSize = (size.value * 0.42f).sp)
+        if (url != null) {
+            AsyncImage(model = url, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        }
+    }
 }
 
 /** A thumbnail with the duration badge and the red "how far you got" bar, like YouTube's. */
 @Composable
 fun Thumbnail(item: VideoItem, modifier: Modifier = Modifier, rounded: Dp = 0.dp, overlay: @Composable BoxScope.() -> Unit = {}) {
-    Box(modifier.aspectRatio(16f / 9f).clip(RoundedCornerShape(rounded)).background(Color.Black)) {
+    Box(modifier.aspectRatio(16f / 9f).clip(RoundedCornerShape(rounded)).background(Stow.colors.chip)) {
         AsyncImage(model = item.video.thumbnailUrl, contentDescription = null, contentScale = ContentScale.Crop,
                    modifier = Modifier.fillMaxSize())
         if (item.durationMs > 0) {
@@ -147,6 +150,8 @@ data class VideoActions(
     val setWatched: (VideoItem, Boolean) -> Unit,
     val saveToPlaylist: (VideoItem) -> Unit,
     val openChannel: (String) -> Unit,
+    /** A short confirmation at the bottom of the screen, like YouTube's snackbars. */
+    val notify: (String) -> Unit = {},
     /** Shown when the list is a playlist. */
     val removeFromPlaylist: ((VideoItem) -> Unit)? = null,
     val move: ((VideoItem, Int) -> Unit)? = null,
@@ -187,7 +192,8 @@ fun VideoMenu(item: VideoItem, actions: VideoActions, expanded: Boolean, onDismi
 fun VideoActions.open(item: VideoItem) {
     when {
         item.isPlayable -> play(item)
-        item.isDownloading -> {}
+        item.state == DownloadState.DOWNLOADING -> notify("Still downloading · ${item.local?.progress ?: 0}%")
+        item.isDownloading -> notify("Waiting to download")
         else -> download(item)
     }
 }
@@ -197,14 +203,18 @@ fun VideoActions.open(item: VideoItem) {
 @Composable
 fun VideoCard(item: VideoItem, avatarUrl: String?, actions: VideoActions) {
     var menu by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth().combinedClickable(onClick = { actions.open(item) }, onLongClick = { menu = true })) {
+    val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+    Column(Modifier.fillMaxWidth().combinedClickable(onClick = { actions.open(item) }, onLongClick = {
+        haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+        menu = true
+    })) {
         Thumbnail(item, Modifier.fillMaxWidth()) {
             if (!item.isPlayable && !item.isDownloading) {
                 DownloadBadge(Modifier.align(Alignment.TopEnd).padding(8.dp))
             }
         }
         Row(Modifier.padding(start = 12.dp, top = 12.dp, bottom = 20.dp)) {
-            ChannelAvatar(avatarUrl, 36.dp, Modifier.clickable { actions.openChannel(item.video.channelId) })
+            ChannelAvatar(avatarUrl, 36.dp, Modifier.clickable { actions.openChannel(item.video.channelId) }, name = item.video.channelTitle)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(item.video.title, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 2,
@@ -229,8 +239,12 @@ fun VideoCard(item: VideoItem, avatarUrl: String?, actions: VideoActions) {
 @Composable
 fun VideoRow(item: VideoItem, actions: VideoActions, showChannel: Boolean = true, trailing: (@Composable () -> Unit)? = null) {
     var menu by remember { mutableStateOf(false) }
+    val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
     Row(
-        Modifier.fillMaxWidth().combinedClickable(onClick = { actions.open(item) }, onLongClick = { menu = true })
+        Modifier.fillMaxWidth().combinedClickable(onClick = { actions.open(item) }, onLongClick = {
+            haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+            menu = true
+        })
             .padding(start = 12.dp, top = 6.dp, bottom = 6.dp),
     ) {
         Thumbnail(item, Modifier.width(168.dp), rounded = 8.dp)
