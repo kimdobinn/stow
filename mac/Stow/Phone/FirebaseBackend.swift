@@ -115,4 +115,8 @@ struct FirebaseBackend: PhoneBackend {
     func push(_ data: [String: String], to token: String) async throws -> Bool {
         try await fcm.send(data: data, to: token) == .sent
     }
+
+    #if DEBUG
+    var firestoreForTests: FirestoreREST { firestore }
+    #endif
 }
