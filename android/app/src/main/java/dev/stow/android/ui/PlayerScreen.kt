@@ -92,11 +92,14 @@ import dev.stow.android.player.PlayerConnection
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
+/** Each double-tap skips this far; taps in a row add up (5, 10, 15 s). */
+private const val SKIP_MS = 5_000L
+
 private val Speeds = listOf(0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f)
 
 /**
  * The watch page: the video with YouTube-style controls (tap for controls, double-tap a side
- * to skip 10 s, red seek bar, full screen), the title and actions, then Up next.
+ * to skip 5 s, red seek bar, full screen), the title and actions, then Up next.
  */
 @Composable
 fun PlayerScreen(
@@ -272,7 +275,7 @@ fun PlayerScreen(
     }
 }
 
-/** Tap to show/hide; double-tap left/right to skip 10 s; drag the red bar to seek. */
+/** Tap to show/hide; double-tap left/right to skip 5 s (more taps add up); drag the red bar to seek. */
 @Composable
 private fun PlayerControls(
     player: Player,
@@ -315,10 +318,10 @@ private fun PlayerControls(
             onTap = { visible = !visible; lastTouch = System.currentTimeMillis() },
             onDoubleTap = { offset ->
                 val forward = offset.x > size.width / 2
-                player.seekTo((player.currentPosition + if (forward) 10_000 else -10_000).coerceIn(0, player.duration.coerceAtLeast(0)))
+                player.seekTo((player.currentPosition + if (forward) SKIP_MS else -SKIP_MS).coerceIn(0, player.duration.coerceAtLeast(0)))
                 val now = System.currentTimeMillis()
                 val previous = skip?.takeIf { it.first == forward && now - it.third < 800 }
-                skip = Triple(forward, (previous?.second ?: 0) + 10, now)
+                skip = Triple(forward, (previous?.second ?: 0) + (SKIP_MS / 1000).toInt(), now)
                 lastTouch = now
             },
         )
