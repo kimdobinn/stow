@@ -13,6 +13,11 @@ enum PhoneHost {
                                  title: "Me at the zoo", publishedAt: Date(timeIntervalSince1970: 1_114_000_000),
                                  thumbnailURL: URL(string: "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg"),
                                  isMembersOnly: false, liveStatus: .none)
+    /// A second recent video the phone can pick from the channel page (3:33).
+    static let channelVideo = Video(id: "dQw4w9WgXcQ", channelId: "UC4QobU6STFB0P71PMvOGN5A", channelTitle: "jawed",
+                                    title: "Never Gonna Give You Up", publishedAt: Date(timeIntervalSince1970: 1_256_000_000),
+                                    thumbnailURL: URL(string: "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg"),
+                                    isMembersOnly: false, liveStatus: .none)
 
     static func run() async -> Bool {
         let args = CommandLine.arguments
@@ -36,6 +41,12 @@ enum PhoneHost {
             return false
         }
         do {
+            // Its cleanup deletes shared data, so never run it next to a real paired phone.
+            let paired = try await backend.members()
+            guard paired.isEmpty else {
+                print("REFUSED \(paired.map(\.name).joined(separator: ", ")) is paired; unpair first")
+                return false
+            }
             try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
             let key = try PairingKey.loadOrCreate(at: scratch.appending(path: "pairing-key"))
             let invite = PairingInvite.make(projectId: backend.projectId, key: key)
@@ -60,15 +71,23 @@ enum PhoneHost {
                 try await backend.saveCookies(sealed: key.seal(cookies))
                 print("COOKIES shared")
             }
-            try await backend.saveChannels([Channel(info: ChannelInfo(id: testVideo.channelId, title: "jawed"))], removing: [])
+            let channel = Channel(info: ChannelInfo(id: testVideo.channelId, title: "jawed",
+                                                    avatarURL: URL(string: "https://yt3.ggpht.com/ytc/AIdro_kvhH1J-xbeJwsHEP5IoWqv-wn9yRRj8mjRf6FT6lb-dCQ=s88-c-k-c0x00ffffff-no-rj")))
+            try await backend.saveChannels([PhoneChannelFeed(channel: channel, recent: [Self.channelVideo, testVideo], watched: [])],
+                                           removing: [])
             try await backend.sendVideos([testVideo], reason: .manual, watched: [])
             if let token = member.fcmToken {
                 let delivered = try await backend.push(["type": "videos", "ids": testVideo.id], to: token)
                 print("PUSH \(delivered ? "sent" : "token invalid")")
             }
             var cursor: String?
+            var channelCursor: String?
             while Date.now < deadline {
                 try await Task.sleep(for: .seconds(2))
+                for change in try await backend.channelChanges(after: channelCursor) {
+                    channelCursor = change.updatedAt
+                    if change.updatedBy == "phone" { print("CHANNEL \(change.id) auto-download=\(change.phone.map(String.init) ?? "-")") }
+                }
                 for change in try await backend.videoChanges(after: cursor) {
                     cursor = change.updatedAt
                     guard change.updatedBy == "phone" else { continue }
@@ -84,6 +103,7 @@ enum PhoneHost {
             try await backend.saveChannels([], removing: [testVideo.channelId])
             if let member { try await backend.removeMember(id: member.id) }
             try await backend.cleanUpTest(videoId: testVideo.id)
+            try await backend.cleanUpTest(videoId: Self.channelVideo.id)
             print("CLEANED")
         } catch {
             print("cleanup failed: \(error.logDescription)")

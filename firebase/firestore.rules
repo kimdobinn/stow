@@ -30,14 +30,22 @@ service cloud.firestore {
                     && onlyChanges(['fcmToken', 'name', 'lastSeenAt']);
     }
 
-    // Written by the Mac.
+    // Written by the Mac; the phone may switch a channel's auto-download on or off.
     match /channels/{channelId} {
       allow read: if isMember();
+      allow update: if isMember() && onlyChanges(['phone', 'updatedAt', 'updatedBy'])
+                    && request.resource.data.updatedBy == 'phone';
     }
 
-    // Videos the Mac sent to the phone. The phone reports downloads and watched status.
+    // Videos sent to the phone, by the Mac or by the phone itself (picked from a channel page).
+    // The phone reports downloads and watched status.
     match /videos/{videoId} {
       allow read: if isMember();
+      allow create: if isMember()
+                    && request.resource.data.sentBy == 'phone' && request.resource.data.updatedBy == 'phone'
+                    && request.resource.data.keys().hasOnly(['channelId', 'channelTitle', 'title', 'publishedAt',
+                         'thumbnailURL', 'isMembersOnly', 'liveStatus', 'sentAt', 'sentBy', 'watched',
+                         'updatedAt', 'updatedBy']);
       allow update: if isMember()
                     && onlyChanges(['watched', 'watchedAt', 'watchedBy', 'phone', 'updatedAt', 'updatedBy']);
     }

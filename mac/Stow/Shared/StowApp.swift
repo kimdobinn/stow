@@ -24,6 +24,14 @@ enum StowMain {
             Task { exit(await Snapshot.run() ? 0 : 1) }
             NSApplication.shared.run()
         }
+        if CommandLine.arguments.contains(PhoneRestore.argument) {
+            Task { exit(await PhoneRestore.run() ? 0 : 1) }
+            dispatchMain()
+        }
+        if CommandLine.arguments.contains(DeployRules.argument) {
+            Task { exit(await DeployRules.run() ? 0 : 1) }
+            dispatchMain()
+        }
         if CommandLine.arguments.contains(PhonePush.argument) {
             Task { exit(await PhonePush.run() ? 0 : 1) }
             dispatchMain()

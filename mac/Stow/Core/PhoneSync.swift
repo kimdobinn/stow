@@ -9,6 +9,10 @@ protocol PhoneSyncHost: AnyObject {
     /// Changes and saves state.json's phone section.
     func updatePhoneState(_ change: (inout PhoneSyncState) -> Void)
     var phoneChannels: [Channel] { get }
+    /// A channel's recent videos (Inbox ones too), newest first.
+    func phoneRecentVideos(channelId: String) -> [Video]
+    /// The phone switched a channel's auto-download on or off.
+    func applyPhoneChannelSetting(phone: Bool, channelId: String)
     /// A video from the Inbox or Recent.
     func phoneVideo(id: String) -> Video?
     func isWatched(videoId: String) -> Bool
@@ -31,6 +35,8 @@ final class PhoneSync {
     static let sentLimit = 1000
     /// More ids than this don't fit an FCM message comfortably; the phone then reads them all.
     static let pushIdLimit = 50
+    /// Recent videos per channel shown on the phone's channel pages.
+    static let recentPerChannel = 30
 
     enum Connection: Equatable {
         /// No key file yet (Firebase setup not done).
@@ -274,6 +280,8 @@ final class PhoneSync {
             host.updatePhoneState { $0.members = members }
             connection = .connected
             if !members.isEmpty {
+                // The phone's switches first, so writing the channels doesn't undo them.
+                try await pullChannelChanges(backend, host)
                 try await syncChannels(backend, host)
                 try await syncCookies(backend, host)
                 try await pullChanges(backend, host)
@@ -291,15 +299,35 @@ final class PhoneSync {
         }
     }
 
+    private func pullChannelChanges(_ backend: any PhoneBackend, _ host: any PhoneSyncHost) async throws {
+        let changes = try await backend.channelChanges(after: host.phoneState.channelCursor)
+        guard let last = changes.last else { return }
+        for change in changes where change.updatedBy == "phone" {
+            guard let phone = change.phone, let channel = host.phoneChannels.first(where: { $0.id == change.id }),
+                  channel.phone != phone else { continue }
+            host.applyPhoneChannelSetting(phone: phone, channelId: change.id)
+        }
+        host.updatePhoneState { $0.channelCursor = last.updatedAt }
+    }
+
     private func syncChannels(_ backend: any PhoneBackend, _ host: any PhoneSyncHost) async throws {
         let channels = host.phoneChannels
+        let feeds = channels.map { channel in
+            let recent = Array(host.phoneRecentVideos(channelId: channel.id).prefix(Self.recentPerChannel))
+            return PhoneChannelFeed(channel: channel, recent: recent,
+                                    watched: Set(recent.map(\.id).filter { host.isWatched(videoId: $0) }))
+        }
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
-        let hash = Self.fingerprint((try? encoder.encode(channels)) ?? Data())
+        let fingerprint = feeds.map { feed in
+            [String(data: (try? encoder.encode(feed.channel)) ?? Data(), encoding: .utf8) ?? ""]
+                + feed.recent.map { "\($0.id)|\($0.title)|\(feed.watched.contains($0.id))" }
+        }
+        let hash = Self.fingerprint((try? encoder.encode(fingerprint)) ?? Data())
         guard hash != host.phoneState.channelsHash else { return }
         let ids = channels.map(\.id)
         let removed = host.phoneState.syncedChannelIds.filter { !ids.contains($0) }
-        try await backend.saveChannels(channels, removing: removed)
+        try await backend.saveChannels(feeds, removing: removed)
         host.updatePhoneState {
             $0.channelsHash = hash
             $0.syncedChannelIds = ids

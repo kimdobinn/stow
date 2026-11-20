@@ -48,18 +48,39 @@ struct FirebaseBackend: PhoneBackend {
         try await firestore.commit([.delete(path: "members/\(id)")])
     }
 
-    func saveChannels(_ channels: [Channel], removing: [String]) async throws {
-        let writes = channels.enumerated().map { order, channel in
-            FirestoreWrite.merge(path: "channels/\(channel.id)", fields: [
+    func saveChannels(_ feeds: [PhoneChannelFeed], removing: [String]) async throws {
+        let writes = feeds.enumerated().map { order, feed in
+            let channel = feed.channel
+            return FirestoreWrite.merge(path: "channels/\(channel.id)", fields: [
                 "title": .string(channel.title),
                 "handle": .optional(channel.handle),
                 "avatarURL": .optional(channel.avatarURL?.absoluteString),
                 "phone": .bool(channel.phone),
                 "morning": .bool(channel.morning),
                 "order": .int(order),
+                "recent": .array(feed.recent.map { video in
+                    .map([
+                        "id": .string(video.id),
+                        "title": .string(video.title),
+                        "publishedAt": video.publishedAt.map(FirestoreValue.date) ?? .null,
+                        "thumbnailURL": .optional(video.thumbnailURL?.absoluteString),
+                        "isMembersOnly": .bool(video.isMembersOnly),
+                        "liveStatus": .string(video.liveStatus.rawValue),
+                        "watched": .bool(feed.watched.contains(video.id)),
+                    ])
+                }),
+                "updatedBy": .string("mac"),
             ])
         } + removing.map { FirestoreWrite.delete(path: "channels/\($0)") }
         try await firestore.commit(writes)
+    }
+
+    func channelChanges(after cursor: String?) async throws -> [PhoneChannelChange] {
+        try await firestore.changed("channels", after: cursor).compactMap { document in
+            guard let updatedAt = document.fields["updatedAt"]?.timestamp else { return nil }
+            return PhoneChannelChange(id: document.id, phone: document.fields["phone"]?.bool,
+                                      updatedBy: document.fields["updatedBy"]?.string, updatedAt: updatedAt)
+        }
     }
 
     func sendVideos(_ videos: [Video], reason: PhoneSendReason, watched: Set<String>) async throws {

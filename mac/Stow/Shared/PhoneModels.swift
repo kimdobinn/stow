@@ -6,9 +6,12 @@ import Foundation
 // Firestore layout (see firebase/firestore.rules):
 //   members/{uid}     paired phones: name, fcmToken, pairedAt (the Mac adds and removes them)
 //   pairing/{code}    a phone's pairing request: uid, name, fcmToken (the Mac deletes it)
-//   channels/{id}     the Mac's channels: title, handle, avatarURL, phone, morning, order
+//   channels/{id}     the Mac's channels: title, handle, avatarURL, phone, morning, order,
+//                     recent [{id, title, publishedAt, thumbnailURL, isMembersOnly, liveStatus,
+//                     watched}]; the phone may switch `phone` (auto-download) on or off
 //   videos/{id}       videos sent to the phone: metadata, sentAt, sentBy, watched…,
-//                     phone {state, error} (written by the phone), updatedAt, updatedBy
+//                     phone {state, error} (written by the phone), updatedAt, updatedBy.
+//                     The phone creates one itself (sentBy "phone") to download a video.
 //   secrets/cookies   the YouTube cookies, sealed with the pairing key
 
 /// A paired phone.
@@ -47,6 +50,24 @@ enum PhoneSendReason: String, Codable, Sendable {
     case manual
 }
 
+/// What the phone sees of a channel: its settings and newest videos.
+struct PhoneChannelFeed: Equatable, Sendable {
+    var channel: Channel
+    /// Newest first.
+    var recent: [Video]
+    /// Which of `recent` are watched.
+    var watched: Set<String>
+}
+
+/// A channels/{id} document changed since the last poll.
+struct PhoneChannelChange: Equatable, Sendable {
+    var id: String
+    /// Auto-download (the channel's `phone` setting).
+    var phone: Bool?
+    var updatedBy: String?
+    var updatedAt: String
+}
+
 /// A videos/{id} document changed since the last poll.
 struct PhoneVideoChange: Equatable, Sendable {
     var id: String
@@ -68,8 +89,10 @@ protocol PhoneBackend: Sendable {
     func addMember(_ member: PhoneMember) async throws
     func removeMember(id: String) async throws
 
-    /// Writes every channel (with its position) and deletes `removing`.
-    func saveChannels(_ channels: [Channel], removing: [String]) async throws
+    /// Writes every channel (with its position and recent videos) and deletes `removing`.
+    func saveChannels(_ feeds: [PhoneChannelFeed], removing: [String]) async throws
+    /// channels/{id} changes after `cursor` (all when nil), oldest first.
+    func channelChanges(after cursor: String?) async throws -> [PhoneChannelChange]
     /// Creates or refreshes videos/{id} for each video, marking it requested now.
     func sendVideos(_ videos: [Video], reason: PhoneSendReason, watched: Set<String>) async throws
     /// Sets `watched` on existing videos/{id} documents.
@@ -106,6 +129,8 @@ struct PhoneSyncState: Codable, Equatable, Sendable {
     var pending: [PhonePendingSend] = []
     /// The newest videos/{id} change already read (Firestore server time).
     var cursor: String?
+    /// The newest channels/{id} change already read.
+    var channelCursor: String?
     /// Fingerprint of the channels last written, and their ids.
     var channelsHash: String?
     var syncedChannelIds: [String] = []
@@ -118,7 +143,7 @@ struct PhoneSyncState: Codable, Equatable, Sendable {
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case members, sent, pending, cursor, channelsHash, syncedChannelIds, cookiesHash, lastSync
+        case members, sent, pending, cursor, channelCursor, channelsHash, syncedChannelIds, cookiesHash, lastSync
     }
 
     init(from decoder: Decoder) throws {
@@ -127,6 +152,7 @@ struct PhoneSyncState: Codable, Equatable, Sendable {
         sent = (try? c.decodeIfPresent([String: PhoneSentVideo].self, forKey: .sent)) ?? [:]
         pending = (try? c.decodeIfPresent([PhonePendingSend].self, forKey: .pending)) ?? []
         cursor = try? c.decodeIfPresent(String.self, forKey: .cursor)
+        channelCursor = try? c.decodeIfPresent(String.self, forKey: .channelCursor)
         channelsHash = try? c.decodeIfPresent(String.self, forKey: .channelsHash)
         syncedChannelIds = (try? c.decodeIfPresent([String].self, forKey: .syncedChannelIds)) ?? []
         cookiesHash = try? c.decodeIfPresent(String.self, forKey: .cookiesHash)

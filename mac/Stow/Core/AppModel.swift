@@ -742,6 +742,16 @@ extension AppModel: PhoneSyncHost {
 
     var phoneChannels: [Channel] { channels }
 
+    func phoneRecentVideos(channelId: String) -> [Video] {
+        (state.recentVideos[channelId] ?? []).sorted { ($0.publishedAt ?? .distantPast) > ($1.publishedAt ?? .distantPast) }
+    }
+
+    func applyPhoneChannelSetting(phone: Bool, channelId: String) {
+        guard let channel = channels.first(where: { $0.id == channelId }) else { return }
+        record(.info, "\(channel.title): auto-download to the phone turned \(phone ? "on" : "off") on the phone.")
+        setPhone(phone, channelId: channelId)
+    }
+
     func phoneVideo(id: String) -> Video? {
         state.inbox.first { $0.id == id }?.video
             ?? state.recentVideos.values.lazy.compactMap { $0.first { $0.id == id } }.first

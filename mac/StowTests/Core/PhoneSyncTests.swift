@@ -34,12 +34,24 @@ final class FakePhoneBackend: PhoneBackend {
     func addMember(_ member: PhoneMember) async throws { members.withLock { $0.append(member) } }
     func removeMember(id: String) async throws { members.withLock { $0.removeAll { $0.id == id } } }
 
-    func saveChannels(_ saved: [Channel], removing: [String]) async throws {
+    let feeds = Mutex<[String: PhoneChannelFeed]>([:])
+    let channelChangeList = Mutex<[PhoneChannelChange]>([])
+
+    func saveChannels(_ saved: [PhoneChannelFeed], removing: [String]) async throws {
         try check()
         channels.withLock { channels in
-            for channel in saved { channels[channel.id] = channel }
+            for feed in saved { channels[feed.channel.id] = feed.channel }
             for id in removing { channels[id] = nil }
         }
+        feeds.withLock { feeds in
+            for feed in saved { feeds[feed.channel.id] = feed }
+            for id in removing { feeds[id] = nil }
+        }
+    }
+
+    func channelChanges(after cursor: String?) async throws -> [PhoneChannelChange] {
+        try check()
+        return channelChangeList.withLock { all in all.filter { cursor == nil || $0.updatedAt > cursor! } }
     }
 
     func sendVideos(_ sent: [Video], reason: PhoneSendReason, watched: Set<String>) async throws {
@@ -196,6 +208,33 @@ struct PhoneSyncTests {
         await model.phone.removeMember(id: "uid9")
         #expect(!model.phone.isPaired)
         #expect(backend.members.withLock { $0.isEmpty })
+    }
+
+    @Test func channelFeedsCarryRecentVideosAndWatched() async throws {
+        let model = try await makeModel()
+        let feed = try #require(backend.feeds.withLock { $0[channelId] })
+        #expect(feed.recent.map(\.id) == ["v1", "v2", "v3", "v4", "v5"])
+        #expect(feed.watched.isEmpty)
+        model.setWatched(true, videoId: "v4")
+        await model.phone.sync()
+        #expect(backend.feeds.withLock { $0[channelId]?.watched } == ["v4"])
+    }
+
+    @Test func phoneSwitchesAutoDownload() async throws {
+        let model = try await makeModel()
+        #expect(model.channels.first?.phone == true)
+        backend.channelChangeList.withLock {
+            $0 = [PhoneChannelChange(id: channelId, phone: false, updatedBy: "phone", updatedAt: "2026-11-20T06:00:00.000001Z")]
+        }
+        await model.phone.sync()
+        #expect(model.channels.first?.phone == false)
+        #expect(backend.channels.withLock { $0[channelId]?.phone } == false)
+        // A change the Mac wrote itself is not applied again.
+        backend.channelChangeList.withLock {
+            $0 = [PhoneChannelChange(id: channelId, phone: true, updatedBy: "mac", updatedAt: "2026-11-20T06:00:01.000001Z")]
+        }
+        await model.phone.sync()
+        #expect(model.channels.first?.phone == false)
     }
 
     @Test func failuresAreReportedThenClear() async throws {

@@ -34,6 +34,12 @@ enum PhoneCheck {
         let http = FirebaseHTTP()
         let account = try ServiceAccount(json: Data(contentsOf: AppPaths.firebaseKeyFile))
         let projectId = account.projectId
+        // The check creates and deletes videos, channels and cookies; with a real phone paired
+        // that would wipe its library, so it only runs on a project without one.
+        let paired = try await FirebaseBackend(account: account).members()
+        guard paired.isEmpty else {
+            throw StowError.parse("\(paired.map(\.name).joined(separator: ", ")) is paired; the check would disturb it. Unpair first.")
+        }
 
         // The Android app's config, which also holds the Web API key the phone signs in with.
         let management = GoogleAuth(account: account, http: http, scopes: ["https://www.googleapis.com/auth/firebase.readonly"])
@@ -147,8 +153,11 @@ enum PhoneCheck {
         let channels = try await admin.list("channels").map { FirestoreWrite.delete(path: "channels/\($0.id)") }
         try await admin.commit(videos + channels + [.delete(path: "secrets/cookies"), .delete(path: "members/\(phone.uid)")])
         try await phone.delete()
-        let left = try await admin.list("videos").count + admin.list("channels").count + admin.list("members").count
-        expect(left == 0, "cleaned up the test documents and the test user")
+        var left: [String] = []
+        for collection in ["videos", "channels", "members", "pairing"] {
+            left += try await admin.list(collection).map { "\(collection)/\($0.id)" }
+        }
+        expect(left.isEmpty, "cleaned up the test documents and the test user\(left.isEmpty ? "" : " (left: \(left.joined(separator: ", ")))")")
     }
 
     private static func androidConfig(projectId: String, auth: GoogleAuth, http: FirebaseHTTP) async throws -> Data {
