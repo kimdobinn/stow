@@ -250,6 +250,7 @@ private struct ChannelChips: View {
 }
 
 private struct VideoCard: View {
+    @Environment(AppModel.self) private var model
     let video: Video
     let isWatched: Bool
     let onOpen: () -> Void
@@ -283,6 +284,10 @@ private struct VideoCard: View {
         .contextMenu {
             Button("Open on YouTube", action: onOpen)
             Button(isWatched ? "Mark as Unwatched" : "Mark as Watched", action: onToggleWatched)
+            Button(model.phone.isSent(videoId: video.id) ? "Send to Phone Again" : "Send to Phone") {
+                model.phone.send(videoId: video.id)
+            }
+            .disabled(!model.phone.isPaired)
             if let onDismiss {
                 Button("Move to Recent", action: onDismiss)
             }
@@ -311,6 +316,11 @@ private struct VideoCard: View {
             .overlay(alignment: .bottomLeading) {
                 if video.isMembersOnly {
                     MembersBadge().padding(8).padding(.bottom, isWatched ? 4 : 0)
+                }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if let status = PhoneBadge.Status(video: video.id, phone: model.phone) {
+                    PhoneBadge(status: status).padding(8).padding(.bottom, isWatched ? 4 : 0)
                 }
             }
             .overlay(alignment: .topLeading) {
@@ -348,6 +358,69 @@ private struct VideoCard: View {
     private var subtitle: String {
         guard let date = video.publishedAt else { return video.channelTitle }
         return "\(video.channelTitle) · \(date.formatted(.relative(presentation: .named)))"
+    }
+}
+
+/// Where a video sent to the phone is: on its way, downloading, on the phone, or failed.
+private struct PhoneBadge: View {
+    enum Status {
+        case sending, downloading, onPhone, failed(String?)
+
+        @MainActor
+        init?(video id: String, phone: PhoneSync) {
+            guard phone.isSent(videoId: id) else { return nil }
+            switch phone.download(videoId: id)?.state {
+            case nil, .queued: self = .sending
+            case .downloading: self = .downloading
+            case .downloaded: self = .onPhone
+            case .failed: self = .failed(phone.download(videoId: id)?.error)
+            case .deleted: return nil
+            }
+        }
+    }
+
+    let status: Status
+
+    var body: some View {
+        Label(title, systemImage: symbol)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(background, in: Capsule())
+            .help(help)
+    }
+
+    private var title: String {
+        switch status {
+        case .sending: "Sending"
+        case .downloading: "Downloading"
+        case .onPhone: "On phone"
+        case .failed: "Failed"
+        }
+    }
+
+    private var symbol: String {
+        switch status {
+        case .sending: "iphone.radiowaves.left.and.right"
+        case .downloading: "arrow.down.circle"
+        case .onPhone: "iphone"
+        case .failed: "exclamationmark.triangle.fill"
+        }
+    }
+
+    private var background: Color {
+        if case .failed = status { return .red.opacity(0.85) }
+        return .black.opacity(0.65)
+    }
+
+    private var help: String {
+        switch status {
+        case .sending: "Sent to the phone; it starts downloading when it's online."
+        case .downloading: "The phone is downloading this video."
+        case .onPhone: "Downloaded on the phone."
+        case .failed(let error): "The phone couldn't download it\(error.map { ": \($0)" } ?? ".")"
+        }
     }
 }
 

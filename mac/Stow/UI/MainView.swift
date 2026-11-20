@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The sections in the sidebar.
 enum SidebarItem: String, CaseIterable, Identifiable {
-    case inbox, channels, alarm, account, log
+    case inbox, channels, alarm, phone, account, log
 
     var id: Self { self }
 
@@ -11,6 +11,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
         case .inbox: "Inbox"
         case .channels: "Channels"
         case .alarm: "Alarm"
+        case .phone: "Phone"
         case .account: "Account"
         case .log: "Log"
         }
@@ -21,6 +22,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
         case .inbox: "tray.full"
         case .channels: "person.2"
         case .alarm: "alarm"
+        case .phone: "iphone"
         case .account: "person.crop.circle"
         case .log: "doc.text"
         }
@@ -59,6 +61,7 @@ struct MainView: View {
         case .inbox: InboxView()
         case .channels: ChannelsTab()
         case .alarm: AlarmTab()
+        case .phone: PhoneTab()
         case .account: AccountTab()
         case .log: LogTab()
         }

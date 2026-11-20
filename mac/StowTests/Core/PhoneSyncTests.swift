@@ -1,0 +1,288 @@
+import CryptoKit
+import Foundation
+import Security
+import Synchronization
+import Testing
+@testable import Stow
+
+/// Firestore in memory, as the Mac's service account sees it.
+final class FakePhoneBackend: PhoneBackend {
+    let projectId = "stow-test"
+    let members = Mutex<[PhoneMember]>([])
+    let pairingRequests = Mutex<[String: PairingRequest]>([:])
+    let channels = Mutex<[String: Channel]>([:])
+    let videos = Mutex<[String: [String: String]]>([:])
+    let cookies = Mutex<Data?>(nil)
+    let changes = Mutex<[PhoneVideoChange]>([])
+    let pushes = Mutex<[(token: String, data: [String: String])]>([])
+    let failure = Mutex<StowError?>(nil)
+
+    private func check() throws {
+        if let error = failure.withLock({ $0 }) { throw error }
+    }
+
+    func members() async throws -> [PhoneMember] {
+        try check()
+        return members.withLock { $0 }
+    }
+
+    func takePairingRequest(code: String) async throws -> PairingRequest? {
+        try check()
+        return pairingRequests.withLock { $0.removeValue(forKey: code) }
+    }
+
+    func addMember(_ member: PhoneMember) async throws { members.withLock { $0.append(member) } }
+    func removeMember(id: String) async throws { members.withLock { $0.removeAll { $0.id == id } } }
+
+    func saveChannels(_ saved: [Channel], removing: [String]) async throws {
+        try check()
+        channels.withLock { channels in
+            for channel in saved { channels[channel.id] = channel }
+            for id in removing { channels[id] = nil }
+        }
+    }
+
+    func sendVideos(_ sent: [Video], reason: PhoneSendReason, watched: Set<String>) async throws {
+        try check()
+        videos.withLock { videos in
+            for video in sent {
+                videos[video.id, default: [:]].merge(["sentBy": reason.rawValue, "watched": String(watched.contains(video.id))]) { $1 }
+            }
+        }
+    }
+
+    func setWatched(_ watched: [String: Bool]) async throws {
+        try check()
+        videos.withLock { videos in
+            for (id, value) in watched { videos[id, default: [:]]["watched"] = String(value) }
+        }
+    }
+
+    func videoChanges(after cursor: String?) async throws -> [PhoneVideoChange] {
+        try check()
+        return changes.withLock { all in all.filter { cursor == nil || $0.updatedAt > cursor! } }
+    }
+
+    func saveCookies(sealed: Data) async throws { cookies.withLock { $0 = sealed } }
+
+    func push(_ data: [String: String], to token: String) async throws -> Bool {
+        pushes.withLock { $0.append((token, data)) }
+        return token != "stale"
+    }
+}
+
+@MainActor
+struct PhoneSyncTests {
+    let youtube = FakeYouTube()
+    let account = FakeAccount()
+    let store = Store(directory: temporaryDirectory())
+    let backend = FakePhoneBackend()
+    let channelId = "UCphone"
+    let phone = PhoneMember(id: "uid1", name: "Galaxy S24+", fcmToken: "token1", pairedAt: nil)
+
+    /// A model with Firebase set up and one channel (v1, v2 in New; v3…v5 in Recent).
+    func makeModel(paired: Bool = true) async throws -> AppModel {
+        try FileManager.default.createDirectory(at: store.directory, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: store.directory.appending(path: "firebase-key.json"))
+        try Data("# cookies".utf8).write(to: store.directory.appending(path: "cookies.txt"))
+        if paired { backend.members.withLock { $0 = [phone] } }
+        youtube.channels.withLock { $0["@p"] = ChannelInfo(id: channelId, title: "P", handle: nil, avatarURL: nil) }
+        youtube.publicFeeds.withLock { $0[channelId] = (1...5).map { video("v\($0)", channel: channelId, minutesAgo: Double($0)) } }
+        account.state = .signedIn
+        let backend = backend
+        let model = AppModel(youtube: youtube, account: account, store: store, notifier: FakeNotifier(),
+                             cookiesFile: store.directory.appending(path: "cookies.txt"), alarmServices: .inert,
+                             phoneBackend: { _ in backend })
+        model.phone.debounce = .milliseconds(1)
+        model.phone.pairingPollInterval = .milliseconds(10)
+        model.load()
+        await model.check(.launch)
+        await model.phone.connect()
+        try await model.addChannel(input: "@p")
+        await model.phone.sync()
+        return model
+    }
+
+    @Test func connectsAndSharesChannelsAndSealedCookies() async throws {
+        let model = try await makeModel()
+        #expect(model.phone.connection == .connected)
+        #expect(model.phone.projectId == "stow-test")
+        #expect(backend.channels.withLock { $0[channelId]?.title } == "P")
+        let sealed = try #require(backend.cookies.withLock { $0 })
+        let key = try PairingKey.loadOrCreate(at: store.directory.appending(path: "pairing-key"))
+        #expect(try key.open(sealed) == Data("# cookies".utf8))
+
+        // Unchanged channels aren't written again; a removed one is deleted.
+        backend.channels.withLock { $0 = [:] }
+        await model.phone.sync()
+        #expect(backend.channels.withLock { $0.isEmpty })
+        backend.channels.withLock { $0 = [channelId: Channel(info: ChannelInfo(id: channelId, title: "P"))] }
+        model.removeChannel(id: channelId)
+        await model.phone.sync()
+        #expect(backend.channels.withLock { $0.isEmpty })
+    }
+
+    @Test func newVideosOfPhoneChannelsAreSentAndThePhoneWoken() async throws {
+        let model = try await makeModel()
+        // The new channel's first videos were found while a phone was paired, so they went too.
+        #expect(Set(backend.videos.withLock { $0.keys }) == ["v1", "v2"])
+        #expect(backend.pushes.withLock { $0.map(\.token) } == ["token1"])
+        #expect(backend.pushes.withLock { $0.first?.data["ids"] }.map { Set($0.split(separator: ",").map(String.init)) } == ["v1", "v2"])
+
+        youtube.publicFeeds.withLock { $0[channelId] = [video("v0", channel: channelId, minutesAgo: 0)] + $0[channelId]! }
+        await model.check(.manual)
+        await model.phone.sync()
+        #expect(backend.videos.withLock { $0["v0"]?["sentBy"] } == "auto")
+        #expect(model.phone.isSent(videoId: "v0"))
+
+        model.setPhone(false, channelId: channelId)
+        youtube.publicFeeds.withLock { $0[channelId] = [video("v9", channel: channelId, minutesAgo: -1)] + $0[channelId]! }
+        await model.check(.manual)
+        await model.phone.sync()
+        #expect(backend.videos.withLock { $0["v9"] } == nil)
+    }
+
+    @Test func sendToPhoneSendsAnyVideo() async throws {
+        let model = try await makeModel()
+        model.phone.send(videoId: "v4")
+        await model.phone.sync()
+        #expect(backend.videos.withLock { $0["v4"]?["sentBy"] } == "manual")
+        #expect(model.phoneState.pending.isEmpty)
+    }
+
+    @Test func nothingIsSentBeforePairing() async throws {
+        let model = try await makeModel(paired: false)
+        model.phone.send(videoId: "v4")
+        await model.phone.sync()
+        #expect(backend.videos.withLock { $0.isEmpty })
+        #expect(backend.channels.withLock { $0.isEmpty })
+    }
+
+    @Test func watchedSyncsBothWays() async throws {
+        let model = try await makeModel()
+        // Watched on the phone.
+        backend.changes.withLock { $0 = [PhoneVideoChange(id: "v1", watched: true, download: PhoneDownload(state: .downloaded),
+                                                          updatedBy: "phone", updatedAt: "2026-11-20T05:00:00.000001Z")] }
+        await model.phone.sync()
+        #expect(model.isWatched(videoId: "v1"))
+        #expect(!model.inbox.contains { $0.id == "v1" })
+        #expect(model.phone.download(videoId: "v1")?.state == .downloaded)
+        #expect(model.phoneState.cursor == "2026-11-20T05:00:00.000001Z")
+
+        // Watched here.
+        model.setWatched(true, videoId: "v2")
+        await model.phone.sync()
+        #expect(backend.videos.withLock { $0["v2"]?["watched"] } == "true")
+        // Unwatched here.
+        model.setWatched(false, videoId: "v1")
+        await model.phone.sync()
+        #expect(backend.videos.withLock { $0["v1"]?["watched"] } == "false")
+    }
+
+    @Test func pairingAddsThePhone() async throws {
+        let model = try await makeModel(paired: false)
+        model.phone.startPairing()
+        let invite = try #require(model.phone.pairing?.invite)
+        #expect(invite.url.absoluteString.hasPrefix("stow://pair?p=stow-test&c=\(invite.code)&k="))
+        #expect(invite.qrImage(size: 200) != nil)
+        backend.pairingRequests.withLock { $0[invite.code] = PairingRequest(uid: "uid9", name: "Pixel", fcmToken: "t9") }
+        for _ in 0..<200 where model.phone.pairing?.status == .waiting {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(model.phone.pairing?.status == .paired(name: "Pixel"))
+        #expect(model.phone.members.map(\.id) == ["uid9"])
+        #expect(backend.channels.withLock { $0[channelId] } != nil)
+
+        await model.phone.removeMember(id: "uid9")
+        #expect(!model.phone.isPaired)
+        #expect(backend.members.withLock { $0.isEmpty })
+    }
+
+    @Test func failuresAreReportedThenClear() async throws {
+        let model = try await makeModel()
+        backend.failure.withLock { $0 = .network("offline") }
+        await model.phone.sync()
+        #expect(model.phone.lastError != nil)
+        backend.failure.withLock { $0 = nil }
+        await model.phone.sync()
+        #expect(model.phone.lastError == nil)
+    }
+
+    @Test func notSetUpWithoutAKey() async throws {
+        let model = AppModel(youtube: youtube, account: account, store: store, notifier: FakeNotifier(),
+                             cookiesFile: store.directory.appending(path: "cookies.txt"))
+        await model.phone.connect()
+        #expect(model.phone.connection == .notSetUp)
+    }
+}
+
+struct FirebasePiecesTests {
+    @Test func firestoreValuesRoundTrip() throws {
+        let value = FirestoreValue.map(["a": .string("x"), "b": .int(3), "c": .bool(true), "d": .null,
+                                        "e": .array([.double(1.5), .timestamp("2026-11-20T05:00:00.123456Z")])])
+        let data = try JSONSerialization.data(withJSONObject: value.json)
+        #expect(FirestoreValue(json: try JSONSerialization.jsonObject(with: data)) == value)
+        #expect(FirestoreValue.timestamp("2026-11-20T05:00:00.123456Z").date != nil)
+    }
+
+    @Test func serviceAccountSignsAVerifiableJWT() throws {
+        let attributes: [CFString: Any] = [kSecAttrKeyType: kSecAttrKeyTypeRSA, kSecAttrKeySizeInBits: 2048]
+        let privateKey = try #require(SecKeyCreateRandomKey(attributes as CFDictionary, nil))
+        let pkcs1 = try #require(SecKeyCopyExternalRepresentation(privateKey, nil) as Data?)
+        let pem = "-----BEGIN PRIVATE KEY-----\n\(Self.pkcs8(pkcs1).base64EncodedString(options: .lineLength64Characters))\n-----END PRIVATE KEY-----\n"
+        let json: [String: Any] = ["type": "service_account", "project_id": "stow-test", "private_key_id": "k1",
+                                   "private_key": pem, "client_email": "sa@stow-test.iam.gserviceaccount.com",
+                                   "token_uri": "https://oauth2.googleapis.com/token"]
+        let account = try ServiceAccount(json: JSONSerialization.data(withJSONObject: json))
+        #expect(account.projectId == "stow-test")
+
+        let jwt = try account.assertion()
+        let parts = jwt.split(separator: ".").map(String.init)
+        #expect(parts.count == 3)
+        let signature = try #require(Data(base64URL: parts[2]))
+        let publicKey = try #require(SecKeyCopyPublicKey(privateKey))
+        #expect(SecKeyVerifySignature(publicKey, .rsaSignatureMessagePKCS1v15SHA256,
+                                      Data("\(parts[0]).\(parts[1])".utf8) as CFData, signature as CFData, nil))
+        let payload = try #require(Data(base64URL: parts[1]))
+        let claims = try #require(try JSONSerialization.jsonObject(with: payload) as? [String: Any])
+        #expect(claims["iss"] as? String == "sa@stow-test.iam.gserviceaccount.com")
+        #expect((claims["scope"] as? String)?.contains("datastore") == true)
+
+        #expect(throws: StowError.self) { try ServiceAccount(json: Data(#"{"hello": 1}"#.utf8)) }
+    }
+
+    @Test func pairingKeySealsAndPersists() throws {
+        let file = temporaryDirectory().appending(path: "pairing-key")
+        let key = try PairingKey.loadOrCreate(at: file)
+        let sealed = try key.seal(Data("secret".utf8))
+        #expect(try PairingKey.loadOrCreate(at: file).open(sealed) == Data("secret".utf8))
+        let permissions = try FileManager.default.attributesOfItem(atPath: file.path)[.posixPermissions] as? Int
+        #expect(permissions == 0o600)
+    }
+
+    /// PrivateKeyInfo { 0, rsaEncryption, OCTET STRING pkcs1 }.
+    static func pkcs8(_ pkcs1: Data) -> Data {
+        func element(_ tag: UInt8, _ content: Data) -> Data {
+            var length = Data()
+            if content.count < 0x80 {
+                length.append(UInt8(content.count))
+            } else {
+                var bytes = withUnsafeBytes(of: UInt32(content.count).bigEndian) { Data($0) }
+                while bytes.first == 0 { bytes.removeFirst() }
+                length.append(0x80 | UInt8(bytes.count))
+                length.append(bytes)
+            }
+            return Data([tag]) + length + content
+        }
+        let algorithm = Data([0x30, 0x0D, 0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01, 0x05, 0x00])
+        return element(0x30, Data([0x02, 0x01, 0x00]) + algorithm + element(0x04, pkcs1))
+    }
+}
+
+private extension Data {
+    init?(base64URL: String) {
+        var text = base64URL.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        text += String(repeating: "=", count: (4 - text.count % 4) % 4)
+        self.init(base64Encoded: text)
+    }
+}

@@ -1,0 +1,50 @@
+rules_version = '2';
+
+// Stow's sync data. The Mac app uses the project's service account, which these rules don't
+// apply to. A phone signs in anonymously and can only reach anything after the Mac paired it
+// (members/{its uid} exists).
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isMember() {
+      return signedIn() && exists(/databases/$(database)/documents/members/$(request.auth.uid));
+    }
+
+    function onlyChanges(fields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
+    }
+
+    // A phone asks to pair with the code from the Mac's QR code. It can only file a request for
+    // itself and can't read anyone's.
+    match /pairing/{code} {
+      allow create: if signedIn() && code.size() >= 32 && request.resource.data.uid == request.auth.uid;
+    }
+
+    // Paired phones. The Mac adds and removes them; a phone may refresh its own push token.
+    match /members/{uid} {
+      allow read: if isMember();
+      allow update: if signedIn() && request.auth.uid == uid
+                    && onlyChanges(['fcmToken', 'name', 'lastSeenAt']);
+    }
+
+    // Written by the Mac.
+    match /channels/{channelId} {
+      allow read: if isMember();
+    }
+
+    // Videos the Mac sent to the phone. The phone reports downloads and watched status.
+    match /videos/{videoId} {
+      allow read: if isMember();
+      allow update: if isMember()
+                    && onlyChanges(['watched', 'watchedAt', 'watchedBy', 'phone', 'updatedAt', 'updatedBy']);
+    }
+
+    // The YouTube sign-in, encrypted on the Mac with the key from the pairing QR code.
+    match /secrets/{doc} {
+      allow read: if isMember();
+    }
+  }
+}

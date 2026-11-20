@@ -207,6 +207,7 @@ struct AppState: Codable, Equatable, Sendable {
     /// fetch's entries above these are what was watched on YouTube in between.
     var youTubeHistory: [String]
     var lastWatchSync: Date?
+    var phone: PhoneSyncState
     var lastAlarmRun: AlarmRunRecord?
     /// The alarm time of the newest scheduled run (played or skipped), so a test run that
     /// replaces `lastAlarmRun` can't make that alarm fire again after a relaunch.
@@ -217,7 +218,7 @@ struct AppState: Codable, Equatable, Sendable {
     init(seenVideoIds: [String: [String]], checkedFeeds: [String: [FeedKind]] = [:], inbox: [InboxItem],
          recentVideos: [String: [Video]] = [:], lastCheck: CheckResult?, failedCheckStreak: Int = 0,
          alarmPlayedIds: [String] = [], watchedIds: [String] = [], pendingYouTubeWatched: [String] = [],
-         youTubeHistory: [String] = [], lastWatchSync: Date? = nil, lastAlarmRun: AlarmRunRecord? = nil,
+         youTubeHistory: [String] = [], lastWatchSync: Date? = nil, phone: PhoneSyncState = .empty, lastAlarmRun: AlarmRunRecord? = nil,
          lastScheduledAlarm: Date? = nil) {
         self.seenVideoIds = seenVideoIds
         self.checkedFeeds = checkedFeeds
@@ -230,13 +231,14 @@ struct AppState: Codable, Equatable, Sendable {
         self.pendingYouTubeWatched = pendingYouTubeWatched
         self.youTubeHistory = youTubeHistory
         self.lastWatchSync = lastWatchSync
+        self.phone = phone
         self.lastAlarmRun = lastAlarmRun
         self.lastScheduledAlarm = lastScheduledAlarm
     }
 
     private enum CodingKeys: String, CodingKey {
         case seenVideoIds, checkedFeeds, inbox, recentVideos, lastCheck, failedCheckStreak, alarmPlayedIds, watchedIds,
-             pendingYouTubeWatched, youTubeHistory, lastWatchSync, lastAlarmRun, lastScheduledAlarm
+             pendingYouTubeWatched, youTubeHistory, lastWatchSync, phone, lastAlarmRun, lastScheduledAlarm
     }
 
     init(from decoder: Decoder) throws {
@@ -252,6 +254,7 @@ struct AppState: Codable, Equatable, Sendable {
         pendingYouTubeWatched = try c.decodeIfPresent([String].self, forKey: .pendingYouTubeWatched) ?? []
         youTubeHistory = try c.decodeIfPresent([String].self, forKey: .youTubeHistory) ?? []
         lastWatchSync = try c.decodeIfPresent(Date.self, forKey: .lastWatchSync)
+        phone = (try? c.decodeIfPresent(PhoneSyncState.self, forKey: .phone)) ?? .empty
         // Written by a newer build with an outcome this one doesn't know: forget it, keep the rest.
         lastAlarmRun = try? c.decodeIfPresent(AlarmRunRecord.self, forKey: .lastAlarmRun)
         lastScheduledAlarm = (try? c.decodeIfPresent(Date.self, forKey: .lastScheduledAlarm))

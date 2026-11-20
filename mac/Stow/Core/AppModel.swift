@@ -50,12 +50,17 @@ final class AppModel {
     private var settings = AppSettings.default
     private var state = AppState.empty {
         didSet {
-            if state.watchedIds != oldValue.watchedIds { watchedSet = Set(state.watchedIds) }
+            if state.watchedIds != oldValue.watchedIds {
+                watchedSet = Set(state.watchedIds)
+                phone.localChange()
+            }
         }
     }
 
     /// The morning alarm (Core/Alarm). The UI uses it through AppModel+Alarm.swift.
     @ObservationIgnored let alarm: AlarmController
+    /// Sync with the paired phones (Core/PhoneSync). The UI uses it directly.
+    @ObservationIgnored let phone: PhoneSync
 
     @ObservationIgnored private let youtube: any YouTubeService
     @ObservationIgnored private let account: any AccountService
@@ -87,14 +92,19 @@ final class AppModel {
     }
 
     init(youtube: any YouTubeService, account: any AccountService, store: Store, notifier: any UserNotifying,
-         cookiesFile: URL, alarmServices: AlarmServices) {
+         cookiesFile: URL, alarmServices: AlarmServices,
+         phoneBackend: @escaping (URL) throws -> any PhoneBackend = { try FirebaseBackend(keyFile: $0) }) {
         self.youtube = youtube
         self.account = account
         self.store = store
         self.notifier = notifier
         self.cookiesFile = cookiesFile
         alarm = AlarmController(services: alarmServices)
+        phone = PhoneSync(keyFile: store.directory.appending(path: AppPaths.firebaseKeyFile.lastPathComponent),
+                          pairingKeyFile: store.directory.appending(path: AppPaths.pairingKeyFile.lastPathComponent),
+                          makeBackend: phoneBackend)
         alarm.host = self
+        phone.host = self
     }
 
     /// Called once at launch: loads JSON files, applies launch-at-login, requests
@@ -114,6 +124,7 @@ final class AppModel {
             await self?.syncWatched()
         }
         watchScheduler?.start()
+        phone.start()
         Task {
             await check(.launch)
             await syncWatched()
@@ -252,6 +263,7 @@ final class AppModel {
             .filter { ids.insert($0.id).inserted }
         let foundAt = Date.now
         state.inbox = Array((added.map { InboxItem(video: $0, foundAt: foundAt) } + state.inbox).prefix(Self.inboxLimit))
+        phone.newVideosFound(added)
         return added
     }
 
@@ -639,6 +651,7 @@ final class AppModel {
         }
         settingsStamp = store.modificationDate(of: store.settingsFile)
         alarm.settingsDidChange()
+        phone.localChange()
     }
 
     private func saveState() {
@@ -713,5 +726,37 @@ extension AppModel: AlarmHost {
     private static func prepending(_ ids: [String], to list: [String], limit: Int) -> [String] {
         var seen = Set<String>()
         return Array((ids + list).filter { seen.insert($0).inserted }.prefix(limit))
+    }
+}
+
+extension AppModel: PhoneSyncHost {
+    var phoneState: PhoneSyncState { state.phone }
+
+    func updatePhoneState(_ change: (inout PhoneSyncState) -> Void) {
+        var phone = state.phone
+        change(&phone)
+        guard phone != state.phone else { return }
+        state.phone = phone
+        saveState()
+    }
+
+    var phoneChannels: [Channel] { channels }
+
+    func phoneVideo(id: String) -> Video? {
+        state.inbox.first { $0.id == id }?.video
+            ?? state.recentVideos.values.lazy.compactMap { $0.first { $0.id == id } }.first
+    }
+
+    func applyPhoneWatched(_ watched: Bool, videoId: String) {
+        if let video = phoneVideo(id: videoId) {
+            record(.info, "\(video.channelTitle): \(watched ? "watched" : "marked unwatched") on the phone “\(video.title)” (\(video.id))")
+        }
+        setWatched(watched, videoId: videoId)
+    }
+
+    var phoneCookiesFile: URL? { signInState == .signedIn ? playbackCookiesFile : nil }
+
+    func logPhone(_ level: LogLevel, _ message: String) {
+        record(level, message)
     }
 }
