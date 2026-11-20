@@ -26,6 +26,18 @@ struct AccountTab: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
+            Section("Watched Videos") {
+                Toggle(isOn: Binding(
+                    get: { model.syncsWatchedWithYouTube },
+                    set: { model.setSyncWatchedWithYouTube($0) }
+                )) {
+                    Text("Sync with YouTube watch history")
+                    Text("Videos you watch on YouTube show as watched in Stow, and videos you mark watched in Stow are added to your YouTube history. Checked every 5 minutes.")
+                }
+                if model.syncsWatchedWithYouTube {
+                    WatchSyncStatus()
+                }
+            }
             Section("General") {
                 Toggle("Launch Stow at login", isOn: Binding(
                     get: { model.launchAtLogin },
@@ -63,6 +75,34 @@ struct AccountTab: View {
         Task {
             await action()
             isBusy = false
+        }
+    }
+}
+
+/// "Synced 2 min ago ✓", "Syncing…", or why it can't sync.
+private struct WatchSyncStatus: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        TimelineView(.everyMinute) { _ in
+            HStack(spacing: 6) {
+                if model.isSyncingWatched {
+                    ProgressView().controlSize(.small)
+                    Text("Syncing…")
+                } else if model.signInState != .signedIn {
+                    Text("Sign in to YouTube to sync.")
+                } else if let error = model.watchSyncError {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    Text(error).lineLimit(2).help(error)
+                } else if let date = model.lastWatchSync {
+                    Text("Synced \(date.formatted(.relative(presentation: .named, unitsStyle: .abbreviated)))")
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                } else {
+                    Text("Not synced yet")
+                }
+            }
+            .font(.callout)
+            .foregroundStyle(.secondary)
         }
     }
 }

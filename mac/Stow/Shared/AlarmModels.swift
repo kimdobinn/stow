@@ -174,9 +174,9 @@ struct SpeakerSettings: Codable, Equatable, Sendable {
 }
 
 enum FallbackRuleKind: String, Codable, CaseIterable, Sendable {
-    /// The newest video the alarm hasn't played, published within `withinDays`.
+    /// The newest video the alarm hasn't played and you haven't watched, published within `withinDays`.
     case mostRecentUnplayed
-    /// A random video the alarm hasn't played, published within `withinDays`.
+    /// A random video the alarm hasn't played and you haven't watched, published within `withinDays`.
     case randomUnplayed
     /// The newest video, even if the alarm already played it.
     case replayLatest

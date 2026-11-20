@@ -20,6 +20,20 @@ protocol YouTubeService: Sendable {
     /// made the run fail, `.notSignedIn` when `cookiesFile` is missing, `.network`,
     /// `.toolNotFound`, `.processFailed`, `.timedOut`.
     func fetchMembersVideos(channelId: String, cookiesFile: URL) async throws -> MembersFeed
+
+    /// The signed-in account's watch history (youtube.com/feed/history via yt-dlp), most
+    /// recently watched first, at most `limit` video ids. Throws like `fetchMembersVideos`.
+    func fetchWatchHistory(cookiesFile: URL, limit: Int) async throws -> WatchHistory
+
+    /// Adds the video to the account's watch history (yt-dlp --mark-watched). Throws
+    /// `.processFailed` when the video is unavailable, otherwise like `fetchMembersVideos`.
+    func markWatched(videoId: String, cookiesFile: URL) async throws
+}
+
+struct WatchHistory: Sendable {
+    /// Most recently watched first, no duplicates.
+    var videoIds: [String]
+    var cookiesRejected = false
 }
 
 struct MembersFeed: Sendable {

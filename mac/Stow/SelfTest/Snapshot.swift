@@ -21,6 +21,8 @@ enum Snapshot {
             try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
             let model = try makeModel(in: scratch)
             await model.signIn()
+            // Shows the watched look on a couple of Recent videos (temporary store only).
+            for video in model.recentVideos.prefix(2) { model.setWatched(true, videoId: video.id) }
             NSApplication.shared.setActivationPolicy(.prohibited)
 
             let screens: [Screen] = SidebarItem.allCases.map { item in

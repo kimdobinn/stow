@@ -75,7 +75,9 @@ struct InboxView: View {
             VStack(alignment: .leading, spacing: 16) {
                 ForEach(shelves, id: \.channel.id) { shelf in
                     ChannelShelf(channel: shelf.channel, videos: shelf.videos,
-                                 isDropTarget: dropTarget == shelf.channel.id) { video in
+                                 isDropTarget: dropTarget == shelf.channel.id,
+                                 isWatched: { model.isWatched(videoId: $0.id) },
+                                 onToggleWatched: toggleWatched) { video in
                         openURL(video.watchURL)
                     } onDrop: { droppedId in
                         dropTarget = nil
@@ -113,11 +115,17 @@ struct InboxView: View {
             LazyVGrid(columns: columns, spacing: 24) {
                 ForEach(videos) { video in
                     VideoCard(video: video,
+                              isWatched: model.isWatched(videoId: video.id),
                               onOpen: { openURL(video.watchURL) },
+                              onToggleWatched: { toggleWatched(video) },
                               onDismiss: dismissible ? { model.dismissInbox(videoId: video.id) } : nil)
                 }
             }
         }
+    }
+
+    private func toggleWatched(_ video: Video) {
+        withAnimation(.snappy) { model.setWatched(!model.isWatched(videoId: video.id), videoId: video.id) }
     }
 }
 
@@ -127,6 +135,8 @@ private struct ChannelShelf: View {
     let channel: Channel
     let videos: [Video]
     let isDropTarget: Bool
+    let isWatched: (Video) -> Bool
+    let onToggleWatched: (Video) -> Void
     let onOpen: (Video) -> Void
     let onDrop: (String) -> Void
     let onTargeted: (Bool) -> Void
@@ -147,7 +157,8 @@ private struct ChannelShelf: View {
             ScrollView(.horizontal) {
                 LazyHStack(alignment: .top, spacing: 18) {
                     ForEach(videos) { video in
-                        VideoCard(video: video, onOpen: { onOpen(video) }, onDismiss: nil)
+                        VideoCard(video: video, isWatched: isWatched(video), onOpen: { onOpen(video) },
+                                  onToggleWatched: { onToggleWatched(video) }, onDismiss: nil)
                             .frame(width: 290)
                     }
                 }
@@ -240,7 +251,9 @@ private struct ChannelChips: View {
 
 private struct VideoCard: View {
     let video: Video
+    let isWatched: Bool
     let onOpen: () -> Void
+    let onToggleWatched: () -> Void
     /// nil for videos that aren't in "New".
     let onDismiss: (() -> Void)?
 
@@ -253,6 +266,7 @@ private struct VideoCard: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(video.title)
                         .font(.title3.weight(.semibold))
+                        .foregroundStyle(isWatched ? .secondary : .primary)
                         .lineLimit(2, reservesSpace: true)
                         .multilineTextAlignment(.leading)
                     Text(subtitle)
@@ -268,6 +282,7 @@ private struct VideoCard: View {
         .help(video.title)
         .contextMenu {
             Button("Open on YouTube", action: onOpen)
+            Button(isWatched ? "Mark as Unwatched" : "Mark as Watched", action: onToggleWatched)
             if let onDismiss {
                 Button("Move to Recent", action: onDismiss)
             }
@@ -283,11 +298,34 @@ private struct VideoCard: View {
                 } placeholder: {
                     Rectangle().fill(.quaternary)
                 }
+                .opacity(isWatched ? 0.55 : 1)
+            }
+            .background(.black)
+            // YouTube's "watched" bar along the bottom of the thumbnail.
+            .overlay(alignment: .bottom) {
+                if isWatched {
+                    Rectangle().fill(Color.red).frame(height: 4)
+                }
             }
             .clipShape(RoundedRectangle(cornerRadius: 10))
             .overlay(alignment: .bottomLeading) {
                 if video.isMembersOnly {
-                    MembersBadge().padding(8)
+                    MembersBadge().padding(8).padding(.bottom, isWatched ? 4 : 0)
+                }
+            }
+            .overlay(alignment: .topLeading) {
+                if isHovered {
+                    Button(action: onToggleWatched) {
+                        Image(systemName: isWatched ? "arrow.uturn.backward.circle.fill" : "checkmark.circle.fill")
+                            .font(.title2)
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(.white, .black.opacity(0.6))
+                    }
+                    .buttonStyle(.plain)
+                    .help(isWatched ? "Mark as unwatched" : "Mark as watched")
+                    .padding(8)
+                } else if isWatched {
+                    WatchedBadge().padding(8)
                 }
             }
             .overlay(alignment: .topTrailing) {
@@ -310,6 +348,17 @@ private struct VideoCard: View {
     private var subtitle: String {
         guard let date = video.publishedAt else { return video.channelTitle }
         return "\(video.channelTitle) · \(date.formatted(.relative(presentation: .named)))"
+    }
+}
+
+private struct WatchedBadge: View {
+    var body: some View {
+        Label("Watched", systemImage: "checkmark")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(.black.opacity(0.65), in: Capsule())
     }
 }
 

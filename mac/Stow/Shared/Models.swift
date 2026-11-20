@@ -134,19 +134,24 @@ struct AppSettings: Codable, Equatable, Sendable {
     var checkIntervalMinutes: Int
     var launchAtLogin: Bool
     var alarm: AlarmSettings
+    /// Keep watched videos in step with the signed-in YouTube account's watch history.
+    var syncWatchedWithYouTube: Bool
 
     static let `default` = AppSettings(schemaVersion: 1, channels: [], checkIntervalMinutes: 30, launchAtLogin: true)
 
     init(schemaVersion: Int, channels: [Channel], checkIntervalMinutes: Int, launchAtLogin: Bool,
-         alarm: AlarmSettings = .default) {
+         alarm: AlarmSettings = .default, syncWatchedWithYouTube: Bool = true) {
         self.schemaVersion = schemaVersion
         self.channels = channels
         self.checkIntervalMinutes = checkIntervalMinutes
         self.launchAtLogin = launchAtLogin
         self.alarm = alarm
+        self.syncWatchedWithYouTube = syncWatchedWithYouTube
     }
 
-    private enum CodingKeys: String, CodingKey { case schemaVersion, channels, checkIntervalMinutes, launchAtLogin, alarm }
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, channels, checkIntervalMinutes, launchAtLogin, alarm, syncWatchedWithYouTube
+    }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -155,6 +160,7 @@ struct AppSettings: Codable, Equatable, Sendable {
         channels = try c.decodeIfPresent([Channel].self, forKey: .channels) ?? d.channels
         checkIntervalMinutes = try c.decodeIfPresent(Int.self, forKey: .checkIntervalMinutes) ?? d.checkIntervalMinutes
         launchAtLogin = try c.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? d.launchAtLogin
+        syncWatchedWithYouTube = try c.decodeIfPresent(Bool.self, forKey: .syncWatchedWithYouTube) ?? d.syncWatchedWithYouTube
         // A hand edit that breaks "alarm" (e.g. not an object) must not cost the channel list.
         do {
             alarm = try c.decodeIfPresent(AlarmSettings.self, forKey: .alarm) ?? d.alarm
@@ -192,8 +198,15 @@ struct AppState: Codable, Equatable, Sendable {
     /// Videos the alarm started, newest first (capped by Core). The alarm never picks these
     /// again, except through a `replayLatest` fallback rule.
     var alarmPlayedIds: [String]
-    /// Videos played to at least 90%, newest first (capped by Core), for syncing with the phone.
+    /// Watched videos, newest first (capped by Core): played to at least 90% by the alarm,
+    /// marked in Stow, or watched on YouTube (from the account's watch history).
     var watchedIds: [String]
+    /// Videos marked watched in Stow that YouTube's watch history doesn't have yet, oldest first.
+    var pendingYouTubeWatched: [String]
+    /// The account's watch history as last fetched (most recently watched first). The next
+    /// fetch's entries above these are what was watched on YouTube in between.
+    var youTubeHistory: [String]
+    var lastWatchSync: Date?
     var lastAlarmRun: AlarmRunRecord?
     /// The alarm time of the newest scheduled run (played or skipped), so a test run that
     /// replaces `lastAlarmRun` can't make that alarm fire again after a relaunch.
@@ -203,7 +216,8 @@ struct AppState: Codable, Equatable, Sendable {
 
     init(seenVideoIds: [String: [String]], checkedFeeds: [String: [FeedKind]] = [:], inbox: [InboxItem],
          recentVideos: [String: [Video]] = [:], lastCheck: CheckResult?, failedCheckStreak: Int = 0,
-         alarmPlayedIds: [String] = [], watchedIds: [String] = [], lastAlarmRun: AlarmRunRecord? = nil,
+         alarmPlayedIds: [String] = [], watchedIds: [String] = [], pendingYouTubeWatched: [String] = [],
+         youTubeHistory: [String] = [], lastWatchSync: Date? = nil, lastAlarmRun: AlarmRunRecord? = nil,
          lastScheduledAlarm: Date? = nil) {
         self.seenVideoIds = seenVideoIds
         self.checkedFeeds = checkedFeeds
@@ -213,13 +227,16 @@ struct AppState: Codable, Equatable, Sendable {
         self.failedCheckStreak = failedCheckStreak
         self.alarmPlayedIds = alarmPlayedIds
         self.watchedIds = watchedIds
+        self.pendingYouTubeWatched = pendingYouTubeWatched
+        self.youTubeHistory = youTubeHistory
+        self.lastWatchSync = lastWatchSync
         self.lastAlarmRun = lastAlarmRun
         self.lastScheduledAlarm = lastScheduledAlarm
     }
 
     private enum CodingKeys: String, CodingKey {
-        case seenVideoIds, checkedFeeds, inbox, recentVideos, lastCheck, failedCheckStreak, alarmPlayedIds, watchedIds, lastAlarmRun,
-             lastScheduledAlarm
+        case seenVideoIds, checkedFeeds, inbox, recentVideos, lastCheck, failedCheckStreak, alarmPlayedIds, watchedIds,
+             pendingYouTubeWatched, youTubeHistory, lastWatchSync, lastAlarmRun, lastScheduledAlarm
     }
 
     init(from decoder: Decoder) throws {
@@ -232,6 +249,9 @@ struct AppState: Codable, Equatable, Sendable {
         failedCheckStreak = try c.decodeIfPresent(Int.self, forKey: .failedCheckStreak) ?? 0
         alarmPlayedIds = try c.decodeIfPresent([String].self, forKey: .alarmPlayedIds) ?? []
         watchedIds = try c.decodeIfPresent([String].self, forKey: .watchedIds) ?? []
+        pendingYouTubeWatched = try c.decodeIfPresent([String].self, forKey: .pendingYouTubeWatched) ?? []
+        youTubeHistory = try c.decodeIfPresent([String].self, forKey: .youTubeHistory) ?? []
+        lastWatchSync = try c.decodeIfPresent(Date.self, forKey: .lastWatchSync)
         // Written by a newer build with an outcome this one doesn't know: forget it, keep the rest.
         lastAlarmRun = try? c.decodeIfPresent(AlarmRunRecord.self, forKey: .lastAlarmRun)
         lastScheduledAlarm = (try? c.decodeIfPresent(Date.self, forKey: .lastScheduledAlarm))

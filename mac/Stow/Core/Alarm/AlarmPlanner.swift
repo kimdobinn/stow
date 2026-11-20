@@ -41,11 +41,11 @@ enum AlarmPlanner {
         }
     }
 
-    /// Inbox videos of channels with `morning` on that the alarm hasn't played, in `settings.order`.
+    /// Inbox videos of channels with `morning` on that the alarm hasn't played and nobody watched, in `settings.order`.
     /// Undated videos (members feed) count as published when they were found.
     static func inboxCandidates(settings: AlarmSettings, channels: [Channel], state: AppState) -> [Video] {
         let morning = Set(channels.filter(\.morning).map(\.id))
-        let played = Set(state.alarmPlayedIds)
+        let played = Set(state.alarmPlayedIds).union(state.watchedIds)
         let items = state.inbox.enumerated().filter { _, item in
             morning.contains(item.video.channelId) && !played.contains(item.id) && isStreamable(item.video)
         }
@@ -65,7 +65,7 @@ enum AlarmPlanner {
             .flatMap { state.recentVideos[$0] ?? [] }
             .filter(isStreamable)
         let newestFirst = pool.sorted { ($0.publishedAt ?? .distantPast) > ($1.publishedAt ?? .distantPast) }
-        let played = Set(state.alarmPlayedIds)
+        let played = Set(state.alarmPlayedIds).union(state.watchedIds)
         let cutoff = now.addingTimeInterval(-Double(rule.withinDays) * 86_400)
         let unplayedRecent = newestFirst.filter { video in
             guard let date = video.publishedAt else { return false }

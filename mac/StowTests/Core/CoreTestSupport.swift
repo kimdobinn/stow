@@ -30,6 +30,24 @@ final class FakeYouTube: YouTubeService {
     func fetchMembersVideos(channelId: String, cookiesFile: URL) async throws -> MembersFeed {
         try (membersFeeds.withLock { $0[channelId] } ?? .success(MembersFeed(videos: []))).get()
     }
+
+    /// Most recently watched first.
+    let history = Mutex<Result<[String], StowError>>(.success([]))
+    /// Videos `markWatched` was called for, in order. A successful call also tops `history`.
+    let markedWatched = Mutex<[String]>([])
+    let markWatchedError = Mutex<StowError?>(nil)
+
+    func fetchWatchHistory(cookiesFile: URL, limit: Int) async throws -> WatchHistory {
+        WatchHistory(videoIds: Array(try history.withLock { $0 }.get().prefix(limit)))
+    }
+
+    func markWatched(videoId: String, cookiesFile: URL) async throws {
+        if let error = markWatchedError.withLock({ $0 }) { throw error }
+        markedWatched.withLock { $0.append(videoId) }
+        history.withLock { history in
+            if case .success(let ids) = history { history = .success([videoId] + ids.filter { $0 != videoId }) }
+        }
+    }
 }
 
 @MainActor

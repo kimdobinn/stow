@@ -41,9 +41,18 @@ final class AppModel {
     /// Newest first, capped.
     private(set) var log: [LogEntry] = []
     private(set) var launchAtLogin = false
+    private(set) var isSyncingWatched = false
+    /// Why the last watch-history sync failed; nil once one succeeds.
+    private(set) var watchSyncError: String?
+    /// `state.watchedIds` as a set, for the Inbox's per-video lookups.
+    private(set) var watchedSet: Set<String> = []
 
     private var settings = AppSettings.default
-    private var state = AppState.empty
+    private var state = AppState.empty {
+        didSet {
+            if state.watchedIds != oldValue.watchedIds { watchedSet = Set(state.watchedIds) }
+        }
+    }
 
     /// The morning alarm (Core/Alarm). The UI uses it through AppModel+Alarm.swift.
     @ObservationIgnored let alarm: AlarmController
@@ -54,6 +63,9 @@ final class AppModel {
     @ObservationIgnored private let notifier: any UserNotifying
     @ObservationIgnored private let cookiesFile: URL
     @ObservationIgnored private var scheduler: CheckScheduler?
+    @ObservationIgnored private var watchScheduler: CheckScheduler?
+    /// A sync requested while one was running; it runs right after.
+    @ObservationIgnored private var syncsAgain = false
     @ObservationIgnored private var scheduledMinutes: Int?
     /// A check requested while another was running; it runs right after.
     @ObservationIgnored private var pendingTrigger: CheckTrigger?
@@ -98,7 +110,14 @@ final class AppModel {
                 record(.warning, "Notifications are off for Stow (System Settings › Notifications).")
             }
         }
-        Task { await check(.launch) }
+        watchScheduler = CheckScheduler(interval: WatchSync.interval) { [weak self] _ in
+            await self?.syncWatched()
+        }
+        watchScheduler?.start()
+        Task {
+            await check(.launch)
+            await syncWatched()
+        }
     }
 
     /// Reads the JSON files. An unreadable file is renamed aside and replaced by defaults.
@@ -200,7 +219,11 @@ final class AppModel {
             state.checkedFeeds[channel.id] = FeedKind.allCases.filter(diff.checkedFeeds.contains)
             found += diff.newVideos
         }
-        return addToInbox(found)
+        // Watched on YouTube before Stow found it: straight to Recent, already watched.
+        let history = Set(state.youTubeHistory)
+        let watchedAlready = found.filter { history.contains($0.id) }.map(\.id)
+        state.watchedIds = Self.prepending(watchedAlready, to: state.watchedIds, limit: Self.watchedLimit)
+        return addToInbox(found.filter { !history.contains($0.id) })
     }
 
     /// Fresh feed entries replace stored ones (titles change); videos that dropped out of a feed
@@ -389,6 +412,7 @@ final class AppModel {
         signInState = .signedIn
         record(.info, "Signed in to YouTube.")
         await check(.signIn)
+        await syncWatched()
     }
 
     func signOut() async {
@@ -409,6 +433,116 @@ final class AppModel {
     func dismissAllInbox() {
         state.inbox.removeAll()
         saveState()
+    }
+
+    // MARK: Watched
+
+    var syncsWatchedWithYouTube: Bool { settings.syncWatchedWithYouTube }
+    var lastWatchSync: Date? { state.lastWatchSync }
+
+    func isWatched(videoId: String) -> Bool {
+        watchedSet.contains(videoId)
+    }
+
+    /// Marking a video watched moves it out of New and, when syncing, tells YouTube.
+    /// Unwatching only changes Stow: YouTube can't unwatch without deleting history.
+    func setWatched(_ watched: Bool, videoId: String) {
+        guard watched != isWatched(videoId: videoId) else { return }
+        if watched {
+            state.watchedIds = Self.prepending([videoId], to: state.watchedIds, limit: Self.watchedLimit)
+            state.inbox.removeAll { $0.id == videoId }
+            if settings.syncWatchedWithYouTube { state.pendingYouTubeWatched.append(videoId) }
+        } else {
+            state.watchedIds.removeAll { $0 == videoId }
+            state.pendingYouTubeWatched.removeAll { $0 == videoId }
+        }
+        saveState()
+        if watched { Task { await syncWatched() } }
+    }
+
+    func setSyncWatchedWithYouTube(_ on: Bool) {
+        updateSettings { $0.syncWatchedWithYouTube = on }
+        if on {
+            Task { await syncWatched() }
+        } else {
+            state.pendingYouTubeWatched.removeAll()
+            watchSyncError = nil
+            saveState()
+        }
+    }
+
+    /// Sends Stow's watched marks to YouTube, then reads the watch history and marks what was
+    /// watched on YouTube since the last sync. Needs the YouTube sign-in.
+    func syncWatched() async {
+        guard settings.syncWatchedWithYouTube, signInState == .signedIn else { return }
+        guard !isSyncingWatched else {
+            syncsAgain = true
+            return
+        }
+        isSyncingWatched = true
+        defer { isSyncingWatched = false }
+        repeat {
+            syncsAgain = false
+            await runWatchSync()
+        } while syncsAgain && signInState == .signedIn
+    }
+
+    private func runWatchSync() async {
+        let generation = authGeneration
+        do {
+            try await pushWatched()
+            let history = try await youtube.fetchWatchHistory(cookiesFile: cookiesFile, limit: WatchSync.historyLimit)
+            guard generation == authGeneration, settings.syncWatchedWithYouTube else { return }
+            if history.cookiesRejected { throw StowError.authExpired }
+            let isFirstSync = state.lastWatchSync == nil
+            applyWatchedOnYouTube(WatchSync.newlyWatched(history: history.videoIds, previous: state.youTubeHistory),
+                                  isFirstSync: isFirstSync)
+            state.youTubeHistory = history.videoIds
+            state.lastWatchSync = .now
+            saveState()
+            if watchSyncError != nil { record(.info, "Watched sync with YouTube works again.") }
+            watchSyncError = nil
+        } catch {
+            guard generation == authGeneration else { return }
+            if case StowError.authExpired = error {
+                markExpired("YouTube rejected the saved sign-in; watched videos can't sync.")
+            }
+            let message = error.logDescription
+            if watchSyncError != message { record(.warning, "Couldn't sync watched videos with YouTube: \(message)") }
+            watchSyncError = message
+        }
+    }
+
+    /// Marks queued videos watched on YouTube, oldest first. One that no longer exists is dropped.
+    private func pushWatched() async throws {
+        for videoId in state.pendingYouTubeWatched.prefix(WatchSync.pushesPerSync) {
+            do {
+                try await youtube.markWatched(videoId: videoId, cookiesFile: cookiesFile)
+            } catch StowError.processFailed(_, _, let stderr) where YTDLP.classify(stderr: stderr) == .unavailable {
+                record(.warning, "Couldn't mark \(videoId) watched on YouTube: it's unavailable.")
+            }
+            state.pendingYouTubeWatched.removeAll { $0 == videoId }
+            saveState()
+        }
+    }
+
+    /// Videos in the Inbox or Recent that were watched on YouTube become watched here.
+    private func applyWatchedOnYouTube(_ ids: [String], isFirstSync: Bool) {
+        let known = Dictionary(
+            (state.inbox.map(\.video) + state.recentVideos.values.flatMap { $0 }).map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first })
+        let newly = ids.filter { known[$0] != nil && !watchedSet.contains($0) }
+        guard !newly.isEmpty else { return }
+        state.watchedIds = Self.prepending(newly, to: state.watchedIds, limit: Self.watchedLimit)
+        let watched = Set(newly)
+        state.inbox.removeAll { watched.contains($0.id) }
+        if isFirstSync {
+            record(.info, "Watched on YouTube: \(newly.count) videos from your channels.")
+        } else {
+            record(newly.compactMap { known[$0] }.map {
+                LogEntry(level: .info, message: "\($0.channelTitle): watched on YouTube “\($0.title)” (\($0.id))")
+            })
+        }
     }
 
     // MARK: Alarm
@@ -558,10 +692,13 @@ extension AppModel: AlarmHost {
         // A test run only uses up the videos it played to the end, so it doesn't take the morning's.
         let used = run.trigger == .scheduled ? run.videoIds : watchedIds
         state.alarmPlayedIds = Self.prepending(used, to: state.alarmPlayedIds, limit: Self.alarmPlayedLimit)
+        let newlyWatched = watchedIds.filter { !watchedSet.contains($0) }
         state.watchedIds = Self.prepending(watchedIds, to: state.watchedIds, limit: Self.watchedLimit)
+        if settings.syncWatchedWithYouTube { state.pendingYouTubeWatched += newlyWatched }
         let played = Set(used)
         state.inbox.removeAll { played.contains($0.id) }
         saveState()
+        if !newlyWatched.isEmpty { Task { await syncWatched() } }
     }
 
     func logAlarm(_ level: LogLevel, _ message: String) {
