@@ -19,11 +19,11 @@ import java.util.concurrent.TimeUnit
 class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val repository = (applicationContext as StowApplication).repository
-        if (!repository.isPaired) return Result.success()
+        if (!repository.isPaired || repository.demo) return Result.success()
         return try {
             val videos = repository.remote.fetchVideos()
             android.util.Log.i("Stow", "Sync: ${videos.size} videos from the Mac")
-            repository.onRemoteVideos(videos)
+            repository.onSentVideos(videos)
             Result.success()
         } catch (e: Remote.NotPaired) {
             if (!repository.remote.isMember()) repository.unpair("The Mac unpaired this phone.")

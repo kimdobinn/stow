@@ -2,8 +2,17 @@ package dev.stow.android.ui
 
 import android.text.format.DateUtils
 import java.util.Date
+import dev.stow.android.data.VideoItem
 
 object Format {
+    /** "1 video", "3 videos". */
+    fun count(n: Int, noun: String): String = "$n ${if (n == 1) noun else noun + "s"}"
+
+    /** "Channel · 3 days ago" (· "Members only"). */
+    fun meta(item: VideoItem): String =
+        listOf(item.video.channelTitle, ago(item.video.publishedAt), if (item.video.isMembersOnly) "Members only" else "")
+            .filter { it.isNotEmpty() }.joinToString(" · ")
+
     fun duration(ms: Long): String {
         val total = ms / 1000
         val h = total / 3600

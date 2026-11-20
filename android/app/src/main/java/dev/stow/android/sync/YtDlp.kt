@@ -7,7 +7,7 @@ import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import dev.stow.android.data.Prefs
-import dev.stow.android.data.RemoteVideo
+import dev.stow.android.data.Video
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -53,16 +53,17 @@ object YtDlp {
     }
 
     /**
-     * Downloads the best video up to 1080p (preferring 60 fps) with the best audio, merged into
+     * Downloads the best H.264 video up to 1080p (preferring 60 fps) with AAC audio, merged into
      * an MP4. `cookies` (members-only videos) is a Netscape cookies.txt. Returns the file.
      */
-    suspend fun download(context: Context, video: RemoteVideo, cookies: File?, onProgress: (Int) -> Unit): File =
+    suspend fun download(context: Context, video: Video, cookies: File?, onProgress: (Int) -> Unit): File =
         withContext(Dispatchers.IO) {
             ensureReady(context)
             val dir = downloadDir(context)
             val request = YoutubeDLRequest(video.watchUrl).apply {
                 addOption("-o", File(dir, "%(id)s.%(ext)s").absolutePath)
-                addOption("-S", "res:1080,fps")
+                // H.264 + AAC: hardware-decoded on every phone (AV1 isn't everywhere).
+                addOption("-S", "res:1080,fps,vcodec:h264,acodec:m4a")
                 addOption("-f", "bv*+ba/b")
                 addOption("--merge-output-format", "mp4")
                 addOption("--no-playlist")

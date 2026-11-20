@@ -1,127 +1,120 @@
 package dev.stow.android.ui
 
 import android.app.Activity
-import android.content.ComponentName
+import android.content.pm.ActivityInfo
 import android.content.res.Configuration
-import android.net.Uri
 import android.view.ViewGroup
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.PlaylistAdd
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.Player
-import androidx.media3.session.MediaController
-import androidx.media3.session.SessionToken
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import coil3.compose.AsyncImage
+import dev.stow.android.data.Channel
 import dev.stow.android.data.VideoItem
-import dev.stow.android.player.PlaybackService
+import dev.stow.android.player.PlayerConnection
 import kotlinx.coroutines.delay
-import java.io.File
+import kotlin.math.roundToInt
+
+private val Speeds = listOf(0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f)
 
 /**
- * Plays a downloaded video through PlaybackService, so it keeps going with the screen off or
- * the app in the background. Turn the phone sideways for full screen. Leaving the screen stops it.
+ * The watch page: the video with YouTube-style controls (tap for controls, double-tap a side
+ * to skip 10 s, red seek bar, full screen), the title and actions, then Up next.
  */
 @Composable
 fun PlayerScreen(
-    item: VideoItem,
-    onPosition: (positionMs: Long, durationMs: Long) -> Unit,
-    onWatched: () -> Unit,
-    onSetWatched: (Boolean) -> Unit,
-    onClose: () -> Unit,
+    connection: PlayerConnection,
+    current: VideoItem?,
+    upNext: List<VideoItem>,
+    channel: Channel?,
+    actions: VideoActions,
+    onCollapse: () -> Unit,
 ) {
     val context = LocalContext.current
+    val activity = context as? Activity
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-    var controller by remember { mutableStateOf<MediaController?>(null) }
-    val filePath = item.local?.filePath ?: return
-
-    DisposableEffect(item.id) {
-        val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
-        val future = MediaController.Builder(context, token).buildAsync()
-        future.addListener({
-            val connected = runCatching { future.get() }.getOrNull() ?: return@addListener
-            if (connected.currentMediaItem?.mediaId != item.id) {
-                val media = MediaItem.Builder()
-                    .setMediaId(item.id)
-                    .setUri(Uri.fromFile(File(filePath)))
-                    .setMediaMetadata(MediaMetadata.Builder()
-                        .setTitle(item.remote.title)
-                        .setArtist(item.remote.channelTitle)
-                        .setArtworkUri(item.remote.thumbnailUrl?.let(Uri::parse))
-                        .build())
-                    .build()
-                // Start where you left off, unless you'd nearly finished.
-                val saved = item.local.positionMs
-                val duration = item.local.durationMs
-                val start = if (duration > 0 && saved > duration * 0.95) 0 else saved
-                connected.setMediaItem(media, start)
-                connected.prepare()
-            }
-            connected.play()
-            controller = connected
-        }, ContextCompat.getMainExecutor(context))
-        onDispose {
-            controller?.let { onPosition(it.currentPosition, it.duration.coerceAtLeast(0)) }
-            controller?.stop()
-            controller?.clearMediaItems()
-            MediaController.releaseFuture(future)
-            controller = null
-        }
-    }
-
-    // Save the position now and then, and mark the video watched at 90%.
-    LaunchedEffect(controller) {
-        val player = controller ?: return@LaunchedEffect
-        var markedWatched = item.remote.watched
-        while (true) {
-            delay(2_000)
-            val duration = player.duration
-            val position = player.currentPosition
-            if (duration > 0) {
-                onPosition(position, duration)
-                if (!markedWatched && (position >= duration * 0.9 || player.playbackState == Player.STATE_ENDED)) {
-                    markedWatched = true
-                    onWatched()
-                }
-            }
-        }
-    }
+    val controller by connection.controller.collectAsStateCompat()
+    var speedDialog by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
 
     // Full screen when sideways: hide the status and navigation bars.
-    val window = (context as? Activity)?.window
     DisposableEffect(landscape) {
+        val window = activity?.window
         if (window != null) {
             val insets = WindowCompat.getInsetsController(window, window.decorView)
             if (landscape) {
@@ -133,44 +126,280 @@ fun PlayerScreen(
         }
         onDispose { window?.let { WindowCompat.getInsetsController(it, it.decorView).show(WindowInsetsCompat.Type.systemBars()) } }
     }
+    // Leaving the watch page gives rotation back to the phone.
+    DisposableEffect(Unit) { onDispose { activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED } }
 
-    BackHandler(onBack = onClose)
+    fun setFullscreen(on: Boolean) {
+        activity?.requestedOrientation =
+            if (on) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_USER_PORTRAIT
+    }
+    BackHandler { if (landscape) setFullscreen(false) else onCollapse() }
 
+    val player = controller
+    val queue = connection.queue.collectAsStateCompat().value
+    val index = queue.indexOf(current?.id)
     val video: @Composable (Modifier) -> Unit = { modifier ->
-        AndroidView(
-            factory = { ctx ->
-                PlayerView(ctx).apply {
-                    layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                    setShowNextButton(false)
-                    setShowPreviousButton(false)
-                    keepScreenOn = true
-                }
-            },
-            update = { view -> view.player = controller },
-            modifier = modifier.background(Color.Black),
-        )
+        Box(modifier.background(Color.Black)) {
+            AndroidView(
+                factory = { ctx ->
+                    PlayerView(ctx).apply {
+                        layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                        useController = false
+                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        keepScreenOn = true
+                        setShutterBackgroundColor(android.graphics.Color.BLACK)
+                    }
+                },
+                update = { it.player = player },
+                modifier = Modifier.fillMaxSize(),
+            )
+            if (player != null) {
+                PlayerControls(
+                    player = player,
+                    fullscreen = landscape,
+                    hasPrevious = index > 0,
+                    hasNext = index in 0 until queue.lastIndex,
+                    onFullscreen = { setFullscreen(!landscape) },
+                    onCollapse = { if (landscape) setFullscreen(false) else onCollapse() },
+                    onSettings = { speedDialog = true },
+                )
+            }
+        }
     }
 
     if (landscape) {
-        Box(Modifier.fillMaxSize().background(Color.Black)) { video(Modifier.fillMaxSize()) }
+        video(Modifier.fillMaxSize())
     } else {
-        Column(Modifier.fillMaxSize().statusBarsPadding()) {
+        Column(Modifier.fillMaxSize().background(Stow.colors.background)) {
+            Spacer(Modifier.statusBarsPadding())
             video(Modifier.fillMaxWidth().aspectRatio(16f / 9f))
-            Column(Modifier.padding(16.dp)) {
-                Text(item.remote.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    listOf(item.remote.channelTitle, Format.ago(item.remote.publishedAt)).filter { it.isNotEmpty() }.joinToString(" · "),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(16.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { onSetWatched(!item.remote.watched) }) {
-                        Text(if (item.remote.watched) "Mark as unwatched" else "Mark as watched")
+            if (current == null) return@Column
+            LazyColumn(Modifier.fillMaxSize().navigationBarsPadding()) {
+                item {
+                    Column(Modifier.padding(horizontal = 12.dp, vertical = 12.dp)) {
+                        Text(current.video.title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Stow.colors.text, lineHeight = 24.sp)
+                        Spacer(Modifier.height(4.dp))
+                        Text(listOf(Format.ago(current.video.publishedAt), if (current.video.isMembersOnly) "Members only" else "")
+                                 .filter { it.isNotEmpty() }.joinToString(" · "),
+                             fontSize = 12.sp, color = Stow.colors.secondaryText)
                     }
-                    OutlinedButton(onClick = onClose) { Text("Close") }
+                    Row(Modifier.fillMaxWidth().clickable { actions.openChannel(current.video.channelId) }
+                            .padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        ChannelAvatar(channel?.avatarUrl, 36.dp)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(current.video.channelTitle, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Stow.colors.text, maxLines = 1)
+                            if (channel?.autoDownload == true) Text("Auto-downloading", fontSize = 12.sp, color = Stow.colors.secondaryText)
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (current.sent != null) {
+                            PillButton(if (current.watched) "Watched" else "Mark watched", if (current.watched) Icons.Filled.Check else null,
+                                       onClick = { actions.setWatched(current, !current.watched) })
+                        }
+                        PillButton("Save", Icons.AutoMirrored.Outlined.PlaylistAdd, onClick = { actions.saveToPlaylist(current) })
+                        PillButton("Speed", Icons.Outlined.Speed, onClick = { speedDialog = true })
+                        PillButton("Delete", Icons.Outlined.Delete, onClick = { confirmDelete = true })
+                    }
+                }
+                if (upNext.isNotEmpty()) {
+                    item { SectionHeader("Up next") }
+                    items(upNext, key = { "n-" + it.id }) { VideoRow(it, actions) }
                 }
             }
         }
     }
+
+    if (speedDialog) {
+        val currentSpeed = player?.playbackParameters?.speed ?: 1f
+        AlertDialog(
+            onDismissRequest = { speedDialog = false },
+            title = { Text("Playback speed") },
+            text = {
+                Column {
+                    Speeds.forEach { speed ->
+                        Row(Modifier.fillMaxWidth().clickable { connection.setSpeed(speed); speedDialog = false }.padding(vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.width(28.dp)) { if (speed == currentSpeed) Icon(Icons.Filled.Check, contentDescription = null) }
+                            Text(if (speed == 1f) "Normal" else "${speed}x".replace(".0x", "x"), fontSize = 15.sp)
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+        )
+    }
+    if (confirmDelete && current != null) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Delete from downloads?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = false
+                    connection.stop()
+                    actions.delete(current)
+                    onCollapse()
+                }) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
+        )
+    }
 }
+
+/** Tap to show/hide; double-tap left/right to skip 10 s; drag the red bar to seek. */
+@Composable
+private fun PlayerControls(
+    player: Player,
+    fullscreen: Boolean,
+    hasPrevious: Boolean,
+    hasNext: Boolean,
+    onFullscreen: () -> Unit,
+    onCollapse: () -> Unit,
+    onSettings: () -> Unit,
+) {
+    var visible by remember { mutableStateOf(true) }
+    var position by remember { mutableLongStateOf(0L) }
+    var duration by remember { mutableLongStateOf(0L) }
+    var buffered by remember { mutableLongStateOf(0L) }
+    var playing by remember { mutableStateOf(player.isPlaying) }
+    var scrubbing by remember { mutableStateOf<Float?>(null) }
+    var skip by remember { mutableStateOf<Pair<Boolean, Long>?>(null) } // (forward?, at time)
+    var lastTouch by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+    LaunchedEffect(player) {
+        while (true) {
+            position = player.currentPosition
+            duration = player.duration.coerceAtLeast(0)
+            buffered = player.bufferedPosition
+            playing = player.isPlaying || (player.playWhenReady && player.playbackState == Player.STATE_BUFFERING)
+            if (visible && playing && scrubbing == null && System.currentTimeMillis() - lastTouch > 3_000) visible = false
+            skip?.let { if (System.currentTimeMillis() - it.second > 700) skip = null }
+            delay(200)
+        }
+    }
+
+    BoxWithConstraints(Modifier.fillMaxSize().pointerInput(player) {
+        detectTapGestures(
+            onTap = { visible = !visible; lastTouch = System.currentTimeMillis() },
+            onDoubleTap = { offset ->
+                val forward = offset.x > size.width / 2
+                player.seekTo((player.currentPosition + if (forward) 10_000 else -10_000).coerceIn(0, player.duration.coerceAtLeast(0)))
+                skip = forward to System.currentTimeMillis()
+                lastTouch = System.currentTimeMillis()
+            },
+        )
+    }) {
+        val width = constraints.maxWidth.toFloat()
+        skip?.let { (forward, _) ->
+            Box(Modifier.fillMaxHeight().width(maxWidth / 2.6f).align(if (forward) Alignment.CenterEnd else Alignment.CenterStart)
+                    .background(Color.White.copy(alpha = 0.12f), CircleShape), contentAlignment = Alignment.Center) {
+                Text(if (forward) "+10 seconds" else "−10 seconds", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+        AnimatedVisibility(visible, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f))) {
+                Row(Modifier.fillMaxWidth().padding(4.dp).align(Alignment.TopStart)) {
+                    IconButton(onClick = onCollapse) { Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Minimize", tint = Color.White) }
+                    Spacer(Modifier.weight(1f))
+                    IconButton(onClick = onSettings) { Icon(Icons.Outlined.Settings, contentDescription = "Settings", tint = Color.White) }
+                }
+                Row(Modifier.align(Alignment.Center), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(36.dp)) {
+                    RoundControl(Icons.Filled.SkipPrevious, "Previous", 44.dp, enabled = hasPrevious) { player.seekToPreviousMediaItem(); lastTouch = System.currentTimeMillis() }
+                    RoundControl(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (playing) "Pause" else "Play", 60.dp) {
+                        if (player.isPlaying) player.pause() else {
+                            if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
+                            player.play()
+                        }
+                        lastTouch = System.currentTimeMillis()
+                    }
+                    RoundControl(Icons.Filled.SkipNext, "Next", 44.dp, enabled = hasNext) { player.seekToNextMediaItem(); lastTouch = System.currentTimeMillis() }
+                }
+                Row(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = 14.dp, end = 4.dp, bottom = if (fullscreen) 34.dp else 14.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    val shown = scrubbing?.let { (it * duration).toLong() } ?: position
+                    Text("${Format.duration(shown)} / ${Format.duration(duration)}", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.weight(1f))
+                    IconButton(onClick = onFullscreen) {
+                        Icon(if (fullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen, contentDescription = "Full screen", tint = Color.White)
+                    }
+                }
+            }
+        }
+        // The seek bar: thin at the bottom edge, with a red scrubber while the controls show.
+        val fraction = scrubbing ?: if (duration > 0) position.toFloat() / duration else 0f
+        val bufferedFraction = if (duration > 0) buffered.toFloat() / duration else 0f
+        Box(
+            Modifier.align(Alignment.BottomStart).fillMaxWidth().height(24.dp)
+                .offset { IntOffset(0, if (fullscreen) -(16.dp.roundToPx()) else 11.dp.roundToPx()) }
+                .pointerInput(player, duration) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { scrubbing = (it.x / width).coerceIn(0f, 1f); visible = true },
+                        onHorizontalDrag = { change, _ -> scrubbing = (change.position.x / width).coerceIn(0f, 1f); lastTouch = System.currentTimeMillis() },
+                        onDragEnd = { scrubbing?.let { player.seekTo((it * duration).toLong()) }; scrubbing = null },
+                        onDragCancel = { scrubbing = null },
+                    )
+                }
+                .pointerInput(player, duration) {
+                    detectTapGestures { offset ->
+                        if (visible) player.seekTo(((offset.x / width).coerceIn(0f, 1f) * duration).toLong()) else visible = true
+                        lastTouch = System.currentTimeMillis()
+                    }
+                },
+            contentAlignment = Alignment.BottomStart,
+        ) {
+            val barHeight = if (visible || scrubbing != null) 3.dp else 2.dp
+            Box(Modifier.fillMaxWidth().height(barHeight).align(Alignment.CenterStart).background(Color.White.copy(alpha = 0.3f)))
+            Box(Modifier.fillMaxWidth(bufferedFraction.coerceIn(0f, 1f)).height(barHeight).align(Alignment.CenterStart).background(Color.White.copy(alpha = 0.5f)))
+            Box(Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f)).height(barHeight).align(Alignment.CenterStart).background(ProgressRed))
+            if (visible || scrubbing != null) {
+                val dot = if (scrubbing != null) 16.dp else 12.dp
+                Box(Modifier.align(Alignment.CenterStart)
+                        .offset { IntOffset((fraction.coerceIn(0f, 1f) * width - dot.toPx() / 2).roundToInt(), 0) }
+                        .size(dot).background(ProgressRed, CircleShape))
+            }
+        }
+    }
+}
+
+@Composable
+private fun RoundControl(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, size: androidx.compose.ui.unit.Dp,
+                         enabled: Boolean = true, onClick: () -> Unit) {
+    Box(Modifier.size(size).clip(CircleShape).background(Color.Black.copy(alpha = 0.35f))
+            .clickable(enabled = enabled, onClick = onClick), contentAlignment = Alignment.Center) {
+        Icon(icon, contentDescription = label, tint = if (enabled) Color.White else Color.White.copy(alpha = 0.3f), modifier = Modifier.size(size * 0.6f))
+    }
+}
+
+/** The bar above the tabs while something plays: thumbnail, title, play/pause, close. */
+@Composable
+fun MiniPlayer(connection: PlayerConnection, item: VideoItem, onOpen: () -> Unit) {
+    val playing by connection.isPlaying.collectAsStateCompat()
+    val controller by connection.controller.collectAsStateCompat()
+    var fraction by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(controller) {
+        while (true) {
+            controller?.let { fraction = if (it.duration > 0) it.currentPosition.toFloat() / it.duration else 0f }
+            delay(500)
+        }
+    }
+    Column(Modifier.fillMaxWidth().background(Stow.colors.raised).clickable(onClick = onOpen)) {
+        Row(Modifier.fillMaxWidth().height(60.dp), verticalAlignment = Alignment.CenterVertically) {
+            AsyncImage(model = item.video.thumbnailUrl, contentDescription = null, contentScale = ContentScale.Crop,
+                       modifier = Modifier.fillMaxHeight().aspectRatio(16f / 9f).background(Color.Black))
+            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                Text(item.video.title, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Stow.colors.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(item.video.channelTitle, fontSize = 12.sp, color = Stow.colors.secondaryText, maxLines = 1)
+            }
+            IconButton(onClick = { connection.togglePlay() }) {
+                Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, contentDescription = if (playing) "Pause" else "Play", tint = Stow.colors.text)
+            }
+            IconButton(onClick = { connection.stop() }) { Icon(Icons.Filled.Close, contentDescription = "Close", tint = Stow.colors.text) }
+        }
+        Box(Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f)).height(2.dp).background(ProgressRed))
+    }
+}
+
+@Composable
+private fun <T> kotlinx.coroutines.flow.StateFlow<T>.collectAsStateCompat() = collectAsStateWithLifecycle()

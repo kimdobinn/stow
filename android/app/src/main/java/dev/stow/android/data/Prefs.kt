@@ -20,7 +20,22 @@ class Prefs(context: Context) {
         _wifiOnly.value = on
     }
 
-    /** The Firebase project the Mac paired this phone with, once paired. */
+    private val _downloadSort = MutableStateFlow(
+        runCatching { DownloadSort.valueOf(prefs.getString(KEY_SORT, null) ?: "") }.getOrDefault(DownloadSort.RECENTLY_DOWNLOADED))
+    val downloadSort: StateFlow<DownloadSort> = _downloadSort.asStateFlow()
+    fun setDownloadSort(sort: DownloadSort) {
+        prefs.edit().putString(KEY_SORT, sort.name).apply()
+        _downloadSort.value = sort
+    }
+
+    private val _groupByChannel = MutableStateFlow(prefs.getBoolean(KEY_GROUP, false))
+    val groupByChannel: StateFlow<Boolean> = _groupByChannel.asStateFlow()
+    fun setGroupByChannel(on: Boolean) {
+        prefs.edit().putBoolean(KEY_GROUP, on).apply()
+        _groupByChannel.value = on
+    }
+
+        /** The Firebase project the Mac paired this phone with, once paired. */
     val pairedProject: String? get() = prefs.getString(KEY_PROJECT, null)
 
     /** Decrypts what only paired phones may read (the YouTube cookies). */
@@ -44,5 +59,7 @@ class Prefs(context: Context) {
         const val KEY_PROJECT = "pairedProject"
         const val KEY_KEY = "pairingKey"
         const val KEY_YTDLP_UPDATE = "lastYtDlpUpdate"
+        const val KEY_SORT = "downloadSort"
+        const val KEY_GROUP = "groupByChannel"
     }
 }

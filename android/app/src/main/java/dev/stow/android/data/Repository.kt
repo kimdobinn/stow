@@ -26,11 +26,12 @@ sealed interface PairState {
     data object Paired : PairState
 }
 
-/** The app's state: pairing, the Mac's videos merged with what this phone downloaded. */
+/** The app's state: pairing, the Mac's channels and sent videos, and what this phone downloaded. */
 class Repository(private val context: Context) {
     val prefs = Prefs(context)
     val local = LocalStore(context)
     val remote = Remote()
+    val playlistStore = PlaylistStore(context)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var observing: Job? = null
@@ -40,20 +41,44 @@ class Repository(private val context: Context) {
     )
     val pairState: StateFlow<PairState> = _pairState.asStateFlow()
 
-    private val remoteVideos = MutableStateFlow<List<RemoteVideo>>(emptyList())
+    private val sent = MutableStateFlow<List<SentVideo>>(emptyList())
     private val _channels = MutableStateFlow<List<Channel>>(emptyList())
+    /** In the Mac's order. */
     val channels: StateFlow<List<Channel>> = _channels.asStateFlow()
+    val playlists: StateFlow<List<Playlist>> get() = playlistStore.playlists
 
-    /** Newest sent first. */
-    val items: StateFlow<List<VideoItem>> = combine(remoteVideos, local.videos) { remote, local ->
-        remote.sortedByDescending { it.sentAt ?: it.publishedAt }.map { VideoItem(it, local[it.id]) }
-    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+    /** Every known video (sent to the phone or recent on a channel), by id. */
+    val items: StateFlow<Map<String, VideoItem>> = combine(sent, _channels, local.videos) { sent, channels, local ->
+        val result = LinkedHashMap<String, VideoItem>()
+        for (channel in channels) {
+            for (recent in channel.recent) {
+                result[recent.video.id] = VideoItem(recent.video, null, local[recent.video.id], recent.watched)
+            }
+        }
+        for (video in sent) {
+            val watchedOnMac = result[video.video.id]?.watchedOnMac ?: false
+            result[video.video.id] = VideoItem(video.video, video, local[video.video.id], watchedOnMac)
+        }
+        result
+    }.stateIn(scope, SharingStarted.Eagerly, emptyMap())
 
     val isPaired: Boolean get() = _pairState.value == PairState.Paired
 
+    /** Debug builds: `files/demo` shows sample channels instead of Firebase (downloads stay real). */
+    val demo = dev.stow.android.BuildConfig.DEBUG && File(context.filesDir, "demo").exists()
+
     fun start() {
+        if (demo) {
+            _pairState.value = PairState.Paired
+            _channels.value = DemoData.channels
+            onSentVideos(DemoData.sent)
+            return
+        }
         if (isPaired) observe()
     }
+
+    fun item(id: String): VideoItem? = items.value[id]
+    fun channel(id: String): Channel? = _channels.value.firstOrNull { it.id == id }
 
     // Pairing
 
@@ -85,7 +110,7 @@ class Repository(private val context: Context) {
         observing = null
         prefs.clearPairing()
         remote.signOut()
-        remoteVideos.value = emptyList()
+        sent.value = emptyList()
         _channels.value = emptyList()
         _pairState.value = PairState.Unpaired(message)
     }
@@ -107,7 +132,7 @@ class Repository(private val context: Context) {
             // The token can change or arrive late (Play services was busy while pairing).
             launch { runCatching { remote.refreshPushToken() }.onFailure { Log.w(TAG, "Token refresh failed", it) } }
             launch { listen { remote.channels().collect { _channels.value = it } } }
-            listen { remote.videos().collect { onRemoteVideos(it) } }
+            listen { remote.videos().collect { onSentVideos(it) } }
         }
     }
 
@@ -134,34 +159,66 @@ class Repository(private val context: Context) {
         }
     }
 
-    /** New videos get downloaded; ones the Mac sent again after a failure or delete are retried. */
-    fun onRemoteVideos(videos: List<RemoteVideo>) {
-        remoteVideos.value = videos
+    /** New videos get downloaded; ones sent again after a failure or delete are retried. */
+    fun onSentVideos(videos: List<SentVideo>) {
+        sent.value = videos
         for (video in videos) {
+            val id = video.video.id
             val sentAt = video.sentAt?.time ?: 0
-            val existing = local[video.id]
+            val existing = local[id]
             when {
-                existing == null -> queue(video.id, sentAt)
-                existing.state in setOf(DownloadState.FAILED, DownloadState.DELETED) && sentAt > existing.sentAt -> queue(video.id, sentAt)
+                existing == null -> queue(id, sentAt)
+                existing.state in setOf(DownloadState.FAILED, DownloadState.DELETED) && sentAt > existing.sentAt -> queue(id, sentAt)
                 existing.state == DownloadState.QUEUED || existing.state == DownloadState.DOWNLOADING ->
-                    Downloads.enqueue(context, video.id, prefs.wifiOnly.value)
+                    Downloads.enqueue(context, id, prefs.wifiOnly.value)
                 existing.state == DownloadState.DOWNLOADED && existing.filePath?.let { File(it).exists() } != true ->
-                    queue(video.id, sentAt)
+                    queue(id, sentAt)
             }
         }
     }
 
-    fun remoteVideo(id: String): RemoteVideo? = remoteVideos.value.firstOrNull { it.id == id }
+    /** The video to download, from what's loaded or (in a background job) from the server. */
+    suspend fun findVideo(id: String): Video? =
+        items.value[id]?.video ?: remote.fetchVideos().firstOrNull { it.video.id == id }?.video
 
     private fun queue(id: String, sentAt: Long) {
-        local.update(id) { LocalVideo(id = id, state = DownloadState.QUEUED, sentAt = sentAt, positionMs = it?.positionMs ?: 0) }
+        local.update(id) {
+            LocalVideo(id = id, state = DownloadState.QUEUED, sentAt = sentAt, positionMs = it?.positionMs ?: 0,
+                       durationMs = it?.durationMs ?: 0)
+        }
         Downloads.enqueue(context, id, prefs.wifiOnly.value)
     }
 
     // Actions
 
+    /** Downloads any video: retries a sent one, or asks for one picked from a channel page. */
+    fun download(item: VideoItem) {
+        if (item.isPlayable || item.isDownloading) return
+        val sentAt = item.sent?.sentAt?.time ?: System.currentTimeMillis()
+        queue(item.id, sentAt)
+        if (demo) {
+            sent.value = sent.value + SentVideo(item.video, java.util.Date(), "phone", false)
+            return
+        }
+        if (item.sent == null) {
+            scope.launch { runCatching { remote.requestDownload(item.video) }.onFailure { Log.w(TAG, "requestDownload failed", it) } }
+        }
+    }
+
     fun setWatched(id: String, watched: Boolean) {
+        if (item(id)?.sent == null) return
+        if (demo) {
+            sent.value = sent.value.map { if (it.video.id == id) it.copy(watched = watched) else it }
+            return
+        }
         scope.launch { runCatching { remote.setWatched(id, watched) }.onFailure { Log.w(TAG, "setWatched failed", it) } }
+    }
+
+    fun setAutoDownload(channelId: String, on: Boolean) {
+        // Show it right away; the listener confirms it.
+        _channels.value = _channels.value.map { if (it.id == channelId) it.copy(autoDownload = on) else it }
+        if (demo) return
+        scope.launch { runCatching { remote.setAutoDownload(channelId, on) }.onFailure { Log.w(TAG, "setAutoDownload failed", it) } }
     }
 
     fun savePosition(id: String, positionMs: Long, durationMs: Long) {
@@ -177,7 +234,21 @@ class Repository(private val context: Context) {
         local[id]?.filePath?.let { File(it).delete() }
         YtDlp.deleteFiles(context, id)
         local.update(id) { it?.copy(state = DownloadState.DELETED, filePath = null, sizeBytes = 0, progress = 0, error = null) }
-        scope.launch { runCatching { remote.reportDownload(id, "deleted") } }
+        if (item(id)?.sent != null) scope.launch { runCatching { remote.reportDownload(id, "deleted") } }
+    }
+
+    // Playlists
+
+    /** Adding a video that isn't downloaded yet downloads it. */
+    fun addToPlaylist(playlistId: String, item: VideoItem) {
+        playlistStore.add(playlistId, item.id)
+        download(item)
+    }
+
+    fun createPlaylist(name: String, with: VideoItem? = null): Playlist {
+        val playlist = playlistStore.create(name, with?.id)
+        with?.let(::download)
+        return playlist
     }
 
     /** Re-queues waiting downloads under the new network rule. */

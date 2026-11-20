@@ -26,11 +26,9 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
 
     override suspend fun doWork(): Result {
         val id = inputData.getString(KEY_ID) ?: return Result.failure()
-        val video = repository.remoteVideo(id)
-            ?: runCatching { repository.remote.fetchVideos() }.getOrElse { e ->
-                return if (e is Remote.NotPaired) Result.failure() else Result.retry()
-            }.firstOrNull { it.id == id }
-            ?: return Result.failure()
+        val video = runCatching { repository.findVideo(id) }.getOrElse { e ->
+            return if (e is Remote.NotPaired) Result.failure() else Result.retry()
+        } ?: return Result.failure()
         val existing = repository.local[id]
         if (existing?.state == DownloadState.DOWNLOADED && existing.filePath?.let { File(it).exists() } == true) return Result.success()
         if (existing?.state == DownloadState.DELETED) return Result.success()
@@ -55,7 +53,7 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
             repository.local.update(id) {
                 (it ?: LocalVideo(id, DownloadState.DOWNLOADED)).copy(
                     state = DownloadState.DOWNLOADED, progress = 100, error = null, filePath = file.absolutePath,
-                    sizeBytes = file.length(), durationMs = durationMs(file))
+                    sizeBytes = file.length(), durationMs = durationMs(file), downloadedAt = System.currentTimeMillis())
             }
             runCatching { repository.remote.reportDownload(id, "downloaded") }
             return Result.success()

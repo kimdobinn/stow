@@ -118,8 +118,8 @@ fun SettingsScreen(repository: Repository, wifiOnly: Boolean, onBack: () -> Unit
             confirmButton = {
                 TextButton(onClick = {
                     confirmDeleteWatched = false
-                    repository.items.value
-                        .filter { it.remote.watched && it.state == DownloadState.DOWNLOADED }
+                    repository.items.value.values
+                        .filter { it.watched && it.state == DownloadState.DOWNLOADED }
                         .forEach { repository.deleteDownload(it.id) }
                     storage = repository.storageUsedBytes()
                 }) { Text("Delete") }

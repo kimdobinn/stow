@@ -106,34 +106,33 @@ class Remote {
 
     // Reading
 
-    /** Every video the Mac sent, live. Fails with [NotPaired] once the Mac unpairs this phone. */
-    fun videos(): Flow<List<RemoteVideo>> = callbackFlow {
+    /** Every video sent to the phone, live. Fails with [NotPaired] once the Mac unpairs this phone. */
+    fun videos(): Flow<List<SentVideo>> = callbackFlow {
         val registration: ListenerRegistration = db.collection("videos").addSnapshotListener { snapshot, error ->
             if (error != null) {
                 close(if (error.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) NotPaired() else error)
                 return@addSnapshotListener
             }
-            trySend(snapshot?.documents.orEmpty().mapNotNull { it.toVideo() })
+            trySend(snapshot?.documents.orEmpty().mapNotNull { it.toSent() })
         }
         awaitClose { registration.remove() }
     }
 
+    /** The Mac's channels with their newest videos, live. */
     fun channels(): Flow<List<Channel>> = callbackFlow {
         val registration = db.collection("channels").addSnapshotListener { snapshot, error ->
             if (error != null) {
                 close(if (error.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) NotPaired() else error)
                 return@addSnapshotListener
             }
-            trySend(snapshot?.documents.orEmpty().map { doc ->
-                Channel(doc.id, doc.getString("title") ?: doc.id, doc.getString("avatarURL"), doc.getLong("order")?.toInt() ?: 0)
-            }.sortedBy { it.order })
+            trySend(snapshot?.documents.orEmpty().map { it.toChannel() }.sortedBy { it.order })
         }
         awaitClose { registration.remove() }
     }
 
     /** The videos as the server has them now (for background syncs). */
-    suspend fun fetchVideos(): List<RemoteVideo> = try {
-        db.collection("videos").get(Source.SERVER).await().documents.mapNotNull { it.toVideo() }
+    suspend fun fetchVideos(): List<SentVideo> = try {
+        db.collection("videos").get(Source.SERVER).await().documents.mapNotNull { it.toSent() }
     } catch (e: FirebaseFirestoreException) {
         if (e.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) throw NotPaired() else throw e
     }
@@ -144,9 +143,9 @@ class Remote {
         return Crypto.open(Base64.decode(sealed, Base64.DEFAULT), key)
     }
 
-    private fun com.google.firebase.firestore.DocumentSnapshot.toVideo(): RemoteVideo? {
+    private fun com.google.firebase.firestore.DocumentSnapshot.toSent(): SentVideo? {
         val title = getString("title") ?: return null
-        return RemoteVideo(
+        val video = Video(
             id = id,
             channelId = getString("channelId") ?: "",
             channelTitle = getString("channelTitle") ?: "",
@@ -154,12 +153,62 @@ class Remote {
             publishedAt = getTimestamp("publishedAt")?.toDate(),
             thumbnailUrl = getString("thumbnailURL"),
             isMembersOnly = getBoolean("isMembersOnly") ?: false,
-            sentAt = getTimestamp("sentAt")?.toDate(),
-            watched = getBoolean("watched") ?: false,
+            liveStatus = getString("liveStatus"),
         )
+        return SentVideo(video, getTimestamp("sentAt")?.toDate(), getString("sentBy"), getBoolean("watched") ?: false)
+    }
+
+    private fun com.google.firebase.firestore.DocumentSnapshot.toChannel(): Channel {
+        val title = getString("title") ?: id
+        @Suppress("UNCHECKED_CAST")
+        val recent = (get("recent") as? List<Map<String, Any?>>).orEmpty().mapNotNull { entry ->
+            val videoId = entry["id"] as? String ?: return@mapNotNull null
+            RecentVideo(
+                Video(
+                    id = videoId,
+                    channelId = id,
+                    channelTitle = title,
+                    title = entry["title"] as? String ?: videoId,
+                    publishedAt = (entry["publishedAt"] as? com.google.firebase.Timestamp)?.toDate(),
+                    thumbnailUrl = entry["thumbnailURL"] as? String,
+                    isMembersOnly = entry["isMembersOnly"] as? Boolean ?: false,
+                    liveStatus = entry["liveStatus"] as? String,
+                ),
+                watched = entry["watched"] as? Boolean ?: false,
+            )
+        }
+        return Channel(id, title, getString("handle"), getString("avatarURL"), getBoolean("phone") ?: false,
+                       getLong("order")?.toInt() ?: 0, recent)
     }
 
     // Writing (only the fields the rules let a phone change)
+
+    /** Turns a channel's auto-download (new uploads to the phone) on or off; the Mac applies it. */
+    suspend fun setAutoDownload(channelId: String, on: Boolean) {
+        db.collection("channels").document(channelId).update(mapOf(
+            "phone" to on,
+            "updatedAt" to FieldValue.serverTimestamp(),
+            "updatedBy" to "phone",
+        )).await()
+    }
+
+    /** Asks for a video the Mac didn't send (picked from a channel page): files videos/{id}. */
+    suspend fun requestDownload(video: Video) {
+        db.collection("videos").document(video.id).set(mapOf(
+            "channelId" to video.channelId,
+            "channelTitle" to video.channelTitle,
+            "title" to video.title,
+            "publishedAt" to video.publishedAt?.let { com.google.firebase.Timestamp(it) },
+            "thumbnailURL" to video.thumbnailUrl,
+            "isMembersOnly" to video.isMembersOnly,
+            "liveStatus" to video.liveStatus,
+            "sentAt" to FieldValue.serverTimestamp(),
+            "sentBy" to "phone",
+            "watched" to false,
+            "updatedAt" to FieldValue.serverTimestamp(),
+            "updatedBy" to "phone",
+        )).await()
+    }
 
     suspend fun reportDownload(id: String, state: String, error: String? = null) {
         db.collection("videos").document(id).update(mapOf(

@@ -44,6 +44,7 @@ class LocalStore(context: Context) {
                 put("durationMs", video.durationMs)
                 put("positionMs", video.positionMs)
                 put("sentAt", video.sentAt)
+                put("downloadedAt", video.downloadedAt)
                 put("updatedAt", video.updatedAt)
             })
         }
@@ -68,6 +69,7 @@ class LocalStore(context: Context) {
                     durationMs = o.optLong("durationMs"),
                     positionMs = o.optLong("positionMs"),
                     sentAt = o.optLong("sentAt"),
+                    downloadedAt = o.optLong("downloadedAt"),
                     updatedAt = o.optLong("updatedAt"),
                 )
             }
