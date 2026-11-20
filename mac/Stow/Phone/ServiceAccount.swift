@@ -35,10 +35,10 @@ struct ServiceAccount: @unchecked Sendable {
     }
 
     /// A signed JWT asking `tokenURI` for an access token (RFC 7523).
-    func assertion(now: Date = .now) throws -> String {
+    func assertion(scopes: [String] = ServiceAccount.scopes, now: Date = .now) throws -> String {
         let header = ["alg": "RS256", "typ": "JWT", "kid": privateKeyId]
         let issued = Int(now.timeIntervalSince1970)
-        let claims: [String: Any] = ["iss": clientEmail, "scope": Self.scopes.joined(separator: " "),
+        let claims: [String: Any] = ["iss": clientEmail, "scope": scopes.joined(separator: " "),
                                      "aud": tokenURI.absoluteString, "iat": issued, "exp": issued + 3600]
         let input = try [header as [String: Any], claims]
             .map { try JSONSerialization.data(withJSONObject: $0, options: .sortedKeys).base64URLEncoded }
@@ -100,11 +100,13 @@ enum DER {
 actor GoogleAuth {
     private let account: ServiceAccount
     private let http: FirebaseHTTP
+    private let scopes: [String]
     private var token: (value: String, expires: Date)?
 
-    init(account: ServiceAccount, http: FirebaseHTTP) {
+    init(account: ServiceAccount, http: FirebaseHTTP, scopes: [String] = ServiceAccount.scopes) {
         self.account = account
         self.http = http
+        self.scopes = scopes
     }
 
     /// Throws `.network`, or `.parse` when Google rejects the key (e.g. it was deleted).
@@ -113,7 +115,7 @@ actor GoogleAuth {
         var request = URLRequest(url: account.tokenURI)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        let assertion = try account.assertion()
+        let assertion = try account.assertion(scopes: scopes)
         request.httpBody = Data("grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=\(assertion)".utf8)
         let (data, status) = try await http.send(request)
         struct Response: Decodable {

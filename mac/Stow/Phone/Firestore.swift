@@ -126,7 +126,8 @@ enum FirestoreWrite: Sendable {
 /// Firestore's REST API for the project's (default) database, as the service account.
 struct FirestoreREST: Sendable {
     let projectId: String
-    let auth: GoogleAuth
+    /// A bearer token: the service account's, or (in the phone check) a Firebase user's ID token.
+    let token: @Sendable () async throws -> String
     let http: FirebaseHTTP
 
     private var root: String { "projects/\(projectId)/databases/(default)/documents" }
@@ -201,7 +202,7 @@ struct FirestoreREST: Sendable {
         guard let url = URL(string: url) else { throw StowError.parse("Bad Firestore URL \(url)") }
         var request = URLRequest(url: url)
         request.httpMethod = method
-        request.setValue("Bearer \(try await auth.accessToken())", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(try await token())", forHTTPHeaderField: "Authorization")
         if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -223,7 +224,7 @@ struct FirestoreREST: Sendable {
 /// Firebase Cloud Messaging (HTTP v1), as the service account.
 struct FCMREST: Sendable {
     let projectId: String
-    let auth: GoogleAuth
+    let token: @Sendable () async throws -> String
     let http: FirebaseHTTP
 
     enum Outcome: Equatable, Sendable {
@@ -239,7 +240,7 @@ struct FCMREST: Sendable {
         }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.setValue("Bearer \(try await auth.accessToken())", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(try await self.token())", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let message: [String: Any] = ["message": ["token": token, "data": data, "android": ["priority": "HIGH"]]]
         request.httpBody = try JSONSerialization.data(withJSONObject: message)

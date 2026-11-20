@@ -10,9 +10,10 @@ struct FirebaseBackend: PhoneBackend {
     init(account: ServiceAccount) {
         let http = FirebaseHTTP()
         let auth = GoogleAuth(account: account, http: http)
+        let token: @Sendable () async throws -> String = { try await auth.accessToken() }
         projectId = account.projectId
-        firestore = FirestoreREST(projectId: account.projectId, auth: auth, http: http)
-        fcm = FCMREST(projectId: account.projectId, auth: auth, http: http)
+        firestore = FirestoreREST(projectId: account.projectId, token: token, http: http)
+        fcm = FCMREST(projectId: account.projectId, token: token, http: http)
     }
 
     /// Reads the key file. Throws `.parse` when it isn't a service-account key.

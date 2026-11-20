@@ -24,6 +24,11 @@ enum StowMain {
             Task { exit(await Snapshot.run() ? 0 : 1) }
             NSApplication.shared.run()
         }
+        if CommandLine.arguments.contains(PhoneCheck.argument) {
+            setvbuf(stdout, nil, _IOLBF, 0)
+            Task { exit(await PhoneCheck.run() ? 0 : 1) }
+            dispatchMain()
+        }
         if CommandLine.arguments.contains(PlaybackDemo.argument) {
             setvbuf(stdout, nil, _IOLBF, 0)
             Task { exit(await PlaybackDemo.run() ? 0 : 1) }
