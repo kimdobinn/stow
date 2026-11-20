@@ -3,7 +3,8 @@ import Security
 
 /// The Firebase project's service-account key (Project settings › Service accounts › Generate
 /// new private key). The Mac signs in with it, so Firestore's security rules don't apply to it.
-struct ServiceAccount: Sendable {
+/// SecKey is immutable and thread-safe.
+struct ServiceAccount: @unchecked Sendable {
     let projectId: String
     let clientEmail: String
     let privateKeyId: String
