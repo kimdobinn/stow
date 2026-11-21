@@ -34,6 +34,14 @@ enum SidebarItem: String, CaseIterable, Identifiable {
 struct MainView: View {
     @Environment(AppModel.self) private var model
     @State private var selection: SidebarItem
+    /// The player panel's width as last dragged; 0 until then (an automatic width).
+    @AppStorage("playerPanelWidth") private var preferredPanelWidth: Double = 0
+    /// The width when a drag of the panel's edge began.
+    @State private var dragStartWidth: CGFloat?
+    /// The height of the title and buttons under the video.
+    @State private var panelDetailsHeight: CGFloat = 130
+    /// The space for the section and the panel, below the toolbar.
+    @State private var detailSize = CGSize(width: 1000, height: 700)
 
     init(selection: SidebarItem = .inbox) {
         _selection = State(initialValue: selection)
@@ -50,21 +58,21 @@ struct MainView: View {
             }
             .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
         } detail: {
-            GeometryReader { proxy in
-                HStack(spacing: 0) {
-                    detail
-                        .frame(maxWidth: dock.isExpanded && dock.screen != nil ? 0 : .infinity)
-                        .opacity(dock.isExpanded && dock.screen != nil ? 0 : 1)
-                    if let screen = dock.screen {
-                        if !dock.isExpanded { Divider() }
-                        PlayerPanel(dock: dock, screen: screen)
-                            // Below the toolbar, like the section beside it.
-                            .padding(.top, dock.isExpanded ? 0 : proxy.safeAreaInsets.top)
-                            .frame(width: dock.isExpanded ? proxy.size.width : Self.panelWidth(in: proxy.size.width))
-                            .transition(.move(edge: .trailing))
-                    }
+            let range = panelWidthRange(in: detailSize)
+            let panelWidth = Self.clamp(preferredPanelWidth > 0 ? preferredPanelWidth : detailSize.width * 0.6, to: range)
+            HStack(spacing: 0) {
+                detail
+                    .frame(maxWidth: dock.isExpanded && dock.screen != nil ? 0 : .infinity)
+                    .opacity(dock.isExpanded && dock.screen != nil ? 0 : 1)
+                if let screen = dock.screen {
+                    if !dock.isExpanded { resizeHandle(width: panelWidth, range: range) }
+                    // Laid out in the safe area, so it starts right under the toolbar.
+                    PlayerPanel(dock: dock, screen: screen) { panelDetailsHeight = $0 }
+                        .frame(width: dock.isExpanded ? detailSize.width : panelWidth)
+                        .transition(.move(edge: .trailing))
                 }
             }
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { detailSize = $0 }
             .animation(.snappy(duration: 0.3), value: dock.screen == nil)
             .animation(.snappy(duration: 0.3), value: dock.isExpanded)
             .navigationTitle(selection.title)
@@ -76,9 +84,44 @@ struct MainView: View {
 
     private var dock: PlayerDock { PlayerDock.shared }
 
-    /// About two fifths of the window, within reason.
-    private static func panelWidth(in width: CGFloat) -> CGFloat {
-        min(max(width * 0.42, 420), 820)
+    private static let minPanelWidth: CGFloat = 420
+    /// What the panel always leaves of the section beside it.
+    private static let minSectionWidth: CGFloat = 320
+
+    /// The panel's widths: at most as wide as lets the video and the details under it fill the
+    /// height (wider would only push them off the bottom), and leaving room for the section.
+    private func panelWidthRange(in size: CGSize) -> ClosedRange<CGFloat> {
+        let fillsHeight = (size.height - panelDetailsHeight) * 16 / 9
+        let upper = min(size.width - Self.minSectionWidth, fillsHeight)
+        return Self.minPanelWidth...max(Self.minPanelWidth, upper)
+    }
+
+    private static func clamp(_ width: CGFloat, to range: ClosedRange<CGFloat>) -> CGFloat {
+        min(max(width, range.lowerBound), range.upperBound)
+    }
+
+    /// The line between the section and the panel: drag it to resize the panel, double-click it
+    /// to go back to the automatic width.
+    private func resizeHandle(width: CGFloat, range: ClosedRange<CGFloat>) -> some View {
+        Divider()
+            .overlay {
+                Color.clear
+                    .frame(width: 9)
+                    .contentShape(Rectangle())
+                    .pointerStyle(.frameResize(position: .leading))
+                    .gesture(
+                        DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                            .onChanged { drag in
+                                let start = dragStartWidth ?? width
+                                dragStartWidth = start
+                                preferredPanelWidth = Self.clamp(start - drag.translation.width, to: range)
+                            }
+                            .onEnded { _ in dragStartWidth = nil }
+                    )
+                    .onTapGesture(count: 2) { preferredPanelWidth = 0 }
+                    .help("Drag to resize the player; double-click for the automatic size")
+            }
+            .zIndex(1)
     }
 
     @ViewBuilder

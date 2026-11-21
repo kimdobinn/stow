@@ -39,6 +39,14 @@ final class PlayerDock {
         hostWindow?.makeKeyAndOrderFront(nil)
     }
 
+    #if DEBUG
+    /// Shows `state` in the panel with no video playing, for `--snapshot`.
+    func showPreview(_ state: PlaybackScreen?) {
+        screen = state
+        videoLayer = nil
+    }
+    #endif
+
     /// Stops the video (closing the panel once mpv has stopped).
     func stop() {
         screen?.perform(.stop)

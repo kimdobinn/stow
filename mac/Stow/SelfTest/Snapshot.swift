@@ -34,14 +34,21 @@ enum Snapshot {
                 Screen(name: "alarm-running", view: AnyView(MainView(selection: .alarm).frame(width: 1180, height: 760)),
                        phase: samplePlayingPhase(model)),
             ] + playbackScreens(model)
+                + playerPanelScreens(model)
             for appearance in [NSAppearance.Name.aqua, .darkAqua] {
                 let suffix = appearance == .aqua ? "light" : "dark"
                 for screen in screens {
                     model.previewAlarmPhase(screen.phase)
+                    PlayerDock.shared.showPreview(screen.player)
                     let url = output.appending(path: "\(screen.name)-\(suffix).png")
-                    try await render(screen.view.environment(model), appearance: appearance, to: url)
+                    if let size = screen.windowSize {
+                        try await renderWindow(screen.view.environment(model), size: size, appearance: appearance, to: url)
+                    } else {
+                        try await render(screen.view.environment(model), appearance: appearance, to: url)
+                    }
                     print(url.path)
                 }
+                PlayerDock.shared.showPreview(nil)
             }
             model.previewAlarmPhase(.idle)
             return true
@@ -69,6 +76,23 @@ enum Snapshot {
         var name: String
         var view: AnyView
         var phase: AlarmPhase = .idle
+        /// Shown in the player panel beside the section.
+        var player: PlaybackScreen?
+        /// Rendered in a real window of this size (with its toolbar) instead of on its own.
+        var windowSize: CGSize?
+    }
+
+    /// The Inbox with the player panel beside it (no video, so the video area is black), in a
+    /// real window so the toolbar above the panel shows, at a typical and a wide window size.
+    private static func playerPanelScreens(_ model: AppModel) -> [Screen] {
+        guard let video = model.inbox.first?.video ?? model.recentVideos.first else { return [] }
+        let nowPlaying = NowPlaying(index: 0, count: 1, video: video, isLoading: false, isPaused: false,
+                                    position: 130, duration: 870, upNext: nil)
+        let player = PlaybackScreen(mode: .watch, nowPlaying: nowPlaying, showsChrome: true) { _ in }
+        return [CGSize(width: 1280, height: 800), CGSize(width: 1900, height: 900)].map { size in
+            Screen(name: "inbox-player-\(Int(size.width))", view: AnyView(MainView(selection: .inbox)),
+                   player: player, windowSize: size)
+        }
     }
 
     /// A finished test run of two recent videos, so "Last Alarm" shows up (temporary store only).
@@ -113,6 +137,25 @@ enum Snapshot {
         loading.isLoading = true
         return [screen("playback-playing", playing), screen("playback-paused", paused),
                 screen("playback-loading", loading)]
+    }
+
+    /// Renders `view` as the content of a titled window, toolbar included.
+    private static func renderWindow(_ view: some View, size: CGSize, appearance: NSAppearance.Name,
+                                     to url: URL) async throws {
+        let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: -20_000, y: -20_000), size: size),
+                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.appearance = NSAppearance(named: appearance)
+        window.contentViewController = NSHostingController(rootView: view)
+        window.setContentSize(size)
+        window.orderFrontRegardless()
+        try await Task.sleep(for: .seconds(3))
+        defer { window.orderOut(nil) }
+        guard let frameView = window.contentView?.superview,
+              let bitmap = frameView.bitmapImageRepForCachingDisplay(in: frameView.bounds) else { return }
+        frameView.cacheDisplay(in: frameView.bounds, to: bitmap)
+        try bitmap.representation(using: .png, properties: [:])?.write(to: url)
     }
 
     private static func render(_ view: some View, appearance: NSAppearance.Name, to url: URL) async throws {

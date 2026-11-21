@@ -8,6 +8,9 @@ struct PlayerPanel: View {
     @Environment(\.openURL) private var openURL
     let dock: PlayerDock
     let screen: PlaybackScreen
+    /// Reports the height of the title and buttons under the video, so the panel can be sized
+    /// for the video and them to fill the height.
+    var onDetailsHeight: (CGFloat) -> Void = { _ in }
     /// The spot (0–1) on the timeline under the pointer, for the preview above it.
     @State private var scrub: Double?
 
@@ -19,9 +22,11 @@ struct PlayerPanel: View {
                 .background(.black)
             if !dock.isExpanded, let nowPlaying = screen.nowPlaying {
                 details(nowPlaying)
-                Spacer(minLength: 0)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { onDetailsHeight($0) }
             }
         }
+        // The video gets the height the details leave (it shrinks rather than pushing them off).
+        .frame(maxHeight: .infinity, alignment: .top)
         .background(dock.isExpanded ? Color.black : Color(nsColor: .windowBackgroundColor), ignoresSafeAreaEdges: [])
         .background(WindowReader { dock.hostWindow = $0 })
         .task(id: screen.nowPlaying?.video.id) {
@@ -151,7 +156,7 @@ struct PlayerPanel: View {
     private func details(_ nowPlaying: NowPlaying) -> some View {
         let video = nowPlaying.video
         let isWatched = model.isWatched(videoId: video.id)
-        return VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading, spacing: 8) {
             Text(video.title)
                 .font(.title3.weight(.semibold))
                 .lineLimit(3)
@@ -184,7 +189,9 @@ struct PlayerPanel: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
         }
-        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
     }
 }
 
