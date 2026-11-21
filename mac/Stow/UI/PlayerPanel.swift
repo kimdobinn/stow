@@ -8,6 +8,8 @@ struct PlayerPanel: View {
     @Environment(\.openURL) private var openURL
     let dock: PlayerDock
     let screen: PlaybackScreen
+    /// The spot (0–1) on the timeline under the pointer, for the preview above it.
+    @State private var scrub: Double?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -22,6 +24,10 @@ struct PlayerPanel: View {
         }
         .background(dock.isExpanded ? Color.black : Color(nsColor: .windowBackgroundColor), ignoresSafeAreaEdges: [])
         .background(WindowReader { dock.hostWindow = $0 })
+        .task(id: screen.nowPlaying?.video.id) {
+            guard let videoId = screen.nowPlaying?.video.id else { return }
+            StoryboardLoader.shared.load(videoId: videoId, cookiesFile: model.playbackCookiesFile)
+        }
     }
 
     // MARK: Video
@@ -67,8 +73,14 @@ struct PlayerPanel: View {
             Spacer(minLength: 0)
             if let nowPlaying = screen.nowPlaying {
                 VStack(spacing: 2) {
-                    PlaybackProgressBar(position: nowPlaying.position, duration: nowPlaying.duration, height: 4) {
+                    PlaybackProgressBar(position: nowPlaying.position, duration: nowPlaying.duration, height: 4,
+                                        onScrub: { scrub = $0 }) {
                         screen.perform(.seekTo($0))
+                    }
+                    .overlay(alignment: .topLeading) {
+                        if let scrub, let duration = nowPlaying.duration, duration > 0 {
+                            ScrubPreview(fraction: scrub, duration: duration)
+                        }
                     }
                     controlRow(nowPlaying)
                 }
@@ -173,6 +185,45 @@ struct PlayerPanel: View {
             .controlSize(.small)
         }
         .padding(16)
+    }
+}
+
+/// The frame and time at the spot on the timeline under the pointer, floating above it.
+private struct ScrubPreview: View {
+    let fraction: Double
+    let duration: TimeInterval
+    private let loader = StoryboardLoader.shared
+
+    var body: some View {
+        GeometryReader { proxy in
+            let barWidth = proxy.size.width
+            let width = min(max(barWidth * 0.26, 150), 260)
+            let time = fraction * duration
+            let image = loader.image(at: time)
+            let frameHeight = image.map { width * CGFloat($0.height) / CGFloat(max($0.width, 1)) }
+            VStack(spacing: 4) {
+                if let image, let frameHeight {
+                    Image(decorative: image, scale: 1)
+                        .resizable()
+                        .interpolation(.medium)
+                        .frame(width: width, height: frameHeight)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.white.opacity(0.85), lineWidth: 1.5))
+                        .shadow(color: .black.opacity(0.5), radius: 6)
+                }
+                Text(AlarmText.playbackTime(time))
+                    .font(.system(size: 12, weight: .semibold))
+                    .monospacedDigit()
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 4))
+            }
+            .frame(width: width)
+            .fixedSize()
+            .position(x: min(max(fraction * barWidth, width / 2), max(barWidth - width / 2, width / 2)),
+                      y: -((frameHeight.map { $0 + 4 } ?? 0) + 19) / 2 - 2)
+        }
+        .allowsHitTesting(false)
     }
 }
 

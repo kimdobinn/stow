@@ -265,8 +265,11 @@ struct PlaybackProgressBar: View {
     let position: TimeInterval
     let duration: TimeInterval?
     var height: CGFloat = 6
+    /// Hears the spot (0–1) under the pointer while it hovers or drags the bar, nil when it leaves.
+    var onScrub: ((Double?) -> Void)? = nil
     let onSeek: (TimeInterval) -> Void
     @State private var isHovered = false
+    @State private var isDragging = false
     /// What the bar shows: follows `fraction`, gliding only through playback ticks.
     @State private var shown: Double = 0
     /// Where a click asked to go, shown until the player gets there.
@@ -300,9 +303,23 @@ struct PlaybackProgressBar: View {
             }
             .frame(maxHeight: .infinity)
             .contentShape(Rectangle())
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let location): onScrub?(spot(location.x, width: width))
+                case .ended: if !isDragging { onScrub?(nil) }
+                }
+            }
             .gesture(DragGesture(minimumDistance: 0)
-                .onChanged { value in seek(to: value.location.x, width: width, commit: false) }
-                .onEnded { value in seek(to: value.location.x, width: width, commit: true) })
+                .onChanged { value in
+                    isDragging = true
+                    onScrub?(spot(value.location.x, width: width))
+                    seek(to: value.location.x, width: width, commit: false)
+                }
+                .onEnded { value in
+                    isDragging = false
+                    seek(to: value.location.x, width: width, commit: true)
+                    if !isHovered { onScrub?(nil) }
+                })
         }
         .frame(height: height * 4.6)
         .onHover { isHovered = $0 }
@@ -317,6 +334,10 @@ struct PlaybackProgressBar: View {
                 shown = new
             }
         }
+    }
+
+    private func spot(_ x: CGFloat, width: CGFloat) -> Double {
+        width > 0 ? min(max(x / width, 0), 1) : 0
     }
 
     /// Moves the bar under the pointer at once; the player seeks on release.
