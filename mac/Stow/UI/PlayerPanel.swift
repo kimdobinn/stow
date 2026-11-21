@@ -163,6 +163,7 @@ struct PlayerPanel: View {
                        systemImage: isWatched ? "eye.slash" : "checkmark.circle") {
                     model.setWatched(!isWatched, videoId: video.id)
                 }
+                PhoneButton(videoId: video.id)
                 Button("Open on YouTube", systemImage: "safari") {
                     dock.stop()
                     openURL(video.watchURL)
@@ -172,6 +173,42 @@ struct PlayerPanel: View {
             .controlSize(.small)
         }
         .padding(16)
+    }
+}
+
+/// Sends the video to the phone, or says where it is on the way there.
+private struct PhoneButton: View {
+    @Environment(AppModel.self) private var model
+    let videoId: String
+
+    var body: some View {
+        let phone = model.phone
+        if let download = phone.download(videoId: videoId), download.state != .deleted, download.state != .failed {
+            Label(status(download.state), systemImage: download.state == .downloaded ? "iphone" : "arrow.down.circle")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+        } else if phone.isSent(videoId: videoId), phone.download(videoId: videoId) == nil {
+            Label("Sent to phone", systemImage: "arrow.down.circle")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+        } else {
+            Button(phone.download(videoId: videoId) == nil ? "Send to Phone" : "Send to Phone Again", systemImage: "iphone.and.arrow.forward") {
+                phone.send(videoId: videoId)
+            }
+            .disabled(!phone.isPaired)
+            .help(phone.isPaired ? "Download this video on the phone" : "Pair a phone under Phone first")
+        }
+    }
+
+    private func status(_ state: PhoneDownloadState) -> String {
+        switch state {
+        case .queued: "Waiting on phone"
+        case .downloading: "Downloading on phone"
+        case .downloaded: "On phone"
+        case .failed, .deleted: ""
+        }
     }
 }
 

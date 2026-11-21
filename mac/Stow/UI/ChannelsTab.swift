@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Channel list with morning/phone toggles, add-by-URL field, and the subscriptions picker.
+/// Channel list with morning/auto-download toggles, add-by-URL field, and the subscriptions picker.
 struct ChannelsTab: View {
     @Environment(AppModel.self) private var model
     @State private var input = ""
@@ -13,6 +13,9 @@ struct ChannelsTab: View {
         VStack(alignment: .leading, spacing: 16) {
             addBar
             channelList
+            Text("**Morning:** the alarm can play this channel's new videos.  **Auto-download:** each new upload goes to the phone by itself; with it off, only the videos you send (Send to Phone) or pick on the phone are downloaded.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
             subscriptionsBar
         }
         .controlSize(.large)
@@ -58,14 +61,15 @@ struct ChannelsTab: View {
             }
             .width(90)
             .alignment(.center)
-            TableColumn("Phone") { channel in
+            TableColumn("Auto-download") { channel in
                 ColumnToggle(isOn: Binding(
                     get: { channel.phone },
                     set: { model.setPhone($0, channelId: channel.id) }
                 ))
-                .help("Send new videos to the phone")
+                .help(channel.phone ? "New uploads download to the phone automatically"
+                      : "Only videos you send download to the phone")
             }
-            .width(90)
+            .width(120)
             .alignment(.center)
         }
         .alternatingRowBackgrounds(.disabled)
