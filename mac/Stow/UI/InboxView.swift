@@ -4,7 +4,6 @@ import SwiftUI
 /// recent videos per channel, reorderable by dragging. Chips at the top filter by channel.
 struct InboxView: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.openURL) private var openURL
     @State private var confirmsClear = false
     @State private var channelFilter: Channel.ID?
     /// The Recent row a channel is being dragged over. Kept here (not per row) so it can be
@@ -78,7 +77,7 @@ struct InboxView: View {
                                  isDropTarget: dropTarget == shelf.channel.id,
                                  isWatched: { model.isWatched(videoId: $0.id) },
                                  onToggleWatched: toggleWatched) { video in
-                        openURL(video.watchURL)
+                        model.watch(video)
                     } onDrop: { droppedId in
                         dropTarget = nil
                         withAnimation(.snappy) { model.moveChannel(id: droppedId, before: shelf.channel.id) }
@@ -116,7 +115,7 @@ struct InboxView: View {
                 ForEach(videos) { video in
                     VideoCard(video: video,
                               isWatched: model.isWatched(videoId: video.id),
-                              onOpen: { openURL(video.watchURL) },
+                              onOpen: { model.watch(video) },
                               onToggleWatched: { toggleWatched(video) },
                               onDismiss: dismissible ? { model.dismissInbox(videoId: video.id) } : nil)
                 }
@@ -251,6 +250,7 @@ private struct ChannelChips: View {
 
 private struct VideoCard: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openURL) private var openURL
     let video: Video
     let isWatched: Bool
     let onOpen: () -> Void
@@ -282,7 +282,8 @@ private struct VideoCard: View {
         .onHover { isHovered = $0 }
         .help(video.title)
         .contextMenu {
-            Button("Open on YouTube", action: onOpen)
+            Button("Play", action: onOpen)
+            Button("Open on YouTube") { openURL(video.watchURL) }
             Button(isWatched ? "Mark as Unwatched" : "Mark as Watched", action: onToggleWatched)
             Button(model.phone.isSent(videoId: video.id) ? "Send to Phone Again" : "Send to Phone") {
                 model.phone.send(videoId: video.id)

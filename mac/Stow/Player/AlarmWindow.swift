@@ -1,9 +1,11 @@
 import AppKit
 import SwiftUI
 
-/// The alarm's window: mpv's video (drawn in process by `MPVVideoLayer`) with Stow's controls
-/// on top. It opens filling the screen, can be resized, moved or made full screen like any
-/// window, and closing it ends the alarm.
+/// The player window: mpv's video (drawn in process by `MPVVideoLayer`) with Stow's controls
+/// on top, for the alarm or for a video picked to watch. The alarm's opens filling the screen and
+/// closing it ends the alarm; a watched video's opens at a comfortable size and closing it stops
+/// the video. Either can be resized, moved or made full screen like any window. Only one is open:
+/// the alarm replaces a video being watched.
 @MainActor
 enum AlarmWindow {
     private static var window: VideoWindow?
@@ -11,10 +13,12 @@ enum AlarmWindow {
     /// Opens the window for `core` and keeps it current from `updates`; it closes when `updates`
     /// ends (mpv stopped) or the core releases its video. Throws `.player` when the video
     /// output can't be set up.
-    static func present(core: MPVCore, updates: AsyncStream<NowPlaying>,
+    static func present(core: MPVCore, updates: AsyncStream<NowPlaying>, mode: PlaybackMode = .alarm,
                         perform: @escaping @Sendable (PlaybackAction) -> Void) throws {
+        // A video being watched stops for whatever comes next (the alarm, or another video).
+        if let window, window.state.mode == .watch { window.state.perform(.stop) }
         close(window)
-        let state = PlaybackScreen(perform: perform)
+        let state = PlaybackScreen(mode: mode, perform: perform)
         let videoLayer = try MPVVideoLayer(core: core)
         let shown = VideoWindow(state: state, videoLayer: videoLayer)
         window = shown
@@ -50,6 +54,7 @@ final class PlaybackScreen {
     static let seekStep: TimeInterval = 10
     static let volumeStep: Double = 5
 
+    let mode: PlaybackMode
     private(set) var nowPlaying: NowPlaying?
     private(set) var showsChrome = true
     /// The pointer is over the bottom controls; they stay up meanwhile.
@@ -58,9 +63,13 @@ final class PlaybackScreen {
     }
 
     @ObservationIgnored let perform: (PlaybackAction) -> Void
+    /// Set by the window: enters or leaves full screen.
+    @ObservationIgnored var toggleFullScreen: () -> Void = {}
     @ObservationIgnored private var hideTask: Task<Void, Never>?
 
-    init(nowPlaying: NowPlaying? = nil, showsChrome: Bool = true, perform: @escaping (PlaybackAction) -> Void) {
+    init(mode: PlaybackMode = .alarm, nowPlaying: NowPlaying? = nil, showsChrome: Bool = true,
+         perform: @escaping (PlaybackAction) -> Void) {
+        self.mode = mode
         self.nowPlaying = nowPlaying
         self.showsChrome = showsChrome
         self.perform = perform
@@ -102,12 +111,13 @@ final class PlaybackScreen {
         perform(.setMuted(!nowPlaying.isMuted))
     }
 
-    /// Keyboard: space pauses, ←/→ seek 10 s, ↑/↓ volume, M mutes, N skips, esc or return ends the alarm.
-    /// Every key also brings up the controls.
+    /// Keyboard: space pauses, ←/→ seek 10 s, ↑/↓ volume, M mutes, N skips, F full screen; esc (or
+    /// return, for the alarm) ends the alarm or closes the video. Every key also brings up the controls.
     func handleKey(code: UInt16, characters: String?) {
         revealChrome()
         switch code {
-        case 53, 36, 76: perform(.stop)
+        case 53: perform(.stop)
+        case 36, 76: if mode == .alarm { perform(.stop) }
         case 49: togglePause()
         case 123: perform(.seekBy(-Self.seekStep))
         case 124: perform(.seekBy(Self.seekStep))
@@ -117,6 +127,7 @@ final class PlaybackScreen {
             switch characters?.lowercased() {
             case "n": if nowPlaying?.upNext != nil { perform(.next) }
             case "m": toggleMute()
+            case "f": toggleFullScreen()
             default: break
             }
         }
@@ -142,18 +153,19 @@ private final class VideoWindow: NSWindow, NSWindowDelegate {
         self.state = state
         self.videoLayer = videoLayer
         let screen = NSScreen.main ?? NSScreen.screens.first
-        let frame = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 720)
+        let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 720)
+        let frame = state.mode == .alarm ? visible : Self.watchFrame(in: visible)
         super.init(contentRect: frame, styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                    backing: .buffered, defer: false)
         setFrame(frame, display: false)
-        title = "Stow Alarm"
+        title = state.mode == .alarm ? "Stow Alarm" : "Stow Player"
         titleVisibility = .hidden
         titlebarAppearsTransparent = true
         backgroundColor = .black
         appearance = NSAppearance(named: .darkAqua)
         isReleasedWhenClosed = false
         acceptsMouseMovedEvents = true
-        collectionBehavior = [.fullScreenPrimary, .moveToActiveSpace]
+        collectionBehavior = state.mode == .alarm ? [.fullScreenPrimary, .moveToActiveSpace] : [.fullScreenPrimary]
         minSize = NSSize(width: 640, height: 360)
         delegate = self
 
@@ -170,9 +182,21 @@ private final class VideoWindow: NSWindow, NSWindowDelegate {
         container.addSubview(video)
         container.addSubview(host)
         contentView = container
+        state.toggleFullScreen = { [weak self] in self?.toggleFullScreen(nil) }
     }
 
-    /// Closing the window is "I'm awake": the alarm stops, and the window closes once mpv has.
+    /// 16:9, most of the screen, centered.
+    private static func watchFrame(in visible: NSRect) -> NSRect {
+        var width = min(visible.width * 0.82, 1760)
+        var height = width * 9 / 16
+        if height > visible.height * 0.9 {
+            height = visible.height * 0.9
+            width = height * 16 / 9
+        }
+        return NSRect(x: visible.midX - width / 2, y: visible.midY - height / 2, width: width, height: height)
+    }
+
+    /// Closing the window is "I'm awake" (or stops the video): the window closes once mpv has.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         if closesForReal { return true }
         state.perform(.stop)
@@ -192,6 +216,11 @@ private final class VideoWindow: NSWindow, NSWindowDelegate {
     /// Keys without ⌘ are the player's (space, arrows, esc…); ⌘-shortcuts (⌘W, ⌘Q…) work as usual.
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown, event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
+            // Watching full screen, esc leaves full screen first.
+            if event.keyCode == 53, state.mode == .watch, styleMask.contains(.fullScreen) {
+                toggleFullScreen(nil)
+                return
+            }
             state.handleKey(code: event.keyCode, characters: event.charactersIgnoringModifiers)
             return
         }

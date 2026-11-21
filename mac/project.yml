@@ -8,9 +8,11 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     MACOSX_DEPLOYMENT_TARGET: "26.0"
-    CODE_SIGN_IDENTITY: "-"
+    # A stable identity, so macOS keeps Bluetooth and Local Network permissions across rebuilds
+    # (an ad-hoc signature is a new app to privacy settings every build).
+    CODE_SIGN_IDENTITY: "Apple Development: Dobin Kim (S46UCL28BH)"
     CODE_SIGN_STYLE: Manual
-    DEVELOPMENT_TEAM: ""
+    DEVELOPMENT_TEAM: LYD6WV79Y4
     ENABLE_HARDENED_RUNTIME: NO
     ENABLE_APP_SANDBOX: NO
 targets:

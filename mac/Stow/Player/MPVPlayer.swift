@@ -9,11 +9,13 @@ actor MPVPlayer: AlarmPlayer {
     private let extraArguments: [String]
     /// Whether to play in the alarm window; off (no video output) for tests and the dry run.
     private let showsControls: Bool
+    private let mode: PlaybackMode
     private var session: MPVSession?
 
-    init(extraArguments: [String] = [], showsControls: Bool = false) {
+    init(extraArguments: [String] = [], showsControls: Bool = false, mode: PlaybackMode = .alarm) {
         self.extraArguments = extraArguments
         self.showsControls = showsControls
+        self.mode = mode
     }
 
     func play(playlist: [PlayableVideo], outputDeviceUID: String?, cookiesFile: URL?) async throws -> AsyncStream<PlayerEvent> {
@@ -33,7 +35,7 @@ actor MPVPlayer: AlarmPlayer {
         do {
             // The window's video output has to exist before the first video starts.
             if showsControls {
-                try await AlarmWindow.present(core: core, updates: session.nowPlaying) { action in
+                try await AlarmWindow.present(core: core, updates: session.nowPlaying, mode: mode) { action in
                     Task { await session.perform(action) }
                 }
             }

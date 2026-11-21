@@ -18,6 +18,11 @@ struct NowPlaying: Equatable, Sendable {
     var isMuted = false
 }
 
+/// Who the player window is for: the morning alarm, or a video picked to watch.
+enum PlaybackMode: Sendable {
+    case alarm, watch
+}
+
 /// What the on-screen controls or the phone remote ask the player to do.
 enum PlaybackAction: Equatable, Sendable {
     case setPaused(Bool)

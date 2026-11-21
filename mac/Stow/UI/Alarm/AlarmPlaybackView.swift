@@ -1,12 +1,15 @@
 import SwiftUI
 
-/// The controls drawn over the alarm video: a clock that always shows, and (after any mouse
-/// movement or key, a new video, or while paused) the title, a progress bar, playback buttons
-/// and a big "I'm Awake" button that ends the alarm.
+/// The controls drawn over the video: (after any mouse movement or key, a new video, or while
+/// paused) the title, a progress bar and playback buttons. The alarm also has a clock that always
+/// shows and a big "I'm Awake" button; a watched video gets smaller type and a full-screen button.
 struct AlarmPlaybackView: View {
     let screen: PlaybackScreen
 
     private var chrome: Bool { screen.showsChrome }
+    private var isAlarm: Bool { screen.mode == .alarm }
+    /// Type and spacing for a window across the room (alarm) or at the desk (watching).
+    private var scale: CGFloat { isAlarm ? 1 : 0.7 }
 
     var body: some View {
         ZStack {
@@ -23,9 +26,9 @@ struct AlarmPlaybackView: View {
                         .allowsHitTesting(chrome)
                 }
             }
-            .padding(.horizontal, 72)
-            .padding(.top, 52)
-            .padding(.bottom, 56)
+            .padding(.horizontal, 72 * scale)
+            .padding(.top, 52 * scale)
+            .padding(.bottom, 56 * scale)
         }
         .foregroundStyle(.white)
         .environment(\.colorScheme, .dark)
@@ -57,16 +60,18 @@ struct AlarmPlaybackView: View {
 
     private var topBar: some View {
         HStack(alignment: .top) {
-            Clock()
+            if isAlarm { Clock() }
             Spacer(minLength: 40)
             if let nowPlaying = screen.nowPlaying {
                 VStack(alignment: .trailing, spacing: 14) {
-                    Label("Morning alarm · \(nowPlaying.index + 1) of \(nowPlaying.count)", systemImage: "alarm.fill")
-                        .font(.system(size: 20, weight: .semibold))
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 10)
-                        .background(.ultraThinMaterial, in: Capsule())
-                    KeyboardHints()
+                    if isAlarm {
+                        Label("Morning alarm · \(nowPlaying.index + 1) of \(nowPlaying.count)", systemImage: "alarm.fill")
+                            .font(.system(size: 20, weight: .semibold))
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 10)
+                            .background(.ultraThinMaterial, in: Capsule())
+                    }
+                    KeyboardHints(mode: screen.mode, hasNext: nowPlaying.upNext != nil)
                 }
                 .opacity(chrome ? 1 : 0)
             }
@@ -99,15 +104,19 @@ struct AlarmPlaybackView: View {
     private func loading(_ nowPlaying: NowPlaying) -> some View {
         VStack(spacing: 22) {
             Spinner()
-            Text(nowPlaying.index == 0 ? "Good morning" : "Up next")
-                .font(.system(size: 44, weight: .bold, design: .rounded))
+            if isAlarm {
+                Text(nowPlaying.index == 0 ? "Good morning" : "Up next")
+                    .font(.system(size: 44, weight: .bold, design: .rounded))
+            }
             Text(nowPlaying.video.title)
                 .font(.system(size: 24, weight: .medium))
                 .opacity(0.75)
                 .lineLimit(1)
                 .frame(maxWidth: 1000)
-            AwakeButton { screen.perform(.stop) }
-                .padding(.top, 16)
+            if isAlarm {
+                AwakeButton { screen.perform(.stop) }
+                    .padding(.top, 16)
+            }
         }
         .shadow(color: .black.opacity(0.4), radius: 16)
     }
@@ -115,11 +124,11 @@ struct AlarmPlaybackView: View {
     // MARK: Bottom
 
     private func bottomBar(_ nowPlaying: NowPlaying) -> some View {
-        VStack(alignment: .leading, spacing: 22) {
+        VStack(alignment: .leading, spacing: 22 * scale) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 12) {
                     Text(nowPlaying.video.channelTitle)
-                        .font(.system(size: 22, weight: .semibold))
+                        .font(.system(size: 22 * scale, weight: .semibold))
                         .opacity(0.8)
                     if nowPlaying.video.isMembersOnly {
                         Label("Members only", systemImage: "star.fill")
@@ -130,7 +139,7 @@ struct AlarmPlaybackView: View {
                     }
                 }
                 Text(nowPlaying.video.title)
-                    .font(.system(size: 40, weight: .bold))
+                    .font(.system(size: 40 * scale, weight: .bold))
                     .lineLimit(2)
                     .frame(maxWidth: 1600, alignment: .leading)
             }
@@ -151,11 +160,13 @@ struct AlarmPlaybackView: View {
                 ControlButton(systemImage: "goforward.10", help: "Forward 10 seconds (→)", size: 26) {
                     screen.perform(.seekBy(PlaybackScreen.seekStep))
                 }
-                ControlButton(systemImage: "forward.end.fill", help: "Next video (N)", size: 26) {
-                    screen.perform(.next)
+                if isAlarm || nowPlaying.upNext != nil {
+                    ControlButton(systemImage: "forward.end.fill", help: "Next video (N)", size: 26) {
+                        screen.perform(.next)
+                    }
+                    .disabled(nowPlaying.upNext == nil)
+                    .opacity(nowPlaying.upNext == nil ? 0.35 : 1)
                 }
-                .disabled(nowPlaying.upNext == nil)
-                .opacity(nowPlaying.upNext == nil ? 0.35 : 1)
 
                 VolumeControl(volume: nowPlaying.volume, isMuted: nowPlaying.isMuted,
                               onToggleMute: { screen.toggleMute() },
@@ -178,7 +189,13 @@ struct AlarmPlaybackView: View {
                         .frame(maxWidth: 700, alignment: .leading)
                 }
                 Spacer(minLength: 24)
-                AwakeButton { screen.perform(.stop) }
+                if isAlarm {
+                    AwakeButton { screen.perform(.stop) }
+                } else {
+                    ControlButton(systemImage: "arrow.up.left.and.arrow.down.right", help: "Full screen (F)", size: 24) {
+                        screen.toggleFullScreen()
+                    }
+                }
             }
         }
         .onHover { screen.isPointerOverControls = $0 }
@@ -367,13 +384,17 @@ private struct VolumeControl: View {
 }
 
 private struct KeyboardHints: View {
+    let mode: PlaybackMode
+    let hasNext: Bool
+
     var body: some View {
         HStack(spacing: 18) {
             hint("space", "pause")
             hint("← →", "10 s")
             hint("↑ ↓", "volume")
-            hint("N", "next")
-            hint("esc", "I'm awake")
+            if mode == .alarm || hasNext { hint("N", "next") }
+            if mode == .watch { hint("F", "full screen") }
+            hint("esc", mode == .alarm ? "I'm awake" : "close")
         }
         .font(.system(size: 16, weight: .medium))
         .shadow(color: .black.opacity(0.5), radius: 6)
