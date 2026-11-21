@@ -86,6 +86,7 @@ struct StowApp: App {
         let model = AppModel(youtube: YouTubeClient(), account: AccountManager(), alarmServices: alarmServices)
         Self.cleanUpChildProcesses()
         model.start()
+        ScrollEngine.shared.install { [weak model] in model?.scrolling ?? .default }
         _model = State(initialValue: model)
     }
 
