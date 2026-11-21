@@ -18,9 +18,25 @@ final class PlayerDock {
     /// Full screen was entered from the panel, so leaving the panel leaves it too.
     @ObservationIgnored private var enteredFullScreen = false
 
+    // The window grows to the right for the panel, so the section keeps its width.
+    /// The section's width while the panel is beside it, when the window grew for the panel.
+    var keptSectionWidth: CGFloat?
+    /// The window is being widened or narrowed for the panel: the section keeps its width exactly.
+    private(set) var isResizingWindow = false
+    /// How wide the panel will be when it opens, and how wide the section is (set by the window).
+    @ObservationIgnored var plannedPanelWidth: CGFloat = 640
+    @ObservationIgnored var detailWidth: CGFloat = 0
+    @ObservationIgnored private var originalFrame: CGRect?
+    @ObservationIgnored private var grownFrame: CGRect?
+    /// The panel that is closing, while the window narrows.
+    @ObservationIgnored private weak var closing: PlaybackScreen?
+    static let minSectionWidth: CGFloat = 320
+    static let resizeDuration: TimeInterval = 0.25
+
     /// Shows a new video's controls and video, replacing any video playing in the panel.
     func present(core: MPVCore, updates: AsyncStream<NowPlaying>,
                  perform: @escaping @Sendable (PlaybackAction) -> Void) throws {
+        let opening = screen == nil || screen === closing
         screen?.perform(.stop)
         let state = PlaybackScreen(mode: .watch, perform: perform)
         let layer = try MPVVideoLayer(core: core)
@@ -37,6 +53,45 @@ final class PlayerDock {
         }
         installKeys()
         hostWindow?.makeKeyAndOrderFront(nil)
+        if opening { growWindow() }
+    }
+
+    /// Widens the window to the right by the panel's width, so the section beside it stays as it is.
+    private func growWindow() {
+        closing = nil
+        guard let window = hostWindow, !window.styleMask.contains(.fullScreen),
+              let visible = (window.screen ?? NSScreen.main)?.visibleFrame else {
+            keptSectionWidth = nil
+            return
+        }
+        // Opened again while narrowing back: widen to where it was.
+        if let grownFrame, originalFrame != nil, keptSectionWidth != nil {
+            resize(window, to: grownFrame) {}
+            return
+        }
+        let wanted = plannedPanelWidth + 1
+        let original = originalFrame ?? window.frame
+        let grown = PanelWindowLayout.grownFrame(window: window.frame, visible: visible, grow: wanted)
+        let shortfall = wanted - (grown.width - window.frame.width)
+        keptSectionWidth = max(detailWidth - shortfall, Self.minSectionWidth)
+        guard grown != window.frame else { return }
+        originalFrame = original
+        grownFrame = grown
+        resize(window, to: grown) {}
+    }
+
+    private func resize(_ window: NSWindow, to frame: CGRect, then done: @escaping @MainActor () -> Void) {
+        isResizingWindow = true
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Self.resizeDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            window.animator().setFrame(frame, display: true)
+        } completionHandler: {
+            MainActor.assumeIsolated {
+                self.isResizingWindow = false
+                done()
+            }
+        }
     }
 
     #if DEBUG
@@ -67,8 +122,30 @@ final class PlayerDock {
     }
 
     private func clear(ifShowing state: PlaybackScreen) {
-        guard screen === state else { return }
+        guard screen === state, closing !== state else { return }
         state.stopTimers()
+        // Narrow the window back first, the panel shrinking away on the right.
+        if !enteredFullScreen, let window = hostWindow, !window.styleMask.contains(.fullScreen),
+           let grown = grownFrame, let original = originalFrame, let kept = keptSectionWidth {
+            let target = PanelWindowLayout.shrunkFrame(current: window.frame, grown: grown, original: original,
+                                                       shrink: detailWidth - kept, minWidth: window.minSize.width)
+            closing = state
+            isExpanded = false
+            resize(window, to: target) { [weak self] in
+                guard let self, self.closing === state else { return }
+                self.closing = nil
+                self.finishClosing(state)
+            }
+            return
+        }
+        finishClosing(state)
+    }
+
+    private func finishClosing(_ state: PlaybackScreen) {
+        guard screen === state else { return }
+        originalFrame = nil
+        grownFrame = nil
+        keptSectionWidth = nil
         screen = nil
         videoLayer = nil
         if enteredFullScreen, let window = hostWindow, window.styleMask.contains(.fullScreen) {

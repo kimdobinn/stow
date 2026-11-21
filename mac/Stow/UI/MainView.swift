@@ -59,7 +59,7 @@ struct MainView: View {
             .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
         } detail: {
             let range = panelWidthRange(in: detailSize)
-            let panelWidth = Self.clamp(preferredPanelWidth > 0 ? preferredPanelWidth : detailSize.width * 0.6, to: range)
+            let panelWidth = currentPanelWidth(range: range)
             HStack(spacing: 0) {
                 detail
                     .frame(maxWidth: dock.isExpanded && dock.screen != nil ? 0 : .infinity)
@@ -72,7 +72,12 @@ struct MainView: View {
                         .transition(.move(edge: .trailing))
                 }
             }
-            .onGeometryChange(for: CGSize.self) { $0.size } action: { detailSize = $0 }
+            .onGeometryChange(for: CGSize.self) { $0.size } action: {
+                detailSize = $0
+                dock.detailWidth = $0.width
+            }
+            .onChange(of: plannedPanelWidth, initial: true) { dock.plannedPanelWidth = $1 }
+            .background(WindowReader { dock.hostWindow = $0 })
             .animation(.snappy(duration: 0.3), value: dock.screen == nil)
             .animation(.snappy(duration: 0.3), value: dock.isExpanded)
             .navigationTitle(selection.title)
@@ -96,6 +101,31 @@ struct MainView: View {
         return Self.minPanelWidth...max(Self.minPanelWidth, upper)
     }
 
+    /// The video and the details under it fill the height at this width.
+    private var fillsHeightWidth: CGFloat { (detailSize.height - panelDetailsHeight) * 16 / 9 }
+
+    /// How wide the panel is when it opens (the window grows by this much).
+    private var plannedPanelWidth: CGFloat {
+        max(preferredPanelWidth > 0 ? preferredPanelWidth : fillsHeightWidth, Self.minPanelWidth)
+    }
+
+    /// When the window grew for the panel, the section keeps its width and the panel takes the
+    /// rest; otherwise the panel takes its share of the window.
+    private func currentPanelWidth(range: ClosedRange<CGFloat>) -> CGFloat {
+        if let kept = keptSectionWidth(in: detailSize.width) {
+            return max(detailSize.width - kept - 1, 0)
+        }
+        return Self.clamp(preferredPanelWidth > 0 ? preferredPanelWidth : fillsHeightWidth, to: range)
+    }
+
+    /// The section's width beside the panel, when the window grew for it. While the window
+    /// resizes it stays exactly as it was; after that it gives way to keep the panel usable.
+    private func keptSectionWidth(in width: CGFloat) -> CGFloat? {
+        guard let kept = dock.keptSectionWidth else { return nil }
+        if dock.isResizingWindow { return min(kept, width - 1) }
+        return min(max(kept, Self.minSectionWidth), max(width - 1 - Self.minPanelWidth, Self.minSectionWidth))
+    }
+
     private static func clamp(_ width: CGFloat, to range: ClosedRange<CGFloat>) -> CGFloat {
         min(max(width, range.lowerBound), range.upperBound)
     }
@@ -114,11 +144,18 @@ struct MainView: View {
                             .onChanged { drag in
                                 let start = dragStartWidth ?? width
                                 dragStartWidth = start
-                                preferredPanelWidth = Self.clamp(start - drag.translation.width, to: range)
+                                let panel = Self.clamp(start - drag.translation.width, to: range)
+                                preferredPanelWidth = panel
+                                if dock.keptSectionWidth != nil { dock.keptSectionWidth = detailSize.width - panel - 1 }
                             }
                             .onEnded { _ in dragStartWidth = nil }
                     )
-                    .onTapGesture(count: 2) { preferredPanelWidth = 0 }
+                    .onTapGesture(count: 2) {
+                        preferredPanelWidth = 0
+                        if dock.keptSectionWidth != nil {
+                            dock.keptSectionWidth = detailSize.width - Self.clamp(fillsHeightWidth, to: range) - 1
+                        }
+                    }
                     .help("Drag to resize the player; double-click for the automatic size")
             }
             .zIndex(1)

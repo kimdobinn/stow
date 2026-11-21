@@ -28,7 +28,6 @@ struct PlayerPanel: View {
         // The video gets the height the details leave (it shrinks rather than pushing them off).
         .frame(maxHeight: .infinity, alignment: .top)
         .background(dock.isExpanded ? Color.black : Color(nsColor: .windowBackgroundColor), ignoresSafeAreaEdges: [])
-        .background(WindowReader { dock.hostWindow = $0 })
         .task(id: screen.nowPlaying?.video.id) {
             guard let videoId = screen.nowPlaying?.video.id else { return }
             StoryboardLoader.shared.load(videoId: videoId, cookiesFile: model.playbackCookiesFile)
@@ -283,7 +282,7 @@ private final class VideoLayerView: NSView {
 }
 
 /// Reports the window the view is in.
-private struct WindowReader: NSViewRepresentable {
+struct WindowReader: NSViewRepresentable {
     let onWindow: (NSWindow) -> Void
 
     func makeNSView(context: Context) -> NSView { ReaderView(onWindow: onWindow) }
