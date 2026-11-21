@@ -31,6 +31,12 @@ enum StreamCache {
         return now.timeIntervalSince(modified) < lifetime
     }
 
+    /// The saved answer for `videoId`, if it's recent enough to use.
+    static func cached(_ videoId: String, in directory: URL = directory, now: Date = .now) -> Data? {
+        guard isFresh(videoId, in: directory, now: now) else { return nil }
+        return try? Data(contentsOf: file(for: videoId, in: directory))
+    }
+
     /// Keeps yt-dlp's answer for `videoId`, unless it's a live or upcoming stream (those addresses
     /// don't keep) or not a video at all.
     @discardableResult

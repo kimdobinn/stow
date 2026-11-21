@@ -30,6 +30,8 @@ final class AccountManager: AccountService {
         await WebDataStore.removeAll()
         removeCookiesFile()
         CookieCopy.removeAll(for: cookiesFile)
+        // Videos looked up ahead were looked up as the signed-in account.
+        StreamCache.removeAll()
     }
 
     func fetchSubscriptions() async throws -> [ChannelInfo] {

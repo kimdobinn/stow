@@ -2,8 +2,9 @@ import Foundation
 import ImageIO
 import Observation
 
-/// Fetches the timeline preview frames for the video being watched: the storyboard (one
-/// `yt-dlp -J` run per video) and its sheets, as the pointer reaches them.
+/// Fetches the timeline preview frames for the video being watched: the storyboard (from the
+/// lookup saved for playback, else one `yt-dlp -J` run per video) and its sheets, as the pointer
+/// reaches them.
 @MainActor
 @Observable
 final class StoryboardLoader {
@@ -62,13 +63,17 @@ final class StoryboardLoader {
     }
 
     private nonisolated static func fetchStoryboard(videoId: String, cookiesFile: URL?) async -> Storyboard? {
+        // The answer looked up ahead for playback lists the storyboards too.
+        if let saved = StreamCache.cached(videoId), let storyboard = Storyboard.parse(json: saved) {
+            return storyboard
+        }
         // Members-only videos need the sign-in to be listed at all.
         let cookies = cookiesFile.flatMap { try? CookieCopy.make(of: $0) }
         defer { if let cookies { try? FileManager.default.removeItem(at: cookies) } }
-        var arguments = ["-J", "--no-playlist", "--skip-download"]
-        if let cookies { arguments += ["--cookies", cookies.path] }
-        arguments.append("https://www.youtube.com/watch?v=\(videoId)")
+        // The same lookup mpv makes, so it's kept for the next time this video plays.
+        let arguments = StreamCache.arguments(videoId: videoId, format: MPVPlayer.format, cookies: cookies)
         guard let output = try? await YTDLP().run(arguments, timeout: .seconds(60)) else { return nil }
+        StreamCache.store(json: output.stdout, videoId: videoId)
         return Storyboard.parse(json: output.stdout)
     }
 

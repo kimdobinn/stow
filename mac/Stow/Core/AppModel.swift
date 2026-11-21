@@ -429,8 +429,6 @@ final class AppModel {
 
     func signOut() async {
         await account.signOut()
-        // Looked-up streams were for the signed-in account.
-        StreamCache.removeAll()
         authGeneration += 1
         signInState = .signedOut
         record(.info, "Signed out of YouTube.")

@@ -32,6 +32,16 @@ struct StreamCacheTests {
         #expect(!StreamCache.isFresh("livelivelive", in: directory))
     }
 
+    @Test func handsBackOnlyFreshAnswers() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        #expect(StreamCache.cached("abcdefghijk", in: directory) == nil)
+        StreamCache.store(json: json("abcdefghijk"), videoId: "abcdefghijk", in: directory)
+        #expect(StreamCache.cached("abcdefghijk", in: directory) == json("abcdefghijk"))
+        let later = Date.now.addingTimeInterval(StreamCache.lifetime + 1)
+        #expect(StreamCache.cached("abcdefghijk", in: directory, now: later) == nil)
+    }
+
     @Test func oldAnswersAreStale() throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
