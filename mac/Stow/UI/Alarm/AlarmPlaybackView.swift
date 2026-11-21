@@ -1,15 +1,12 @@
 import SwiftUI
 
-/// The controls drawn over the video: (after any mouse movement or key, a new video, or while
-/// paused) the title, a progress bar and playback buttons. The alarm also has a clock that always
-/// shows and a big "I'm Awake" button; a watched video gets smaller type and a full-screen button.
+/// The controls drawn over the alarm video: a clock that always shows, and (after any mouse
+/// movement or key, a new video, or while paused) the title, a progress bar, playback buttons
+/// and a big "I'm Awake" button that ends the alarm.
 struct AlarmPlaybackView: View {
     let screen: PlaybackScreen
 
     private var chrome: Bool { screen.showsChrome }
-    private var isAlarm: Bool { screen.mode == .alarm }
-    /// Type and spacing for a window across the room (alarm) or at the desk (watching).
-    private var scale: CGFloat { isAlarm ? 1 : 0.7 }
 
     var body: some View {
         ZStack {
@@ -26,9 +23,9 @@ struct AlarmPlaybackView: View {
                         .allowsHitTesting(chrome)
                 }
             }
-            .padding(.horizontal, 72 * scale)
-            .padding(.top, 52 * scale)
-            .padding(.bottom, 56 * scale)
+            .padding(.horizontal, 72)
+            .padding(.top, 52)
+            .padding(.bottom, 56)
         }
         .foregroundStyle(.white)
         .environment(\.colorScheme, .dark)
@@ -60,18 +57,16 @@ struct AlarmPlaybackView: View {
 
     private var topBar: some View {
         HStack(alignment: .top) {
-            if isAlarm { Clock() }
+            Clock()
             Spacer(minLength: 40)
             if let nowPlaying = screen.nowPlaying {
                 VStack(alignment: .trailing, spacing: 14) {
-                    if isAlarm {
-                        Label("Morning alarm · \(nowPlaying.index + 1) of \(nowPlaying.count)", systemImage: "alarm.fill")
-                            .font(.system(size: 20, weight: .semibold))
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 10)
-                            .background(.ultraThinMaterial, in: Capsule())
-                    }
-                    KeyboardHints(mode: screen.mode, hasNext: nowPlaying.upNext != nil)
+                    Label("Morning alarm · \(nowPlaying.index + 1) of \(nowPlaying.count)", systemImage: "alarm.fill")
+                        .font(.system(size: 20, weight: .semibold))
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 10)
+                        .background(.ultraThinMaterial, in: Capsule())
+                    KeyboardHints()
                 }
                 .opacity(chrome ? 1 : 0)
             }
@@ -104,19 +99,15 @@ struct AlarmPlaybackView: View {
     private func loading(_ nowPlaying: NowPlaying) -> some View {
         VStack(spacing: 22) {
             Spinner()
-            if isAlarm {
-                Text(nowPlaying.index == 0 ? "Good morning" : "Up next")
-                    .font(.system(size: 44, weight: .bold, design: .rounded))
-            }
+            Text(nowPlaying.index == 0 ? "Good morning" : "Up next")
+                .font(.system(size: 44, weight: .bold, design: .rounded))
             Text(nowPlaying.video.title)
                 .font(.system(size: 24, weight: .medium))
                 .opacity(0.75)
                 .lineLimit(1)
                 .frame(maxWidth: 1000)
-            if isAlarm {
-                AwakeButton { screen.perform(.stop) }
-                    .padding(.top, 16)
-            }
+            AwakeButton { screen.perform(.stop) }
+                .padding(.top, 16)
         }
         .shadow(color: .black.opacity(0.4), radius: 16)
     }
@@ -124,11 +115,11 @@ struct AlarmPlaybackView: View {
     // MARK: Bottom
 
     private func bottomBar(_ nowPlaying: NowPlaying) -> some View {
-        VStack(alignment: .leading, spacing: 22 * scale) {
+        VStack(alignment: .leading, spacing: 22) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 12) {
                     Text(nowPlaying.video.channelTitle)
-                        .font(.system(size: 22 * scale, weight: .semibold))
+                        .font(.system(size: 22, weight: .semibold))
                         .opacity(0.8)
                     if nowPlaying.video.isMembersOnly {
                         Label("Members only", systemImage: "star.fill")
@@ -139,7 +130,7 @@ struct AlarmPlaybackView: View {
                     }
                 }
                 Text(nowPlaying.video.title)
-                    .font(.system(size: 40 * scale, weight: .bold))
+                    .font(.system(size: 40, weight: .bold))
                     .lineLimit(2)
                     .frame(maxWidth: 1600, alignment: .leading)
             }
@@ -160,13 +151,11 @@ struct AlarmPlaybackView: View {
                 ControlButton(systemImage: "goforward.10", help: "Forward 10 seconds (→)", size: 26) {
                     screen.perform(.seekBy(PlaybackScreen.seekStep))
                 }
-                if isAlarm || nowPlaying.upNext != nil {
-                    ControlButton(systemImage: "forward.end.fill", help: "Next video (N)", size: 26) {
-                        screen.perform(.next)
-                    }
-                    .disabled(nowPlaying.upNext == nil)
-                    .opacity(nowPlaying.upNext == nil ? 0.35 : 1)
+                ControlButton(systemImage: "forward.end.fill", help: "Next video (N)", size: 26) {
+                    screen.perform(.next)
                 }
+                .disabled(nowPlaying.upNext == nil)
+                .opacity(nowPlaying.upNext == nil ? 0.35 : 1)
 
                 VolumeControl(volume: nowPlaying.volume, isMuted: nowPlaying.isMuted,
                               onToggleMute: { screen.toggleMute() },
@@ -189,13 +178,7 @@ struct AlarmPlaybackView: View {
                         .frame(maxWidth: 700, alignment: .leading)
                 }
                 Spacer(minLength: 24)
-                if isAlarm {
-                    AwakeButton { screen.perform(.stop) }
-                } else {
-                    ControlButton(systemImage: "arrow.up.left.and.arrow.down.right", help: "Full screen (F)", size: 24) {
-                        screen.toggleFullScreen()
-                    }
-                }
+                AwakeButton { screen.perform(.stop) }
             }
         }
         .onHover { screen.isPointerOverControls = $0 }
@@ -276,17 +259,26 @@ private struct ControlButton: View {
     }
 }
 
-/// A thin bar that grows on hover; click anywhere on it to jump there.
-private struct PlaybackProgressBar: View {
+/// A thin bar that grows on hover; click (or drag) anywhere on it to jump there at once, like
+/// YouTube. Only regular playback (mpv reports the position about once a second) glides.
+struct PlaybackProgressBar: View {
     let position: TimeInterval
     let duration: TimeInterval?
+    var height: CGFloat = 6
     let onSeek: (TimeInterval) -> Void
     @State private var isHovered = false
+    /// What the bar shows: follows `fraction`, gliding only through playback ticks.
+    @State private var shown: Double = 0
+    /// Where a click asked to go, shown until the player gets there.
+    @State private var pending: Double?
+    @State private var pendingTimeout: Task<Void, Never>?
 
     private var fraction: Double {
         guard let duration, duration > 0 else { return 0 }
         return min(max(position / duration, 0), 1)
     }
+
+    private var displayed: Double { pending ?? shown }
 
     var body: some View {
         GeometryReader { proxy in
@@ -295,29 +287,51 @@ private struct PlaybackProgressBar: View {
                 Capsule().fill(.white.opacity(0.28))
                 Capsule()
                     .fill(StowBrand.gradient)
-                    .frame(width: max(width * fraction, isHovered ? 10 : 6))
-                    .animation(.linear(duration: 1), value: fraction)
+                    .frame(width: max(width * displayed, isHovered ? height + 4 : height))
             }
-            .frame(height: isHovered ? 10 : 6)
+            .frame(height: isHovered ? height + 4 : height)
             .overlay(alignment: .leading) {
                 Circle()
                     .fill(.white)
-                    .frame(width: 20, height: 20)
+                    .frame(width: height * 3.3, height: height * 3.3)
                     .shadow(color: .black.opacity(0.4), radius: 4)
-                    .offset(x: width * fraction - 10)
+                    .offset(x: width * displayed - height * 1.65)
                     .opacity(isHovered ? 1 : 0)
-                    .animation(.linear(duration: 1), value: fraction)
             }
             .frame(maxHeight: .infinity)
             .contentShape(Rectangle())
-            .onTapGesture { location in
-                guard let duration, duration > 0, width > 0 else { return }
-                onSeek(min(max(location.x / width, 0), 1) * duration)
-            }
+            .gesture(DragGesture(minimumDistance: 0)
+                .onChanged { value in seek(to: value.location.x, width: width, commit: false) }
+                .onEnded { value in seek(to: value.location.x, width: width, commit: true) })
         }
-        .frame(height: 28)
+        .frame(height: height * 4.6)
         .onHover { isHovered = $0 }
         .animation(.easeOut(duration: 0.15), value: isHovered)
+        .onAppear { shown = fraction }
+        .onChange(of: fraction) { old, new in
+            if let pending, let duration, abs(new - pending) * duration < 2 { self.pending = nil }
+            let step = (new - old) * (duration ?? 0)
+            if step > 0, step < 1.6 {
+                withAnimation(.linear(duration: 1)) { shown = new }
+            } else {
+                shown = new
+            }
+        }
+    }
+
+    /// Moves the bar under the pointer at once; the player seeks on release.
+    private func seek(to x: CGFloat, width: CGFloat, commit: Bool) {
+        guard let duration, duration > 0, width > 0 else { return }
+        let target = min(max(x / width, 0), 1)
+        pending = target
+        guard commit else { return }
+        onSeek(target * duration)
+        // If the player never gets there (seek refused), stop pretending after a moment.
+        pendingTimeout?.cancel()
+        pendingTimeout = Task {
+            try? await Task.sleep(for: .seconds(3))
+            if !Task.isCancelled { pending = nil }
+        }
     }
 }
 
@@ -384,17 +398,13 @@ private struct VolumeControl: View {
 }
 
 private struct KeyboardHints: View {
-    let mode: PlaybackMode
-    let hasNext: Bool
-
     var body: some View {
         HStack(spacing: 18) {
             hint("space", "pause")
             hint("← →", "10 s")
             hint("↑ ↓", "volume")
-            if mode == .alarm || hasNext { hint("N", "next") }
-            if mode == .watch { hint("F", "full screen") }
-            hint("esc", mode == .alarm ? "I'm awake" : "close")
+            hint("N", "next")
+            hint("esc", "I'm awake")
         }
         .font(.system(size: 16, weight: .medium))
         .shadow(color: .black.opacity(0.5), radius: 6)
@@ -413,7 +423,7 @@ private struct KeyboardHints: View {
 }
 
 /// A brand-colored arc that spins; the system spinner is too faint over video.
-private struct Spinner: View {
+struct Spinner: View {
     var body: some View {
         TimelineView(.animation) { context in
             let turns = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.1) / 1.1
