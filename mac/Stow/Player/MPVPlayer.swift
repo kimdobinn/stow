@@ -26,7 +26,9 @@ actor MPVPlayer: AlarmPlayer {
         // Without cookies only members-only videos fail, so a failed copy isn't fatal.
         let cookiesCopy = cookiesFile.flatMap { try? CookieCopy.make(of: $0) }
         let socketPath = socketDirectory.appending(path: "mpv.sock").path
-        let options = Self.options(socketPath: socketPath, ytdlp: ytdlp, outputDeviceUID: outputDeviceUID,
+        // mpv's lookups go through the cache, so videos looked up ahead start at once.
+        let lookup = (try? StreamCache.wrapper(realYtDlp: ytdlp)) ?? ytdlp
+        let options = Self.options(socketPath: socketPath, ytdlp: lookup, outputDeviceUID: outputDeviceUID,
                                    cookiesCopy: cookiesCopy, drawsVideo: showsControls)
             + extraArguments.compactMap(Self.option(fromArgument:))
         let core = try MPVCore(options: options, leftovers: [socketDirectory] + (cookiesCopy.map { [$0] } ?? []))

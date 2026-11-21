@@ -26,4 +26,10 @@ extension AppModel {
             }
         }
     }
+
+    /// Looks `video` up ahead (the pointer is resting on it), so playing it starts at once.
+    func prefetchStream(_ video: Video) {
+        guard video.liveStatus != .live, video.liveStatus != .upcoming else { return }
+        StreamPrefetcher.shared.prefetch(videoId: video.id, cookiesFile: playbackCookiesFile)
+    }
 }

@@ -280,6 +280,11 @@ private struct VideoCard: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
+        .task(id: isHovered) {
+            // Resting on a video looks it up, so clicking it plays without the wait.
+            guard isHovered, (try? await Task.sleep(for: .milliseconds(300))) != nil else { return }
+            model.prefetchStream(video)
+        }
         .help(video.title)
         .contextMenu {
             Button("Play", action: onOpen)

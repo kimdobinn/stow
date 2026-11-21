@@ -1,6 +1,6 @@
 import Foundation
 
-/// Duration, live status and playability of videos from `yt-dlp -J --no-playlist`. A run that
+/// Duration, live status and playability of videos from `yt-dlp -J` (mpv's own lookup). A run that
 /// succeeds resolved the streams, so mpv (which uses the same yt-dlp) should be able to play it.
 struct YTDLPVideoDetails: VideoDetailsService {
     static let maxConcurrent = 3
@@ -27,12 +27,14 @@ struct YTDLPVideoDetails: VideoDetailsService {
         // Signed out (or the file vanished): members-only videos then come back not playable.
         let cookies = cookiesFile.flatMap { try? CookieCopy.make(of: $0) }
         defer { if let cookies { try? FileManager.default.removeItem(at: cookies) } }
-        var arguments = ["-J", "--no-playlist"]
-        if let cookies { arguments += ["--cookies", cookies.path] }
-        arguments.append("https://www.youtube.com/watch?v=\(id)")
+        // mpv's own lookup, so the answer is kept for the player (the alarm then starts each
+        // video without looking it up again).
+        let arguments = StreamCache.arguments(videoId: id, format: MPVPlayer.format, cookies: cookies)
         do {
             let output = try await YTDLP().run(arguments, timeout: timeout)
-            return try parse(json: output.stdout, id: id)
+            let details = try parse(json: output.stdout, id: id)
+            StreamCache.store(json: output.stdout, videoId: id)
+            return details
         } catch {
             return VideoDetails(id: id, duration: nil, liveStatus: .unknown, isPlayable: false, error: error.logDescription)
         }

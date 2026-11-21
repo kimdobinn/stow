@@ -94,6 +94,7 @@ struct StowApp: App {
     /// yt-dlp and mpv first so they can't write their copies back afterwards.
     private static func cleanUpChildProcesses() {
         CookieCopy.removeAll(for: AppPaths.cookiesFile)
+        StreamCache.removeStale()
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: nil) { _ in
             ProcessRunner.terminateAll()
             MPVPlayer.terminateAll()
