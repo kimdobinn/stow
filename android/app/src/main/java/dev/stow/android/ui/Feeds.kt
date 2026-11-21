@@ -52,9 +52,28 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.stow.android.data.Channel
+import dev.stow.android.data.HomeSource
 import dev.stow.android.data.VideoItem
 import dev.stow.android.sync.SyncWorker
 import kotlinx.coroutines.delay
+
+/** Home's two sources side by side: your channels, or YouTube's own feeds. */
+@Composable
+private fun SourceSwitch(source: HomeSource, onSource: (HomeSource) -> Unit) {
+    val colors = Stow.colors
+    Row(Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp)).background(colors.chip).padding(2.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        listOf(HomeSource.CHANNELS to "My channels", HomeSource.YOUTUBE to "YouTube").forEach { (value, label) ->
+            val selected = source == value
+            Text(label, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1,
+                 color = if (selected) colors.chipSelectedText else colors.text,
+                 modifier = Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+                     .background(if (selected) colors.chipSelected else androidx.compose.ui.graphics.Color.Transparent)
+                     .clickable { onSource(value) }.padding(horizontal = 10.dp, vertical = 5.dp))
+        }
+    }
+    Box(Modifier.padding(vertical = 4.dp).width(1.dp).height(26.dp).background(colors.chip))
+}
 
 /** The logo bar of YouTube's Home and Subscriptions tabs. */
 @Composable
@@ -96,18 +115,23 @@ fun Refreshable(content: @Composable () -> Unit) {
 }
 
 private enum class HomeFilter(val label: String) { ALL("All"), DOWNLOADED("Downloaded") }
+private enum class YouTubeFilter(val label: String) { RECOMMENDED("Recommended"), SUBSCRIPTIONS("Subscriptions") }
 
 /**
  * What's new from your channels, newest first, then a clear end: "You're all caught up".
- * Watched videos stay folded away below it unless you ask for them.
+ * Watched videos stay folded away below it unless you ask for them. The switch at the start of
+ * the chips turns Home into YouTube's own: its recommendations, or everything you subscribe to.
  */
 @Composable
 fun HomeScreen(
     feed: List<VideoItem>, channels: List<Channel>, actions: VideoActions, todaySeconds: Long,
     onReport: () -> Unit, onSearch: () -> Unit, onSettings: () -> Unit,
     alarmMac: String? = null, onRemote: () -> Unit = {},
+    source: HomeSource = HomeSource.CHANNELS, onSource: (HomeSource) -> Unit = {},
+    recommended: List<VideoItem> = emptyList(), subscriptions: List<VideoItem> = emptyList(),
 ) {
     var filter by rememberSaveable { mutableStateOf(HomeFilter.ALL) }
+    var youtubeFilter by rememberSaveable { mutableStateOf(YouTubeFilter.RECOMMENDED) }
     var channelId by rememberSaveable { mutableStateOf<String?>(null) }
     var showWatched by rememberSaveable { mutableStateOf(false) }
     val avatars = channels.associate { it.id to it.avatarUrl }
@@ -119,7 +143,28 @@ fun HomeScreen(
     Column(Modifier.fillMaxSize()) {
         LogoTopBar(onSearch, onSettings)
         alarmMac?.let { AlarmBanner(it, onRemote) }
+        if (source == HomeSource.YOUTUBE) {
+            ChipRow {
+                SourceSwitch(source, onSource)
+                YouTubeFilter.entries.forEach { f -> Chip(f.label, youtubeFilter == f, onClick = { youtubeFilter = f }) }
+            }
+            val videos = if (youtubeFilter == YouTubeFilter.RECOMMENDED) recommended else subscriptions
+            Refreshable {
+                LazyColumn(Modifier.fillMaxSize()) {
+                    if (videos.isEmpty()) {
+                        item(key = "empty") {
+                            EmptyState(if (recommended.isEmpty() && subscriptions.isEmpty())
+                                "YouTube's recommendations come through the Mac. Keep Stow on the Mac signed in to YouTube; it reads your Home and Subscriptions every 20 minutes."
+                                else "Nothing here right now.")
+                        }
+                    }
+                    items(videos, key = { "yt-" + it.id }) { VideoCard(it, avatars[it.video.channelId], actions) }
+                }
+            }
+            return@Column
+        }
         ChipRow {
+            SourceSwitch(source, onSource)
             HomeFilter.entries.forEach { f ->
                 Chip(f.label, filter == f && channelId == null, onClick = { filter = f; channelId = null })
             }
@@ -258,7 +303,18 @@ fun ChannelsScreen(channels: List<Channel>, onOpen: (String) -> Unit, onAutoDown
 fun ChannelScreen(channel: Channel?, videos: List<VideoItem>, actions: VideoActions, onAutoDownload: (Boolean) -> Unit, onBack: () -> Unit) {
     var oldestFirst by rememberSaveable { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
-        BackTopBar(channel?.title.orEmpty(), onBack)
+        BackTopBar(channel?.title ?: videos.firstOrNull()?.video?.channelTitle.orEmpty(), onBack)
+        if (channel == null && videos.isNotEmpty()) {
+            // Only seen in YouTube's feeds: what they had of it.
+            LazyColumn(Modifier.fillMaxSize()) {
+                item {
+                    Text("Not one of your channels on the Mac. These are its videos in your YouTube feeds.",
+                         fontSize = 13.sp, color = Stow.colors.secondaryText, modifier = Modifier.padding(16.dp))
+                }
+                items(videos, key = { it.id }) { item -> VideoRow(item, actions, showChannel = false) }
+            }
+            return
+        }
         if (channel == null) {
             EmptyState("This channel isn't on the Mac anymore.")
             return

@@ -101,6 +101,8 @@ protocol PhoneBackend: Sendable {
     func videoChanges(after cursor: String?) async throws -> [PhoneVideoChange]
     /// The cookies sealed with the pairing key.
     func saveCookies(sealed: Data) async throws
+    /// YouTube's Home and Subscriptions (`AccountFeeds` JSON) sealed with the pairing key.
+    func saveAccountFeeds(sealed: Data) async throws
     /// A high-priority data message. Returns false when the token is no longer valid.
     func push(_ data: [String: String], to token: String) async throws -> Bool
 }

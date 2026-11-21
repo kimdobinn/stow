@@ -41,6 +41,14 @@ final class FakeYouTube: YouTubeService {
         WatchHistory(videoIds: Array(try history.withLock { $0 }.get().prefix(limit)))
     }
 
+    let accountFeeds = Mutex<Result<AccountFeeds, StowError>>(.success(AccountFeeds(recommended: [], subscriptions: [])))
+    let accountFeedFetches = Mutex(0)
+
+    func fetchAccountFeeds(cookiesFile: URL, limit: Int) async throws -> AccountFeeds {
+        accountFeedFetches.withLock { $0 += 1 }
+        return try accountFeeds.withLock { $0 }.get()
+    }
+
     func markWatched(videoId: String, cookiesFile: URL) async throws {
         if let error = markWatchedError.withLock({ $0 }) { throw error }
         markedWatched.withLock { $0.append(videoId) }

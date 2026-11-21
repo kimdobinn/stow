@@ -28,6 +28,15 @@ class Prefs(context: Context) {
         _downloadSort.value = sort
     }
 
+    private val _homeSource = MutableStateFlow(
+        runCatching { HomeSource.valueOf(prefs.getString(KEY_HOME_SOURCE, null) ?: "") }.getOrDefault(HomeSource.CHANNELS))
+    /** Home shows your channels (default) or YouTube's own recommendations and subscriptions. */
+    val homeSource: StateFlow<HomeSource> = _homeSource.asStateFlow()
+    fun setHomeSource(source: HomeSource) {
+        prefs.edit().putString(KEY_HOME_SOURCE, source.name).apply()
+        _homeSource.value = source
+    }
+
     private val _groupByChannel = MutableStateFlow(prefs.getBoolean(KEY_GROUP, false))
     val groupByChannel: StateFlow<Boolean> = _groupByChannel.asStateFlow()
     fun setGroupByChannel(on: Boolean) {
@@ -124,6 +133,7 @@ class Prefs(context: Context) {
         const val KEY_GRAYSCALE = "grayscale"
         const val KEY_WATCHED_HERE = "watchedHere"
         const val KEY_GROUP = "groupByChannel"
+        const val KEY_HOME_SOURCE = "homeSource"
         const val KEY_ALARM_HOSTS = "alarmHosts"
         const val KEY_ALARM_PORT = "alarmPort"
         const val KEY_ALARM_MAC = "alarmMac"

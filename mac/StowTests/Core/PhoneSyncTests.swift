@@ -78,6 +78,12 @@ final class FakePhoneBackend: PhoneBackend {
     }
 
     func saveCookies(sealed: Data) async throws { cookies.withLock { $0 = sealed } }
+    let accountFeeds = Mutex<Data?>(nil)
+    let accountFeedUploads = Mutex(0)
+    func saveAccountFeeds(sealed: Data) async throws {
+        accountFeeds.withLock { $0 = sealed }
+        accountFeedUploads.withLock { $0 += 1 }
+    }
 
     func push(_ data: [String: String], to token: String) async throws -> Bool {
         if let slow = slowPushState.withLock({ $0 }), data["state"] == slow {
@@ -118,6 +124,38 @@ struct PhoneSyncTests {
         try await model.addChannel(input: "@p")
         await model.phone.sync()
         return model
+    }
+
+    @Test func sharesYouTubeFeedsSealedAndReadsThemRarely() async throws {
+        let feeds = AccountFeeds(
+            recommended: [FeedVideo(id: "rec00000001", channelId: "UCr", channelTitle: "R", title: "Rec", duration: 60,
+                                    thumbnailURL: nil, isMembersOnly: false, isLive: false)],
+            subscriptions: [])
+        youtube.accountFeeds.withLock { $0 = .success(feeds) }
+        let model = try await makeModel()
+        // Read beside the sync, uploaded at the next one.
+        await model.phone.accountFeedsRead?.value
+        await model.phone.sync()
+        let sealed = try #require(backend.accountFeeds.withLock { $0 })
+        let key = try PairingKey.loadOrCreate(at: store.directory.appending(path: "pairing-key"))
+        #expect(try JSONDecoder().decode(AccountFeeds.self, from: key.open(sealed)) == feeds)
+
+        // Not read again for a while, and not uploaded again unchanged.
+        let reads = youtube.accountFeedFetches.withLock { $0 }
+        let uploads = backend.accountFeedUploads.withLock { $0 }
+        await model.phone.sync()
+        await model.phone.sync()
+        #expect(youtube.accountFeedFetches.withLock { $0 } == reads)
+        #expect(backend.accountFeedUploads.withLock { $0 } == uploads)
+    }
+
+    @Test func noYouTubeFeedsWhenSignedOutOrFailing() async throws {
+        youtube.accountFeeds.withLock { $0 = .failure(.network("offline")) }
+        let model = try await makeModel()
+        await model.phone.accountFeedsRead?.value
+        await model.phone.sync()
+        #expect(backend.accountFeeds.withLock { $0 } == nil)
+        #expect(model.phone.connection == .connected)
     }
 
     @Test func connectsAndSharesChannelsAndSealedCookies() async throws {

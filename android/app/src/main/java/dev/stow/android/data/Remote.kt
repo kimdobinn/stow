@@ -18,7 +18,7 @@ import kotlinx.coroutines.tasks.await
 
 /**
  * The phone's side of the Firestore layout the Mac writes (see firebase/firestore.rules):
- * members/{uid}, pairing/{code}, channels/{id}, videos/{id}, secrets/cookies. The phone signs
+ * members/{uid}, pairing/{code}, channels/{id}, videos/{id}, secrets/cookies and secrets/feeds. The phone signs
  * in anonymously and can only read anything once the Mac has paired it.
  */
 class Remote {
@@ -141,6 +141,18 @@ class Remote {
     suspend fun cookies(key: ByteArray): ByteArray? {
         val sealed = db.collection("secrets").document("cookies").get(Source.SERVER).await().getString("sealed") ?: return null
         return Crypto.open(Base64.decode(sealed, Base64.DEFAULT), key)
+    }
+
+    /** YouTube's Home and Subscriptions as the Mac last read them (sealed JSON), live; null until shared. */
+    fun accountFeeds(): Flow<String?> = callbackFlow {
+        val registration = db.collection("secrets").document("feeds").addSnapshotListener { snapshot, error ->
+            if (error != null) {
+                close(if (error.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) NotPaired() else error)
+                return@addSnapshotListener
+            }
+            trySend(snapshot?.getString("sealed"))
+        }
+        awaitClose { registration.remove() }
     }
 
     private fun com.google.firebase.firestore.DocumentSnapshot.toSent(): SentVideo? {

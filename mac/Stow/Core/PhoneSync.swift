@@ -20,6 +20,8 @@ protocol PhoneSyncHost: AnyObject {
     func applyPhoneWatched(_ watched: Bool, videoId: String)
     /// cookies.txt while signed in to YouTube.
     var phoneCookiesFile: URL? { get }
+    /// YouTube's Home and Subscriptions for the signed-in account; nil when signed out or failed.
+    func phoneAccountFeeds() async -> AccountFeeds?
     func logPhone(_ level: LogLevel, _ message: String)
 }
 
@@ -37,6 +39,9 @@ final class PhoneSync {
     static let pushIdLimit = 50
     /// Recent videos per channel shown on the phone's channel pages.
     static let recentPerChannel = 30
+    /// YouTube's Home and Subscriptions are read again this often (each read is two yt-dlp runs).
+    static let accountFeedsInterval: TimeInterval = 20 * 60
+    static let accountFeedLimit = 40
 
     enum Connection: Equatable {
         /// No key file yet (Firebase setup not done).
@@ -83,6 +88,12 @@ final class PhoneSync {
     /// overtakes its "playing".
     @ObservationIgnored private var pushChain: Task<Void, Never>?
     @ObservationIgnored private var syncsAgain = false
+    @ObservationIgnored private var accountFeeds: AccountFeeds?
+    @ObservationIgnored private var accountFeedsReadAt: Date?
+    /// Fingerprint of the feeds last uploaded.
+    @ObservationIgnored private var accountFeedsHash: String?
+    /// Reading YouTube's feeds, which happens beside the sync rather than holding it up.
+    @ObservationIgnored private(set) var accountFeedsRead: Task<Void, Never>?
 
     init(keyFile: URL, pairingKeyFile: URL,
          makeBackend: @escaping (URL) throws -> any PhoneBackend = { try FirebaseBackend(keyFile: $0) }) {
@@ -186,6 +197,7 @@ final class PhoneSync {
                     state.channelsHash = nil
                     state.cookiesHash = nil
                 }
+                accountFeedsHash = nil
                 host?.logPhone(.info, "Paired with \(member.name).")
                 pairing?.status = .paired(name: member.name)
                 await sync()
@@ -287,6 +299,7 @@ final class PhoneSync {
                 try await pullChannelChanges(backend, host)
                 try await syncChannels(backend, host)
                 try await syncCookies(backend, host)
+                try await syncAccountFeeds(backend, host)
                 try await pullChanges(backend, host)
                 try await pushWatched(backend, host)
                 try await sendPending(backend, host, members: members)
@@ -344,6 +357,32 @@ final class PhoneSync {
         let sealed = try PairingKey.loadOrCreate(at: pairingKeyFile).seal(cookies)
         try await backend.saveCookies(sealed: sealed)
         host.updatePhoneState { $0.cookiesHash = hash }
+    }
+
+    /// Shares YouTube's own Home and Subscriptions feeds, sealed like the cookies (they say a lot
+    /// about the account). They're read every `accountFeedsInterval` in the background and
+    /// uploaded at the sync after, when they changed.
+    private func syncAccountFeeds(_ backend: any PhoneBackend, _ host: any PhoneSyncHost) async throws {
+        if accountFeedsRead == nil, accountFeedsReadAt.map({ Date.now.timeIntervalSince($0) >= Self.accountFeedsInterval }) ?? true {
+            accountFeedsReadAt = .now
+            accountFeedsRead = Task { [weak self, weak host] in
+                let feeds = await host?.phoneAccountFeeds()
+                guard let self else { return }
+                self.accountFeedsRead = nil
+                guard let feeds else { return }
+                self.accountFeeds = feeds
+                self.localChange()
+            }
+        }
+        guard let feeds = accountFeeds else { return }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let data = try encoder.encode(feeds)
+        let hash = Self.fingerprint(data)
+        guard hash != accountFeedsHash else { return }
+        let sealed = try PairingKey.loadOrCreate(at: pairingKeyFile).seal(data)
+        try await backend.saveAccountFeeds(sealed: sealed)
+        accountFeedsHash = hash
     }
 
     /// Applies what the phones changed: watched status and download progress.

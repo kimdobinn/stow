@@ -770,6 +770,16 @@ extension AppModel: PhoneSyncHost {
 
     var phoneCookiesFile: URL? { signInState == .signedIn ? playbackCookiesFile : nil }
 
+    func phoneAccountFeeds() async -> AccountFeeds? {
+        guard let cookiesFile = phoneCookiesFile else { return nil }
+        do {
+            return try await youtube.fetchAccountFeeds(cookiesFile: cookiesFile, limit: PhoneSync.accountFeedLimit)
+        } catch {
+            record(.warning, "Couldn't read YouTube's Home and Subscriptions for the phone: \(error.logDescription)")
+            return nil
+        }
+    }
+
     func logPhone(_ level: LogLevel, _ message: String) {
         record(level, message)
     }

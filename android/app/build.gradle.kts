@@ -95,4 +95,6 @@ dependencies {
     implementation(libs.youtubedl.library)
     implementation(libs.youtubedl.ffmpeg)
     testImplementation(libs.junit)
+    // The real org.json (Android's is a stub in unit tests).
+    testImplementation(libs.json)
 }

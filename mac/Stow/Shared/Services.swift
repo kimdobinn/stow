@@ -28,6 +28,30 @@ protocol YouTubeService: Sendable {
     /// Adds the video to the account's watch history (yt-dlp --mark-watched). Throws
     /// `.processFailed` when the video is unavailable, otherwise like `fetchMembersVideos`.
     func markWatched(videoId: String, cookiesFile: URL) async throws
+
+    /// The signed-in account's YouTube Home recommendations and Subscriptions feed (yt-dlp
+    /// :ytrec / :ytsubs), long-form videos only, at most `limit` each. Throws like
+    /// `fetchMembersVideos`.
+    func fetchAccountFeeds(cookiesFile: URL, limit: Int) async throws -> AccountFeeds
+}
+
+/// What YouTube itself would show the account: its Home recommendations and Subscriptions feed.
+struct AccountFeeds: Codable, Equatable, Sendable {
+    var recommended: [FeedVideo]
+    var subscriptions: [FeedVideo]
+}
+
+/// A video in a YouTube feed (yt-dlp --flat-playlist lists no upload dates).
+struct FeedVideo: Codable, Equatable, Sendable {
+    var id: String
+    var channelId: String
+    var channelTitle: String
+    var title: String
+    /// Seconds.
+    var duration: Double?
+    var thumbnailURL: URL?
+    var isMembersOnly: Bool
+    var isLive: Bool
 }
 
 struct WatchHistory: Sendable {

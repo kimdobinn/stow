@@ -133,6 +133,14 @@ struct FirebaseBackend: PhoneBackend {
         ])])
     }
 
+    func saveAccountFeeds(sealed: Data) async throws {
+        try await firestore.commit([.merge(path: "secrets/feeds", fields: [
+            "sealed": .string(sealed.base64EncodedString()),
+            "algorithm": .string("ChaChaPoly"),
+            "updatedAt": .string(ISO8601DateFormatter().string(from: .now)),
+        ])])
+    }
+
     func push(_ data: [String: String], to token: String) async throws -> Bool {
         try await fcm.send(data: data, to: token) == .sent
     }

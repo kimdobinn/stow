@@ -47,18 +47,27 @@ class Repository(private val context: Context) {
     /** In the Mac's order. */
     val channels: StateFlow<List<Channel>> = _channels.asStateFlow()
     val playlists: StateFlow<List<Playlist>> get() = playlistStore.playlists
+    private val _youtubeFeeds = MutableStateFlow(YouTubeFeeds())
+    /** YouTube's own Home and Subscriptions, shared by the Mac. */
+    val youtubeFeeds: StateFlow<YouTubeFeeds> = _youtubeFeeds.asStateFlow()
 
-    /** Every known video (sent to the phone or recent on a channel), by id. */
-    val items: StateFlow<Map<String, VideoItem>> = combine(sent, _channels, local.videos, prefs.watchedHere) { sent, channels, local, watchedHere ->
+    /** Every known video (sent to the phone, recent on a channel, or in YouTube's feeds), by id. */
+    val items: StateFlow<Map<String, VideoItem>> = combine(sent, _channels, local.videos, prefs.watchedHere, _youtubeFeeds) { sent, channels, local, watchedHere, feeds ->
         val result = LinkedHashMap<String, VideoItem>()
+        for (video in feeds.recommended + feeds.subscriptions) {
+            if (video.id in result) continue
+            result[video.id] = VideoItem(video, null, local[video.id], video.id in watchedHere, onlyInYouTubeFeeds = true)
+        }
+        // YouTube's feeds know the length of videos the Mac's channel list doesn't.
+        fun Video.withFeedDuration() = if (durationSeconds == null) copy(durationSeconds = result[id]?.video?.durationSeconds) else this
         for (channel in channels) {
             for (recent in channel.recent) {
-                result[recent.video.id] = VideoItem(recent.video, null, local[recent.video.id], recent.watched || recent.video.id in watchedHere)
+                result[recent.video.id] = VideoItem(recent.video.withFeedDuration(), null, local[recent.video.id], recent.watched || recent.video.id in watchedHere)
             }
         }
         for (video in sent) {
             val watchedOnMac = result[video.video.id]?.watchedOnMac ?: false
-            result[video.video.id] = VideoItem(video.video, video, local[video.video.id], watchedOnMac)
+            result[video.video.id] = VideoItem(video.video.withFeedDuration(), video, local[video.video.id], watchedOnMac)
         }
         result
     }.stateIn(scope, SharingStarted.Eagerly, emptyMap())
@@ -72,6 +81,7 @@ class Repository(private val context: Context) {
         if (demo) {
             _pairState.value = PairState.Paired
             _channels.value = DemoData.channels
+            _youtubeFeeds.value = DemoData.youtubeFeeds
             onSentVideos(DemoData.sent)
             return
         }
@@ -113,6 +123,7 @@ class Repository(private val context: Context) {
         remote.signOut()
         sent.value = emptyList()
         _channels.value = emptyList()
+        _youtubeFeeds.value = YouTubeFeeds()
         _pairState.value = PairState.Unpaired(message)
     }
 
@@ -133,6 +144,7 @@ class Repository(private val context: Context) {
             // The token can change or arrive late (Play services was busy while pairing).
             launch { runCatching { remote.refreshPushToken() }.onFailure { Log.w(TAG, "Token refresh failed", it) } }
             launch { listen { remote.channels().collect { _channels.value = it } } }
+            launch { listen { remote.accountFeeds().collect { _youtubeFeeds.value = openFeeds(it) } } }
             listen { remote.videos().collect { onSentVideos(it) } }
         }
     }
@@ -158,6 +170,14 @@ class Repository(private val context: Context) {
                 delay(15_000)
             }
         }
+    }
+
+    private fun openFeeds(sealed: String?): YouTubeFeeds {
+        val key = prefs.pairingKey ?: return YouTubeFeeds()
+        if (sealed == null) return YouTubeFeeds()
+        return runCatching {
+            YouTubeFeeds.parse(String(Crypto.open(android.util.Base64.decode(sealed, android.util.Base64.DEFAULT), key)))
+        }.onFailure { Log.w(TAG, "Couldn't open YouTube's feeds", it) }.getOrDefault(YouTubeFeeds())
     }
 
     /** New videos get downloaded; ones sent again after a failure or delete are retried. */

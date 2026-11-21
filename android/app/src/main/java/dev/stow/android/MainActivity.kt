@@ -180,7 +180,9 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        val all = itemsById.values.toList()
+        val all = itemsById.values.filterNot { it.onlyInYouTubeFeeds }
+        val youtubeFeeds by repository.youtubeFeeds.collectAsStateWithLifecycle()
+        val homeSource by repository.prefs.homeSource.collectAsStateWithLifecycle()
         val feed = all.sortedByDescending { it.video.publishedAt?.time ?: it.sent?.sentAt?.time ?: 0 }
         LaunchedEffect(all.count { it.isPlayable }) {
             storage = withContext(Dispatchers.IO) { "${Format.bytes(repository.storageUsedBytes())} used on this phone" }
@@ -254,7 +256,10 @@ class MainActivity : ComponentActivity() {
                     composable("home") {
                         HomeScreen(feed, channels, actions, todaySeconds = todaySeconds, onReport = { nav.navigate("report") },
                                    onSearch = { nav.navigate("search") }, onSettings = { nav.navigate("settings") },
-                                   alarmMac = alarm?.takeIf { it.isRecent() }?.macName, onRemote = { nav.navigate("remote") })
+                                   alarmMac = alarm?.takeIf { it.isRecent() }?.macName, onRemote = { nav.navigate("remote") },
+                                   source = homeSource, onSource = repository.prefs::setHomeSource,
+                                   recommended = youtubeFeeds.recommended.mapNotNull { itemsById[it.id] },
+                                   subscriptions = youtubeFeeds.subscriptions.mapNotNull { itemsById[it.id] })
                     }
                     composable("subscriptions") {
                         SubscriptionsScreen(feed, channels, actions, onAllChannels = { nav.navigate("channels") },
@@ -277,7 +282,9 @@ class MainActivity : ComponentActivity() {
                     composable("channel/{id}") { entry ->
                         val id = entry.arguments?.getString("id")
                         val channel = channels.firstOrNull { it.id == id }
-                        val videos = channel?.recent?.mapNotNull { itemsById[it.video.id] }.orEmpty()
+                        val videos = channel?.recent?.mapNotNull { itemsById[it.video.id] }
+                            ?: (youtubeFeeds.recommended + youtubeFeeds.subscriptions).filter { it.channelId == id }
+                                .distinctBy { it.id }.mapNotNull { itemsById[it.id] }
                         ChannelScreen(channel, videos, actions, onAutoDownload = { on -> id?.let { setAutoDownload(it, on) } },
                                       onBack = { nav.popBackStack() })
                     }

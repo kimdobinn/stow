@@ -22,6 +22,22 @@ object DemoData {
                 rick.mapIndexed { i, v -> RecentVideo(v, i == 1) }),
     )
 
+    private fun yt(id: String, channelId: String, channel: String, title: String, seconds: Long) =
+        Video(id, channelId, channel, title, null, thumb(id), false, durationSeconds = seconds)
+
+    /** What the Mac would share of YouTube's Home and Subscriptions. */
+    val youtubeFeeds = YouTubeFeeds(
+        recommended = listOf(
+            yt("9bZkp7q19f0", "UCrDkAvwZum-UTjHmzDI2iIw", "officialpsy", "PSY - GANGNAM STYLE(강남스타일) M/V", 252),
+            yt("kJQP7kiw5Fk", "UCLp8RBhQHu9wSsq62j_Md6A", "Luis Fonsi", "Luis Fonsi - Despacito ft. Daddy Yankee", 282),
+            yt("JGwWNGJdvx8", "UC0C-w0YjGpqDXGB8IHb662A", "Ed Sheeran", "Ed Sheeran - Shape of You (Official Music Video)", 263),
+        ),
+        subscriptions = listOf(
+            rick[1].copy(durationSeconds = 211),
+            yt("OPf0YbXqDm0", "UCdKDCoP9NM48pyhcKeVB7cQ", "Mark Ronson", "Mark Ronson - Uptown Funk (Official Video) ft. Bruno Mars", 271),
+        ),
+    )
+
     /** Sent to the phone, so these download right away. */
     val sent = listOf(SentVideo(jawed[0], daysAgo(0.1), "mac", false))
 }

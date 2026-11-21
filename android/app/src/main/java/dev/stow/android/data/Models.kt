@@ -1,6 +1,7 @@
 package dev.stow.android.data
 
 import java.util.Date
+import org.json.JSONObject
 
 /** A YouTube video, as the Mac describes it. */
 data class Video(
@@ -12,6 +13,8 @@ data class Video(
     val thumbnailUrl: String?,
     val isMembersOnly: Boolean,
     val liveStatus: String? = null,
+    /** Known up front only for videos from YouTube's own feeds. */
+    val durationSeconds: Long? = null,
 ) {
     val watchUrl: String get() = "https://www.youtube.com/watch?v=$id"
 }
@@ -54,14 +57,18 @@ data class LocalVideo(
 )
 
 /** A video as the app shows it: what it is, whether it was sent, and what the phone has. */
-data class VideoItem(val video: Video, val sent: SentVideo?, val local: LocalVideo?, val watchedOnMac: Boolean) {
+data class VideoItem(
+    val video: Video, val sent: SentVideo?, val local: LocalVideo?, val watchedOnMac: Boolean,
+    /** Only in YouTube's Home or Subscriptions feed: not from a Stow channel, never sent. */
+    val onlyInYouTubeFeeds: Boolean = false,
+) {
     val id: String get() = video.id
     val watched: Boolean get() = sent?.watched ?: watchedOnMac
     /** null when it was never downloaded (or the download was deleted). */
     val state: DownloadState? get() = local?.state?.takeIf { it != DownloadState.DELETED }
     val isPlayable: Boolean get() = local?.state == DownloadState.DOWNLOADED && local.filePath != null
     val isDownloading: Boolean get() = state == DownloadState.QUEUED || state == DownloadState.DOWNLOADING
-    val durationMs: Long get() = local?.durationMs ?: 0
+    val durationMs: Long get() = local?.durationMs?.takeIf { it > 0 } ?: ((video.durationSeconds ?: 0) * 1000)
     /** How far you got, 0…1 (1 once watched). */
     val progress: Float
         get() = when {
@@ -85,3 +92,40 @@ enum class DownloadSort(val label: String) {
 }
 
 enum class WatchFilter(val label: String) { ALL("All"), UNWATCHED("Unwatched"), WATCHED("Watched") }
+
+/**
+ * What YouTube itself would show the account, as the Mac last read it (its Home
+ * recommendations and the Subscriptions feed), in YouTube's order.
+ */
+data class YouTubeFeeds(val recommended: List<Video> = emptyList(), val subscriptions: List<Video> = emptyList()) {
+    val isEmpty: Boolean get() = recommended.isEmpty() && subscriptions.isEmpty()
+
+    companion object {
+        /** The Mac's AccountFeeds JSON. */
+        fun parse(json: String): YouTubeFeeds {
+            val root = JSONObject(json)
+            fun list(key: String): List<Video> {
+                val array = root.optJSONArray(key) ?: return emptyList()
+                return (0 until array.length()).mapNotNull { i ->
+                    val o = array.optJSONObject(i) ?: return@mapNotNull null
+                    val id = o.optString("id").takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+                    Video(
+                        id = id,
+                        channelId = o.optString("channelId"),
+                        channelTitle = o.optString("channelTitle"),
+                        title = o.optString("title").ifEmpty { id },
+                        publishedAt = null,
+                        thumbnailUrl = o.optString("thumbnailURL").takeIf { it.isNotEmpty() },
+                        isMembersOnly = o.optBoolean("isMembersOnly"),
+                        liveStatus = if (o.optBoolean("isLive")) "is_live" else null,
+                        durationSeconds = if (o.has("duration")) o.optDouble("duration").toLong() else null,
+                    )
+                }
+            }
+            return YouTubeFeeds(list("recommended"), list("subscriptions"))
+        }
+    }
+}
+
+/** Where Home's videos come from. */
+enum class HomeSource { CHANNELS, YOUTUBE }

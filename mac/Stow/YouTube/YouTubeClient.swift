@@ -30,4 +30,8 @@ struct YouTubeClient: YouTubeService {
     func markWatched(videoId: String, cookiesFile: URL) async throws {
         try await WatchHistoryClient(ytdlp: ytdlp).markWatched(videoId: videoId, cookiesFile: cookiesFile)
     }
+
+    func fetchAccountFeeds(cookiesFile: URL, limit: Int) async throws -> AccountFeeds {
+        try await AccountFeedClient(ytdlp: ytdlp).fetch(cookiesFile: cookiesFile, limit: limit)
+    }
 }

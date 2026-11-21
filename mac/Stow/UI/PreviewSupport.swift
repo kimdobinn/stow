@@ -9,6 +9,9 @@ private struct PreviewYouTube: YouTubeService {
     func fetchMembersVideos(channelId: String, cookiesFile: URL) async throws -> MembersFeed { MembersFeed(videos: []) }
     func fetchWatchHistory(cookiesFile: URL, limit: Int) async throws -> WatchHistory { WatchHistory(videoIds: []) }
     func markWatched(videoId: String, cookiesFile: URL) async throws {}
+    func fetchAccountFeeds(cookiesFile: URL, limit: Int) async throws -> AccountFeeds {
+        AccountFeeds(recommended: [], subscriptions: [])
+    }
 }
 
 @MainActor
