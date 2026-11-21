@@ -73,6 +73,8 @@ actor MPVPlayer: AlarmPlayer {
         var options = [
             ("config", "no"), ("terminal", "no"), ("idle", "once"), ("keep-open", "no"),
             ("vo", drawsVideo ? "libmpv" : "null"), ("hwdec", "auto-safe"),
+            // Frames are drawn on Stow's main thread, which must not wait for display times.
+            ("video-timing-offset", "0"),
             // Stow's window handles every key and click; mpv draws no controls or messages.
             ("input-default-bindings", "no"), ("input-vo-keyboard", "no"), ("osc", "no"), ("osd-level", "0"),
             ("volume", "100"), ("input-ipc-server", socketPath),

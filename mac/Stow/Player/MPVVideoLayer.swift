@@ -125,14 +125,22 @@ final class MPVVideoLayer: CAOpenGLLayer {
         var target = mpv_opengl_fbo(fbo: Int32(framebuffer), w: Int32(viewport[2]), h: Int32(viewport[3]),
                                     internal_format: 0)
         var flipY: Int32 = 1
+        // This runs on the main thread: never wait here for the frame's display time (mpv would
+        // block up to a frame per draw, stalling every click, scroll and hover in the app).
+        // `video-timing-offset=0` (MPVPlayer) keeps the video in sync without the wait.
+        var blockForTargetTime: Int32 = 0
         withUnsafeMutablePointer(to: &target) { targetPointer in
             withUnsafeMutablePointer(to: &flipY) { flipPointer in
-                var params = [
-                    mpv_render_param(type: MPV_RENDER_PARAM_OPENGL_FBO, data: UnsafeMutableRawPointer(targetPointer)),
-                    mpv_render_param(type: MPV_RENDER_PARAM_FLIP_Y, data: UnsafeMutableRawPointer(flipPointer)),
-                    mpv_render_param(type: MPV_RENDER_PARAM_INVALID, data: nil),
-                ]
-                _ = api.renderContextRender(renderContext, &params)
+                withUnsafeMutablePointer(to: &blockForTargetTime) { blockPointer in
+                    var params = [
+                        mpv_render_param(type: MPV_RENDER_PARAM_OPENGL_FBO, data: UnsafeMutableRawPointer(targetPointer)),
+                        mpv_render_param(type: MPV_RENDER_PARAM_FLIP_Y, data: UnsafeMutableRawPointer(flipPointer)),
+                        mpv_render_param(type: MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME,
+                                         data: UnsafeMutableRawPointer(blockPointer)),
+                        mpv_render_param(type: MPV_RENDER_PARAM_INVALID, data: nil),
+                    ]
+                    _ = api.renderContextRender(renderContext, &params)
+                }
             }
         }
         glFlush()
