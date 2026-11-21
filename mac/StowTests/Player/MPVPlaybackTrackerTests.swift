@@ -131,6 +131,43 @@ struct MPVPlaybackTrackerTests {
         #expect(tracker.exit(stopRequested: false, exitCode: 0) == .stopped)
     }
 
+    @Test func jumpsToAnEntry() {
+        var tracker = MPVPlaybackTracker(playlist: playlist)
+        _ = tracker.handle(.startFile(entryId: 1))
+        _ = tracker.handle(.playbackRestart)
+        #expect(tracker.play(index: 2) == [.send(.playlistPlayIndex(2)), .send(.setPause(false))])
+        #expect(tracker.play(index: 3).isEmpty)
+        // The requested entry shows as loading, also while mpv ends the current one.
+        #expect(tracker.nowPlaying.index == 2 && tracker.nowPlaying.isLoading)
+        #expect(emitted(tracker.handle(.endFile(entryId: 1, reason: .stop, error: nil))).count == 1)
+        #expect(tracker.nowPlaying.index == 2)
+        _ = tracker.handle(.startFile(entryId: 3))
+        #expect(emitted(tracker.handle(.playbackRestart)) == [.started(index: 2, videoId: "c")])
+    }
+
+    @Test func playsAVideoFromTheListOrAppendsIt() {
+        var tracker = MPVPlaybackTracker(playlist: playlist)
+        _ = tracker.handle(.startFile(entryId: 1))
+        _ = tracker.handle(.playbackRestart)
+        #expect(tracker.play(PlayableVideo(video: video("b"), duration: nil)) == [.send(.playlistPlayIndex(1)), .send(.setPause(false))])
+
+        let added = PlayableVideo(video: video("x"), duration: nil)
+        #expect(tracker.play(added) == [.emit(.appended(added)), .send(.appendFile(video("x").watchURL)),
+                                        .send(.playlistPlayIndex(3)), .send(.setPause(false))])
+        #expect(tracker.playlist.map(\.video.id) == ["a", "b", "c", "x"])
+        #expect(tracker.nowPlaying.count == 4 && tracker.nowPlaying.index == 3)
+
+        // mpv numbers the appended entry 4.
+        _ = tracker.handle(.endFile(entryId: 1, reason: .stop, error: nil))
+        _ = tracker.handle(.startFile(entryId: 4))
+        #expect(emitted(tracker.handle(.playbackRestart)) == [.started(index: 3, videoId: "x")])
+        _ = tracker.handle(.propertyChange(name: "time-pos", value: 50))
+        #expect(emitted(tracker.handle(.endFile(entryId: 4, reason: .eof, error: nil)))
+                == [.videoEnded(videoId: "x", position: 50, duration: nil)])
+        // Playing it again only jumps back.
+        #expect(tracker.play(added) == [.send(.playlistPlayIndex(3)), .send(.setPause(false))])
+    }
+
     @Test func ignoresUnknownEntries() {
         var tracker = MPVPlaybackTracker(playlist: playlist)
         _ = tracker.handle(.startFile(entryId: 9))

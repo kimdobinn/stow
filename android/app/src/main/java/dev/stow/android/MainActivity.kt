@@ -3,6 +3,7 @@ package dev.stow.android
 import android.Manifest
 import android.content.Intent
 import android.os.Bundle
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -32,6 +33,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -43,6 +45,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -50,6 +53,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import dev.stow.android.data.PairState
 import dev.stow.android.data.VideoItem
+import dev.stow.android.remote.RemoteModel
 import dev.stow.android.ui.ChannelScreen
 import dev.stow.android.ui.ChannelsScreen
 import dev.stow.android.ui.DownloadsScreen
@@ -59,6 +63,7 @@ import dev.stow.android.ui.MiniPlayer
 import dev.stow.android.ui.PairScreen
 import dev.stow.android.ui.PlayerScreen
 import dev.stow.android.ui.PlaylistScreen
+import dev.stow.android.ui.RemoteScreen
 import dev.stow.android.ui.SaveToPlaylistSheet
 import dev.stow.android.ui.SearchScreen
 import dev.stow.android.ui.SettingsScreen
@@ -78,6 +83,11 @@ import kotlinx.coroutines.withContext
 class MainActivity : ComponentActivity() {
     private val app get() = application as StowApplication
     private val repository get() = app.repository
+    /** The alarm remote's state, here so the volume keys can reach it while its screen shows. */
+    private val remote by lazy { RemoteModel(app, app.remoteClient, repository.prefs, lifecycleScope) }
+    /** A screen to open from an intent (the alarm notification), taken by the NavHost. */
+    private var openRoute by mutableStateOf<String?>(null)
+    private var shownRoute: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -95,10 +105,29 @@ class MainActivity : ComponentActivity() {
         handle(intent)
     }
 
-    /** stow://pair?… opened from the phone's camera app. */
+    /** stow://pair?… opened from the phone's camera app, or the alarm notification. */
     private fun handle(intent: Intent?) {
+        if (intent?.action == ACTION_OPEN_REMOTE) {
+            openRoute = "remote"
+            // Not again when the activity is recreated with the same intent.
+            intent.action = null
+        }
         val data = intent?.data ?: return
         if (data.scheme == "stow" && data.host == "pair") repository.pair(data.toString())
+    }
+
+    /** On the alarm remote, the volume keys turn the Mac's speaker up and down instead of the phone's. */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val up = when (event.keyCode) {
+            KeyEvent.KEYCODE_VOLUME_UP -> true
+            KeyEvent.KEYCODE_VOLUME_DOWN -> false
+            else -> null
+        }
+        if (up != null && shownRoute == "remote" && remote.volumeControllable) {
+            if (event.action == KeyEvent.ACTION_DOWN) remote.nudgeVolume(up)
+            return true
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     @Composable
@@ -126,6 +155,16 @@ class MainActivity : ComponentActivity() {
         val current by player.current.collectAsStateWithLifecycle()
         val queue by player.queue.collectAsStateWithLifecycle()
         val route = nav.currentBackStackEntryAsState().value?.destination?.route
+        // Cleared when Shell goes (e.g. the Mac unpaired this phone), so the volume keys work again.
+        DisposableEffect(route) {
+            shownRoute = route
+            onDispose { shownRoute = null }
+        }
+        LaunchedEffect(openRoute) {
+            openRoute?.let { nav.navigate(it) { launchSingleTop = true } }
+            openRoute = null
+        }
+        val alarm by repository.prefs.alarm.collectAsStateWithLifecycle()
         val calm by repository.prefs.calm.collectAsStateWithLifecycle()
         val grayscale by repository.prefs.grayscale.collectAsStateWithLifecycle()
         val statsVersion by repository.stats.changes.collectAsStateWithLifecycle()
@@ -190,7 +229,7 @@ class MainActivity : ComponentActivity() {
             Tab("subscriptions", "Subscriptions", Icons.Filled.Subscriptions, Icons.Outlined.Subscriptions),
             Tab("downloads", "Downloads", Icons.Filled.Download, Icons.Outlined.Download),
         )
-        val watching = route == "watch"
+        val fullScreen = route == "watch" || route == "remote"
 
         val gray = if (grayscale) Modifier.graphicsLayer {
             renderEffect = android.graphics.RenderEffect.createColorFilterEffect(
@@ -207,7 +246,8 @@ class MainActivity : ComponentActivity() {
                 NavHost(nav, startDestination = "home") {
                     composable("home") {
                         HomeScreen(feed, channels, actions, todaySeconds = todaySeconds, onReport = { nav.navigate("report") },
-                                   onSearch = { nav.navigate("search") }, onSettings = { nav.navigate("settings") })
+                                   onSearch = { nav.navigate("search") }, onSettings = { nav.navigate("settings") },
+                                   alarmMac = alarm?.takeIf { it.isRecent() }?.macName, onRemote = { nav.navigate("remote") })
                     }
                     composable("subscriptions") {
                         SubscriptionsScreen(feed, channels, actions, onAllChannels = { nav.navigate("channels") },
@@ -260,8 +300,10 @@ class MainActivity : ComponentActivity() {
                     }
                     composable("search") { SearchScreen(feed, actions, onBack = { nav.popBackStack() }) }
                     composable("settings") {
-                        SettingsScreen(repository, wifiOnly, onReport = { nav.navigate("report") }, onBack = { nav.popBackStack() })
+                        SettingsScreen(repository, wifiOnly, onReport = { nav.navigate("report") },
+                                       onRemote = { nav.navigate("remote") }, onBack = { nav.popBackStack() })
                     }
+                    composable("remote") { RemoteScreen(remote, alarm?.macName, onBack = { nav.popBackStack() }) }
                     composable("report") {
                         val week = remember(statsVersion) { repository.stats.week() }
                         val lastWeek = remember(statsVersion) { repository.stats.week(java.time.LocalDate.now().minusDays(7)) }
@@ -286,7 +328,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
-            if (!watching) {
+            if (!fullScreen) {
                 val playing = current?.let { itemsById[it] }
                 if (playing != null) MiniPlayer(player, playing, onOpen = { nav.navigate("watch") { launchSingleTop = true } })
                 BottomBar(tabs, route, nav)
@@ -305,6 +347,11 @@ class MainActivity : ComponentActivity() {
                 onDismiss = { saving = null },
             )
         }
+    }
+
+    companion object {
+        /** The alarm notification's tap: opens the remote. */
+        const val ACTION_OPEN_REMOTE = "dev.stow.android.OPEN_REMOTE"
     }
 
     private data class Tab(val route: String, val label: String, val selected: ImageVector, val unselected: ImageVector)

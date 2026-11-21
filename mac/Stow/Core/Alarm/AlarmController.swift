@@ -24,7 +24,7 @@ final class AlarmController {
     @ObservationIgnored private var scheduler: AlarmScheduler?
     /// Alarm times up to this were already looked at (settable for tests).
     @ObservationIgnored var evaluatedSince = Date.now
-    @ObservationIgnored private var runner: AlarmRunner?
+    @ObservationIgnored private(set) var runner: AlarmRunner?
     @ObservationIgnored private var runTask: Task<Void, Never>?
     @ObservationIgnored private var runID: UUID?
     /// `handledFireDate` before the running scheduled run, restored if that run is abandoned.
@@ -160,11 +160,11 @@ final class AlarmController {
         let id = UUID()
         let runner = AlarmRunner(trigger: trigger, scheduledFor: date, services: services, host: host) { [weak self] phase in
             // An abandoned run may still be winding down; it no longer owns the phase.
-            if self?.runID == id { self?.phase = phase }
+            if self?.runID == id { self?.setPhase(phase) }
         }
         self.runner = runner
         runID = id
-        phase = .preparing(scheduledFor: date)
+        setPhase(.preparing(scheduledFor: date))
         runTask = Task { [weak self] in
             await runner.run()
             guard let self, runID == id else { return }
@@ -177,7 +177,13 @@ final class AlarmController {
         runner = nil
         runID = nil
         runTask = nil
-        phase = .idle
+        setPhase(.idle)
+    }
+
+    /// The phone remote follows every phase of a run.
+    private func setPhase(_ new: AlarmPhase) {
+        phase = new
+        services.remote.alarmPhaseChanged(new, run: self)
     }
 
     // MARK: Devices

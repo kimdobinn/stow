@@ -5,6 +5,8 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import dev.stow.android.data.Repository
 import dev.stow.android.player.PlayerConnection
+import dev.stow.android.remote.AlarmNotification
+import dev.stow.android.remote.RemoteClient
 import dev.stow.android.sync.SyncWorker
 import dev.stow.android.sync.YtDlp
 import kotlinx.coroutines.CoroutineScope
@@ -17,12 +19,15 @@ class StowApplication : Application() {
         private set
     /** Created on first use (it binds to the playback service). */
     val player: PlayerConnection by lazy { PlayerConnection(this, repository) }
+    /** The Mac's alarm remote, shared by the remote screen and the alarm notification. */
+    val remoteClient: RemoteClient by lazy { RemoteClient(this, repository.prefs) }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onCreate() {
         super.onCreate()
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(CHANNEL_DOWNLOADS, "Downloads", NotificationManager.IMPORTANCE_LOW))
+        AlarmNotification.createChannel(this)
         repository = Repository(this)
         repository.start()
         SyncWorker.schedule(this)

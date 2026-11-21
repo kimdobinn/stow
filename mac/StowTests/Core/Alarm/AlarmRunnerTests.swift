@@ -152,6 +152,35 @@ struct AlarmRunnerTests {
         #expect(fakes.sound.plays.isEmpty)
     }
 
+    @Test func videosAddedFromThePhoneJoinThePlaylistAndTheRecord() async {
+        let added = PlayableVideo(video: video("x"), duration: 100)
+        fakes.player.script.withLock {
+            $0 = [.started(index: 0, videoId: "a"), .appended(added), .started(index: 2, videoId: "x"),
+                  .videoEnded(videoId: "x", position: 95, duration: nil), .exited(.finished)]
+        }
+        let (runner, phases) = makeRunner()
+        await runner.run()
+
+        #expect(runner.playlist.map(\.video.id) == ["a", "b", "x"])
+        #expect(phases.list.contains(.playing(index: 2, count: 3, video: video("x"))))
+        #expect(host.runs.last?.videoIds == ["a", "x"])
+        // Watched by the duration it was added with.
+        #expect(host.watched == ["x"])
+        #expect(host.logs.contains { $0.contains("added “Video x”") })
+    }
+
+    @Test func volumeFromThePhoneBeforeTheOutputIsChosenReplacesTheSetting() async {
+        fakes.player.script.withLock { $0 = [.started(index: 0, videoId: "a"), .exited(.finished)] }
+        let (runner, _) = makeRunner()
+        #expect(runner.outputVolume == host.currentSettings().alarm.volume)
+        runner.setOutputVolume(140)
+        #expect(runner.outputVolume == 100)
+        runner.setOutputVolume(55)
+        await runner.run()
+        #expect(fakes.outputs.volumes.withLock { $0 } == [alarmJBL.uid: 0.55])
+        #expect(runner.output == alarmJBL)
+    }
+
     @Test func stopDuringPrepRecordsNothingPlayed() async {
         let (runner, _) = makeRunner()
         runner.stop()

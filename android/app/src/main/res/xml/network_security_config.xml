@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The alarm remote talks plain HTTP to the Mac on the home Wi-Fi. Its address is only known at
+     run time and Android can't allow cleartext by IP range, so it's allowed in general (every
+     remote request is signed with the pairing key), and refused for the services the app uses
+     over HTTPS so nothing there can be downgraded. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">google.com</domain>
+        <domain includeSubdomains="true">googleapis.com</domain>
+        <domain includeSubdomains="true">firebaseio.com</domain>
+        <domain includeSubdomains="true">youtube.com</domain>
+        <domain includeSubdomains="true">googlevideo.com</domain>
+        <domain includeSubdomains="true">ytimg.com</domain>
+        <domain includeSubdomains="true">ggpht.com</domain>
+        <domain includeSubdomains="true">googleusercontent.com</domain>
+        <domain includeSubdomains="true">gstatic.com</domain>
+    </domain-config>
+</network-security-config>

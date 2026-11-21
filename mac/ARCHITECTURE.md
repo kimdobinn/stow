@@ -15,15 +15,16 @@ Each folder has exactly one owner. Owners may add files only inside their own fo
 
 | Folder | Owner | Responsibility |
 |---|---|---|
-| `Stow/Shared/` | architect (frozen) | `Models.swift` (value types, `StowError`), `AlarmModels.swift` (alarm value types), `Services.swift` and `AlarmServices.swift` (protocols, `AlarmServices`, `AlarmHost`), `CookieCopy.swift`, `AppPaths.swift`, `StowApp.swift` (`@main StowMain` entry point, `StowApp` scenes and wiring) |
+| `Stow/Shared/` | architect (frozen) | `Models.swift` (value types, `StowError`), `AlarmModels.swift` (alarm value types), `NowPlaying.swift` (`NowPlaying`, `PlaybackAction`), `Services.swift` and `AlarmServices.swift` (protocols, `AlarmServices`, `AlarmHost`, `AlarmRemoteService`, `AlarmRunControl`), `CookieCopy.swift`, `AppPaths.swift`, `StowApp.swift` (`@main StowMain` entry point, `StowApp` scenes and wiring) |
 | `Stow/YouTube/` | youtube | `YouTubeClient: YouTubeService`; yt-dlp runner, tool lookup, channel resolver, UULF RSS, UUMF via yt-dlp. `VideoDetails.swift` (`YTDLPVideoDetails`) belongs to the alarm engine |
 | `Stow/Account/` | account | `AccountManager: AccountService`; sign-in window, dedicated `WKWebsiteDataStore`, cookies.txt export, subscriptions |
 | `Stow/Core/` | core | `AppModel` (@Observable; `AppModel.swift` frozen), JSON store, scheduler, diffing, notifications, launch at login |
 | `Stow/Core/Alarm/`, `Core/AppModel+Alarm.swift` | alarm engine | `AlarmController`, schedule, planner, runner, inert services |
 | `Stow/Player/` | player | `MPVPlayer: AlarmPlayer` (mpv + JSON IPC, overlay, SponsorBlock), `AlarmSound: AlarmSoundPlayer` |
+| `Stow/Remote/` | remote | `AlarmRemote: AlarmRemoteService` (phone remote while the alarm runs: `RemoteServer` on Network.framework, `RemoteAPI`, `RemoteAuth`, `RemoteHTTP`) |
 | `Stow/System/` | system | `CoreAudioOutputs`, `BluetoothSpeaker`, `KeepAlive`, `PowerAssertions` |
 | `Stow/UI/` | ui | Main window: sidebar (`MainView`, frozen) with Inbox grid, Channels, Alarm (`UI/Alarm/`), Account, Log |
-| `Stow/SelfTest/` | integrator | `Stow --selftest` (headless check against real YouTube), `Stow --alarm-dryrun` (`AlarmDryRun`, `AlarmDryRunServices`), Debug-only `Stow --snapshot <dir>` (`Snapshot`) |
+| `Stow/SelfTest/` | integrator | `Stow --selftest` (headless check against real YouTube), `Stow --alarm-dryrun` (`AlarmDryRun`, `AlarmDryRunServices`), Debug-only `Stow --snapshot <dir>` (`Snapshot`), `--playback-demo`, `--remote-demo` |
 | `StowTests/<Module>/` | same as module | Swift Testing tests (hosted by the app, `@testable import Stow`) |
 
 Dependency rules:
@@ -32,7 +33,7 @@ Dependency rules:
 - UI depends on Shared and on `AppModel`, which it reads with `@Environment(AppModel.self)`.
 - Core/Alarm depends on Shared, uses Player, System and `YTDLPVideoDetails` only through the alarm protocols, and
   reaches the rest of the app only through `AlarmHost` (implemented by `AppModel`).
-- Player and System depend only on Shared.
+- Player, System and Remote depend only on Shared (Remote also reads the pairing key through `PairingKey`).
 - `StowApp` is the only place that names the concrete services (`SelfTest` also uses `YouTubeClient`, with a fixed fake account and a temporary store;
   `AlarmDryRun` also uses `MPVPlayer`, `CoreAudioOutputs`, `BluetoothSpeaker` and `YTDLPVideoDetails`, wrapped so nothing changes).
 
@@ -305,3 +306,36 @@ outcome (running, played, alarmSound, skippedLate, stopped, failed), error}. It 
 `lastScheduledAlarm`: the alarm time of the newest scheduled run (played or skipped), so a test run that replaces
 `lastAlarmRun` can't make that morning's alarm fire again after a relaunch. Older files without it fall back to
 `lastAlarmRun` when that was a scheduled run.
+
+## Phone remote
+
+While an alarm run is active (from prep until it ends, test alarms included) the paired phone can control it over
+the home Wi-Fi, so nobody has to touch the Mac. `AlarmController` reports every phase to `AlarmServices.remote`
+(`AlarmRemote`), which serves plain HTTP/1.1 on port 48261 (any free port when it is taken), advertised over Bonjour
+as `_stow-remote._tcp` under the Mac's name. It listens only with a pairing key on disk (a phone was paired) and stops
+when the run ends. macOS holds an advertising listener back until Local Network access is allowed, so if that fails
+the remote listens without Bonjour (the push still carries the address); at launch, with a phone paired, it advertises
+for a few seconds so macOS asks while someone is at the Mac, not first at alarm time.
+
+- Every request is signed with the 32-byte pairing key: `X-Stow-Time` (unix ms), `X-Stow-Nonce` (32 lowercase hex),
+  `X-Stow-Signature` = base64url (no padding) of HMAC-SHA256 over `METHOD\nPATH\nTIME\nNONCE\nhex SHA-256(body)`
+  (PATH without the query). More than 120 s off the Mac's clock, a nonce seen in the last 5 minutes (in any run), or a
+  bad signature → 401. An action reaching a run's server after that run ended → 409. One request per connection (`Connection: close`), bodies by `Content-Length` only (no chunked),
+  at most 64 KB (413).
+- `GET /v1/state` (phase, playlist, what plays, the output and its volume), `GET /v1/choices` (Inbox and recent videos,
+  newest first, at most 40), `POST /v1/action` (`setPaused`, `seekBy`, `seekTo`, `next`, `playIndex`, `playVideo`,
+  `setVolume`, `setMuted`, `stop`) answering with the state; 400 bad input, 404 unknown path, 405 wrong method,
+  409 not applicable (before the videos play only `stop` and `setVolume` work).
+- `setVolume` is the alarm output's own volume (before the output is chosen it replaces the configured volume); the
+  previous volume still comes back when the run ends. `setMuted` is the player's mute, like the window's. `stop` is
+  Stop Alarm. `playIndex`/`playVideo` jump with mpv's `playlist-play-index` and unpause; `playVideo` of a video not in
+  the playlist appends it (`loadfile … append`), and the runner adds it to the playlist and the run record when it starts.
+- When the run first reaches `starting`/`playing` and the server listens, every paired phone gets an FCM data message
+  `{type: alarm, state: playing, port, hosts, macName}` (`hosts`: the Mac's IPv4 addresses, LAN first); when it ends,
+  `{type: alarm, state: ended}` (only after a `playing` one). Pushes go through `AlarmHost.pushToPhones` →
+  `PhoneSync.pushToPhones`, leave one after another in order, are best effort and only logged when they fail. Actions and the first rejected request of
+  a run are logged; polling isn't.
+- Debug builds: `Stow --remote-demo [--remote-key <base64url>]` runs a test alarm on the two newest known public videos
+  through the real engine and remote (port 48261, Bonjour), headless and silent (no window, `--ao=null`), with the
+  volume in memory, no pushes, no cookies and nothing saved. It prints every phase, request and push, and ends on
+  `stop`, when the videos finish, or after 10 minutes.

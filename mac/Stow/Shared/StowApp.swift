@@ -46,6 +46,11 @@ enum StowMain {
             Task { exit(await PhoneCheck.run() ? 0 : 1) }
             dispatchMain()
         }
+        if CommandLine.arguments.contains(RemoteDemo.argument) {
+            setvbuf(stdout, nil, _IOLBF, 0)
+            Task { exit(await RemoteDemo.run() ? 0 : 1) }
+            dispatchMain()
+        }
         if CommandLine.arguments.contains(PlaybackDemo.argument) {
             setvbuf(stdout, nil, _IOLBF, 0)
             Task { exit(await PlaybackDemo.run() ? 0 : 1) }
@@ -73,9 +78,11 @@ struct StowApp: App {
             _model = State(initialValue: AppModel(youtube: YouTubeClient(), account: AccountManager(), alarmServices: .inert))
             return
         }
+        let remote = AlarmRemote(pairingKeyFile: AppPaths.pairingKeyFile)
+        remote.askForLocalNetworkAccess()
         let alarmServices = AlarmServices(
             player: MPVPlayer(showsControls: true), sound: AlarmSound(), outputs: CoreAudioOutputs(), speaker: BluetoothSpeaker(),
-            keepAlive: KeepAlive(), power: PowerAssertions(), videoDetails: YTDLPVideoDetails())
+            keepAlive: KeepAlive(), power: PowerAssertions(), videoDetails: YTDLPVideoDetails(), remote: remote)
         let model = AppModel(youtube: YouTubeClient(), account: AccountManager(), alarmServices: alarmServices)
         Self.cleanUpChildProcesses()
         model.start()

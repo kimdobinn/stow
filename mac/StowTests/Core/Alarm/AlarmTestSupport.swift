@@ -22,6 +22,7 @@ final class FakeAlarmHost: AlarmHost {
     var watched: [String] = []
     var logs: [String] = []
     var problems: [String] = []
+    var pushes: [[String: String]] = []
     var refreshes = 0
 
     init(alarm: AlarmSettings = .default, channels: [Channel] = [alarmChannel()], state: AppState = .empty) {
@@ -41,6 +42,7 @@ final class FakeAlarmHost: AlarmHost {
 
     func logAlarm(_ level: LogLevel, _ message: String) { logs.append("\(level.rawValue): \(message)") }
     func notifyAlarmProblem(title: String, body: String) { problems.append(title) }
+    func pushToPhones(_ data: [String: String]) { pushes.append(data) }
 }
 
 final class FakeAlarmPlayer: AlarmPlayer {
@@ -48,6 +50,9 @@ final class FakeAlarmPlayer: AlarmPlayer {
     let script = Mutex<[PlayerEvent]>([])
     let failure = Mutex<StowError?>(nil)
     let plays = Mutex<[(ids: [String], output: String?)]>([])
+    /// What `nowPlaying()` reports.
+    let current = Mutex<NowPlaying?>(nil)
+    let actions = Mutex<[PlaybackAction]>([])
     private let continuation = Mutex<AsyncStream<PlayerEvent>.Continuation?>(nil)
 
     func play(playlist: [PlayableVideo], outputDeviceUID: String?, cookiesFile: URL?) async throws -> AsyncStream<PlayerEvent> {
@@ -67,6 +72,16 @@ final class FakeAlarmPlayer: AlarmPlayer {
         continuation.yield(.exited(.stopped))
         continuation.finish()
     }
+
+    func nowPlaying() async -> NowPlaying? { current.withLock { $0 } }
+    func perform(_ action: PlaybackAction) async { actions.withLock { $0.append(action) } }
+}
+
+/// Records the phases the controller reports.
+@MainActor
+final class FakeAlarmRemote: AlarmRemoteService {
+    var phases: [AlarmPhase] = []
+    func alarmPhaseChanged(_ phase: AlarmPhase, run: any AlarmRunControl) { phases.append(phase) }
 }
 
 @MainActor
@@ -167,6 +182,7 @@ struct FakeAlarmServices {
     let keepAlive = FakeAlarmKeepAlive()
     let power = FakeAlarmPower()
     let details = FakeAlarmDetails()
+    let remote = FakeAlarmRemote()
 
     init(outputs: [AudioOutput] = [alarmJBL, alarmCRG, alarmMonitor, alarmBuiltIn]) {
         self.outputs = FakeAlarmOutputs(outputs)
@@ -175,6 +191,6 @@ struct FakeAlarmServices {
 
     var services: AlarmServices {
         AlarmServices(player: player, sound: sound, outputs: outputs, speaker: speaker, keepAlive: keepAlive,
-                      power: power, videoDetails: details)
+                      power: power, videoDetails: details, remote: remote)
     }
 }

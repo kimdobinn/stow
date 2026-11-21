@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Download
@@ -104,6 +105,7 @@ private enum class HomeFilter(val label: String) { ALL("All"), DOWNLOADED("Downl
 fun HomeScreen(
     feed: List<VideoItem>, channels: List<Channel>, actions: VideoActions, todaySeconds: Long,
     onReport: () -> Unit, onSearch: () -> Unit, onSettings: () -> Unit,
+    alarmMac: String? = null, onRemote: () -> Unit = {},
 ) {
     var filter by rememberSaveable { mutableStateOf(HomeFilter.ALL) }
     var channelId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -116,6 +118,7 @@ fun HomeScreen(
     val watched = matching.filter { it.watched }
     Column(Modifier.fillMaxSize()) {
         LogoTopBar(onSearch, onSettings)
+        alarmMac?.let { AlarmBanner(it, onRemote) }
         ChipRow {
             HomeFilter.entries.forEach { f ->
                 Chip(f.label, filter == f && channelId == null, onClick = { filter = f; channelId = null })
@@ -133,6 +136,20 @@ fun HomeScreen(
                 if (showWatched) items(watched, key = { "w-" + it.id }) { VideoCard(it, avatars[it.video.channelId], actions) }
             }
         }
+    }
+}
+
+/** While the Mac's alarm plays (its push came in the last two hours): one tap to the remote. */
+@Composable
+private fun AlarmBanner(macName: String, onOpen: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+            .background(Stow.colors.chip).clickable(onClick = onOpen).padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Filled.Alarm, contentDescription = null, tint = Stow.colors.text, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(12.dp))
+        Text("Alarm playing on $macName", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Stow.colors.text,
+             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        Text(" · Open remote", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Color3D(), maxLines = 1)
     }
 }
 

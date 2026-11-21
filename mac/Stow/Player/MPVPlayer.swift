@@ -51,6 +51,14 @@ actor MPVPlayer: AlarmPlayer {
         await session.stop()
     }
 
+    func nowPlaying() async -> NowPlaying? {
+        await session?.latestNowPlaying
+    }
+
+    func perform(_ action: PlaybackAction) async {
+        await session?.perform(action)
+    }
+
     /// Shuts down any mpv this app started, synchronously; called when the app quits.
     static func terminateAll() {
         MPVCore.terminateAll()

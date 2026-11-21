@@ -94,4 +94,5 @@ dependencies {
     implementation(libs.code.scanner)
     implementation(libs.youtubedl.library)
     implementation(libs.youtubedl.ffmpeg)
+    testImplementation(libs.junit)
 }

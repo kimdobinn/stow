@@ -8,7 +8,9 @@ struct MPVPlaybackTracker {
         case send(MPVCommand)
     }
 
-    let playlist: [PlayableVideo]
+    /// mpv's playlist: the initial videos, then any added with `play(_:)`. Entries are never removed,
+    /// so entry id N (mpv counts from 1) is always index N − 1.
+    private(set) var playlist: [PlayableVideo]
     private var segments: [String: [SponsorSegment]] = [:]
     /// Index of the entry mpv is loading or playing.
     private(set) var currentIndex: Int?
@@ -18,6 +20,8 @@ struct MPVPlaybackTracker {
     private var position: TimeInterval = 0
     /// The entry the controls show: the current one, or the next one between entries.
     private var shownIndex = 0
+    /// The entry a jump asked for, shown (loading) until mpv starts it.
+    private var requestedIndex: Int?
     private(set) var isPaused = false
     private var volume: Double = 100
     private var isMuted = false
@@ -35,6 +39,21 @@ struct MPVPlaybackTracker {
 
     mutating func setSegments(_ segments: [SponsorSegment], videoId: String) {
         self.segments[videoId] = segments
+    }
+
+    /// Jumps to entry `index` and plays it (mpv would keep a pause); nothing when there is no such entry.
+    mutating func play(index: Int) -> [Effect] {
+        guard playlist.indices.contains(index) else { return [] }
+        requestedIndex = index
+        shownIndex = index
+        return [.send(.playlistPlayIndex(index)), .send(.setPause(false))]
+    }
+
+    /// Plays `video` now: jumps to it when it is in the playlist, else appends it first.
+    mutating func play(_ video: PlayableVideo) -> [Effect] {
+        if let index = playlist.firstIndex(where: { $0.video.id == video.video.id }) { return play(index: index) }
+        playlist.append(video)
+        return [.emit(.appended(video)), .send(.appendFile(video.video.watchURL))] + play(index: playlist.count - 1)
     }
 
     mutating func handle(_ event: MPVEvent) -> [Effect] {
@@ -95,7 +114,7 @@ struct MPVPlaybackTracker {
         return .failed(lastFailure ?? lastLoggedError ?? "mpv exited (code \(exitCode)) without playing anything.")
     }
 
-    /// mpv numbers the initial playlist's entries 1…N.
+    /// mpv numbers the playlist's entries 1…N in the order they were added.
     private func index(of entryId: Int?) -> Int? {
         guard let entryId, playlist.indices.contains(entryId - 1) else { return nil }
         return entryId - 1
@@ -104,6 +123,7 @@ struct MPVPlaybackTracker {
     private mutating func beginEntry(_ index: Int) {
         currentIndex = index
         shownIndex = index
+        requestedIndex = nil
         currentStarted = false
         furthest = 0
         position = 0
@@ -129,7 +149,7 @@ struct MPVPlaybackTracker {
         defer { currentIndex = nil }
         if reason == .quit { userQuit = true }
         guard let index else { return [] }
-        shownIndex = min(index + 1, playlist.count - 1)
+        shownIndex = requestedIndex ?? min(index + 1, playlist.count - 1)
         let entry = playlist[index]
         if index == currentIndex, currentStarted {
             return [.emit(.videoEnded(videoId: entry.video.id, position: furthest, duration: duration ?? entry.duration))]

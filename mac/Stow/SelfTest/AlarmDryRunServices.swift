@@ -9,7 +9,8 @@ extension AlarmServices {
     static func dryRun(player: any AlarmPlayer, log: @escaping @Sendable (String) -> Void) -> AlarmServices {
         AlarmServices(player: DryRunPlayer(player: player, log: log), sound: DryRunSound(log: log),
                       outputs: DryRunOutputs(log: log), speaker: DryRunSpeaker(log: log), keepAlive: DryRunKeepAlive(),
-                      power: DryRunPower(log: log), videoDetails: DryRunVideoDetails(log: log))
+                      power: DryRunPower(log: log), videoDetails: DryRunVideoDetails(log: log),
+                      remote: InertAlarmRemote())
     }
 }
 
@@ -48,6 +49,14 @@ private struct DryRunPlayer: AlarmPlayer {
 
     func stop() async {
         await player.stop()
+    }
+
+    func nowPlaying() async -> NowPlaying? {
+        await player.nowPlaying()
+    }
+
+    func perform(_ action: PlaybackAction) async {
+        await player.perform(action)
     }
 }
 

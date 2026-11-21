@@ -29,6 +29,10 @@ enum MPVCommand: Equatable, Sendable {
     case setVolume(Double)
     case setMute(Bool)
     case playlistNext
+    /// 0-based playlist position.
+    case playlistPlayIndex(Int)
+    /// Adds `url` to the end of the playlist without playing it.
+    case appendFile(URL)
     case quit
 
     var arguments: [MPVArgument] {
@@ -42,6 +46,8 @@ enum MPVCommand: Equatable, Sendable {
         case .setVolume(let volume): [.string("set_property"), .string("volume"), .double(volume)]
         case .setMute(let muted): [.string("set_property"), .string("mute"), .bool(muted)]
         case .playlistNext: [.string("playlist-next")]
+        case .playlistPlayIndex(let index): [.string("playlist-play-index"), .int(index)]
+        case .appendFile(let url): [.string("loadfile"), .string(url.absoluteString), .string("append")]
         case .quit: [.string("quit")]
         }
     }

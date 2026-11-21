@@ -24,7 +24,7 @@ extension AlarmServices {
     private static func make(outputs: [AudioOutput], devices: [BluetoothAudioDevice]) -> AlarmServices {
         AlarmServices(player: InertPlayer(), sound: InertSound(), outputs: InertOutputs(list: outputs),
                       speaker: InertSpeaker(devices: devices), keepAlive: InertKeepAlive(), power: InertPower(),
-                      videoDetails: InertVideoDetails())
+                      videoDetails: InertVideoDetails(), remote: InertAlarmRemote())
     }
 }
 
@@ -33,6 +33,8 @@ private struct InertPlayer: AlarmPlayer {
         throw StowError.player("No player in this build.")
     }
     func stop() async {}
+    func nowPlaying() async -> NowPlaying? { nil }
+    func perform(_ action: PlaybackAction) async {}
 }
 
 @MainActor
@@ -80,4 +82,10 @@ private final class InertPower: PowerService {
 
 private struct InertVideoDetails: VideoDetailsService {
     func details(for ids: [String], cookiesFile: URL?) async -> [String: VideoDetails] { [:] }
+}
+
+/// No phone remote: nothing listens on the network.
+@MainActor
+final class InertAlarmRemote: AlarmRemoteService {
+    func alarmPhaseChanged(_ phase: AlarmPhase, run: any AlarmRunControl) {}
 }

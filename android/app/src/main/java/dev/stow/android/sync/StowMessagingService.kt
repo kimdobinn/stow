@@ -3,12 +3,17 @@ package dev.stow.android.sync
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import dev.stow.android.StowApplication
+import dev.stow.android.remote.AlarmNotification
 
-/** The Mac's high-priority pushes ("videos", "sync") wake the phone to fetch and download. */
+/**
+ * The Mac's high-priority pushes: "videos" and "sync" wake the phone to fetch and download;
+ * "alarm" says the morning alarm started or ended (the remote, nothing to download).
+ */
 class StowMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
-        android.util.Log.i("Stow", "Push from the Mac: ${message.data["type"]}")
-        SyncWorker.runNow(this)
+        val type = message.data["type"]
+        android.util.Log.i("Stow", "Push from the Mac: $type")
+        if (type == "alarm") AlarmNotification.onPush(this, message.data, message.sentTime) else SyncWorker.runNow(this)
     }
 
     override fun onNewToken(token: String) {

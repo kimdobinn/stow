@@ -3,7 +3,7 @@ import Foundation
 // Alarm module boundaries. FROZEN: request changes from the architect.
 // Core/Alarm depends only on these protocols; StowApp wires up the concrete types:
 //   MPVPlayer (Player), AlarmSound (Player), CoreAudioOutputs, BluetoothSpeaker, KeepAlive,
-//   PowerAssertions (System), YTDLPVideoDetails (YouTube).
+//   PowerAssertions (System), YTDLPVideoDetails (YouTube), AlarmRemote (Remote).
 
 /// Plays the morning videos fullscreen in mpv, streamed from YouTube. Implemented by Player/MPVPlayer.
 protocol AlarmPlayer: Sendable {
@@ -17,6 +17,40 @@ protocol AlarmPlayer: Sendable {
 
     /// Quits mpv; the event stream then yields `.exited(.stopped)`. No-op when idle.
     func stop() async
+
+    /// What the running playlist shows (the window's view); nil when mpv isn't running.
+    func nowPlaying() async -> NowPlaying?
+
+    /// Carries out a control request (from the window or the phone) on the running playlist.
+    /// `.playVideo` of a new video yields `.appended` before it starts. No-op when idle.
+    func perform(_ action: PlaybackAction) async
+}
+
+/// Lets the paired phone see and control a running alarm over the local network.
+/// Implemented by Remote/AlarmRemote.
+@MainActor
+protocol AlarmRemoteService: AnyObject {
+    /// Called with every phase of a run, from `.preparing` to `.idle` (the run ended).
+    func alarmPhaseChanged(_ phase: AlarmPhase, run: any AlarmRunControl)
+}
+
+/// A running alarm as the phone remote drives it. Implemented by Core/Alarm (AlarmController).
+@MainActor
+protocol AlarmRunControl: AnyObject {
+    var phase: AlarmPhase { get }
+    func runStatus() async -> AlarmRunStatus
+    /// Inbox and recent videos (any order, may repeat), for switching to another video.
+    var knownVideos: [Video] { get }
+    /// A player request; ignored unless the player is running.
+    func perform(_ action: PlaybackAction) async
+    /// Sets the alarm output's own volume (0–100). Before the output is chosen, the run uses it
+    /// instead of the configured volume. The previous volume still comes back when the run ends.
+    func setOutputVolume(_ volume: Int)
+    /// Stop Alarm: cancels prep, stops mpv and the alarm sound.
+    func stop()
+    /// A best-effort FCM data message to every paired phone; returns at once.
+    func pushToPhones(_ data: [String: String])
+    func log(_ level: LogLevel, _ message: String)
 }
 
 /// Loops a built-in alarm sound (/System/Library/Sounds/Glass.aiff) on a specific output.
@@ -114,6 +148,7 @@ struct AlarmServices {
     var keepAlive: any KeepAliveService
     var power: any PowerService
     var videoDetails: any VideoDetailsService
+    var remote: any AlarmRemoteService
 }
 
 /// What the alarm needs from the app's model. Implemented by `AppModel` (Core/AppModel.swift).
@@ -136,4 +171,7 @@ protocol AlarmHost: AnyObject {
     func logAlarm(_ level: LogLevel, _ message: String)
     /// Rate-limited per title, like other problem notifications.
     func notifyAlarmProblem(title: String, body: String)
+    /// A best-effort FCM data message to every paired phone (the alarm remote's start and end).
+    /// Returns at once; failures are only logged.
+    func pushToPhones(_ data: [String: String])
 }

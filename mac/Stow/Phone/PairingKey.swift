@@ -8,12 +8,17 @@ import Foundation
 struct PairingKey: Sendable {
     let key: SymmetricKey
 
+    /// Reads the key; nil when there is none yet (no phone was ever paired) or it is unreadable.
+    static func load(at file: URL) -> PairingKey? {
+        guard let text = try? String(contentsOf: file, encoding: .utf8),
+              let data = Data(base64Encoded: text.trimmingCharacters(in: .whitespacesAndNewlines)), data.count == 32
+        else { return nil }
+        return PairingKey(key: SymmetricKey(data: data))
+    }
+
     /// Reads the key, creating it (0600) the first time.
     static func loadOrCreate(at file: URL) throws -> PairingKey {
-        if let text = try? String(contentsOf: file, encoding: .utf8),
-           let data = Data(base64Encoded: text.trimmingCharacters(in: .whitespacesAndNewlines)), data.count == 32 {
-            return PairingKey(key: SymmetricKey(data: data))
-        }
+        if let existing = load(at: file) { return existing }
         let key = SymmetricKey(size: .bits256)
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         let text = key.withUnsafeBytes { Data($0) }.base64EncodedString()

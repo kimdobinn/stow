@@ -79,6 +79,9 @@ final class PhoneSync {
     @ObservationIgnored private var loop: Task<Void, Never>?
     @ObservationIgnored private var pairingTask: Task<Void, Never>?
     @ObservationIgnored private var debounced: Task<Void, Never>?
+    /// The latest `pushToPhones` send; each waits for the one before, so a run's "ended" never
+    /// overtakes its "playing".
+    @ObservationIgnored private var pushChain: Task<Void, Never>?
     @ObservationIgnored private var syncsAgain = false
 
     init(keyFile: URL, pairingKeyFile: URL,
@@ -424,6 +427,28 @@ final class PhoneSync {
                 }
             } catch {
                 host.logPhone(.warning, "Couldn't wake \(member.name): \(error.logDescription)")
+            }
+        }
+    }
+
+    /// A data message to every paired phone that has a push token, in the background and in call
+    /// order (the alarm remote's start and end). Best effort: failures are only logged.
+    func pushToPhones(_ data: [String: String]) {
+        guard let backend, let host else { return }
+        let members = members.filter { $0.fcmToken != nil }
+        guard !members.isEmpty else { return }
+        let previous = pushChain
+        pushChain = Task {
+            await previous?.value
+            for member in members {
+                guard let token = member.fcmToken else { continue }
+                do {
+                    if try await !backend.push(data, to: token) {
+                        host.logPhone(.warning, "\(member.name)'s push token is out of date.")
+                    }
+                } catch {
+                    host.logPhone(.warning, "Couldn't reach \(member.name): \(error.logDescription)")
+                }
             }
         }
     }

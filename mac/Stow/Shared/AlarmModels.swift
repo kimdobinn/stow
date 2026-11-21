@@ -394,6 +394,8 @@ enum PlayerEvent: Equatable, Sendable {
     case skippedSegment(videoId: String, category: String, from: TimeInterval, to: TimeInterval)
     /// An entry couldn't be loaded (yt-dlp failed, unavailable); the player moves on.
     case loadFailed(videoId: String, message: String)
+    /// A video was added to the end of the playlist (chosen on the phone); its index is the old count.
+    case appended(PlayableVideo)
     case exited(PlayerExit)
 }
 
@@ -469,6 +471,21 @@ enum AlarmPhase: Equatable, Sendable {
 
     /// True from prep until the run ends; "Stop" applies.
     var isActive: Bool { self != .idle }
+}
+
+/// A running alarm as the phone remote sees it.
+struct AlarmRunStatus: Equatable, Sendable {
+    var phase: AlarmPhase
+    /// The videos in play order, including ones added from the phone; empty until they start playing.
+    var playlist: [Video]
+    /// Nil unless the player is running.
+    var nowPlaying: NowPlaying?
+    /// The output the alarm plays on; nil until it is chosen.
+    var outputName: String?
+    /// That output's own volume, 0–100; nil when it can't be read.
+    var volume: Int?
+
+    static let ended = AlarmRunStatus(phase: .idle, playlist: [], nowPlaying: nil, outputName: nil, volume: nil)
 }
 
 /// What the alarm would play right now (planner dry-run from state, no yt-dlp).

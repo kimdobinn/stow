@@ -56,6 +56,8 @@ The **Alarm** section sets it up; everything is also in the `alarm` object of se
 - Keys while playing: space pauses, `>` skips to the next video, `q` quits. **Stop Alarm** (⌘.) stops everything.
 - Played videos leave the Inbox (they move to Recent); videos watched to 90% are remembered for a future phone sync.
 - **Test Alarm Now…** runs the whole thing immediately (it is loud).
+- While the alarm runs, the paired phone is its remote over the home Wi-Fi: volume, pause, seek, next, another
+  video, and I'm Awake. macOS asks once, when Stow opens with a phone paired, whether it may use the local network.
 
 The first time the Alarm section lists Bluetooth devices, macOS asks for Bluetooth permission.
 

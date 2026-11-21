@@ -15,6 +15,7 @@ actor MPVSession {
     private var nextRequestId = 1
     private var playlistPositionRequest: Int?
     private var stopRequested = false
+    private var hasExited = false
     private var helpers: [Task<Void, Never>] = []
     private var runTask: Task<Void, Never>?
 
@@ -54,17 +55,29 @@ actor MPVSession {
         await runTask?.value
     }
 
-    /// Carries out a request from the on-screen controls.
+    /// What the controls show now; nil once mpv has exited.
+    var latestNowPlaying: NowPlaying? { hasExited ? nil : lastNowPlaying }
+
+    /// Carries out a request from the on-screen controls or the phone.
     func perform(_ action: PlaybackAction) async {
         switch action {
         case .setPaused(let paused): send(.setPause(paused))
         case .seekBy(let seconds): send(.seekRelative(seconds))
         case .seekTo(let seconds): send(.seekAbsolute(max(seconds, 0)))
-        case .next: send(.playlistNext)
+        case .next:
+            // Like a jump: the next video plays even if this one was paused.
+            send(.playlistNext)
+            send(.setPause(false))
+        case .playIndex(let index): perform(tracker.play(index: index))
+        case .playVideo(let video):
+            let isNew = !tracker.playlist.contains { $0.video.id == video.video.id }
+            perform(tracker.play(video))
+            if isNew { fetchSegments(videoId: video.video.id) }
         case .setVolume(let volume): send(.setVolume(min(max(volume, 0), 100).rounded()))
         case .setMuted(let muted): send(.setMute(muted))
         case .stop: await stop()
         }
+        publishNowPlaying()
     }
 
     private func begin() {
@@ -79,12 +92,7 @@ actor MPVSession {
         playlistPositionRequest = send(.getProperty("playlist-pos"))
         runTask = Task { await self.run(lines) }
         publishNowPlaying()
-        for id in Set(tracker.playlist.map(\.video.id)) {
-            helpers.append(Task {
-                let segments = await SponsorBlock.segments(videoId: id)
-                self.setSegments(segments, videoId: id)
-            })
-        }
+        Set(tracker.playlist.map(\.video.id)).forEach(fetchSegments)
         continuation.onTermination = { [weak self] termination in
             guard case .cancelled = termination, let self else { return }
             Task { await self.stop() }
@@ -103,6 +111,7 @@ actor MPVSession {
         let exit = lostConnection && !stopRequested
             ? .failed("Lost the connection to mpv.")
             : tracker.exit(stopRequested: stopRequested, exitCode: process.exitCode)
+        hasExited = true
         continuation.yield(.exited(exit))
         continuation.finish()
         nowPlayingContinuation.finish()
@@ -136,6 +145,13 @@ actor MPVSession {
                 send(command)
             }
         }
+    }
+
+    private func fetchSegments(videoId: String) {
+        helpers.append(Task {
+            let segments = await SponsorBlock.segments(videoId: videoId)
+            self.setSegments(segments, videoId: videoId)
+        })
     }
 
     private func setSegments(_ segments: [SponsorSegment], videoId: String) {

@@ -201,4 +201,8 @@ private final class DryRunHost: AlarmHost {
     func notifyAlarmProblem(title: String, body: String) {
         log("would notify: \(title): \(body)")
     }
+
+    func pushToPhones(_ data: [String: String]) {
+        log("would push to the phones: \(data)")
+    }
 }

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Alarm
 import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.Contrast
 import androidx.compose.material.icons.outlined.DeleteSweep
@@ -51,7 +52,7 @@ import kotlinx.coroutines.withContext
 
 /** Downloads, the downloader and the pairing, in YouTube's plain settings style. */
 @Composable
-fun SettingsScreen(repository: Repository, wifiOnly: Boolean, onReport: () -> Unit, onBack: () -> Unit) {
+fun SettingsScreen(repository: Repository, wifiOnly: Boolean, onReport: () -> Unit, onRemote: () -> Unit, onBack: () -> Unit) {
     val autoplay by repository.prefs.autoplay.collectAsStateWithLifecycle()
     val calm by repository.prefs.calm.collectAsStateWithLifecycle()
     val grayscale by repository.prefs.grayscale.collectAsStateWithLifecycle()
@@ -109,6 +110,7 @@ fun SettingsScreen(repository: Repository, wifiOnly: Boolean, onReport: () -> Un
                        }))
             HorizontalDivider(color = Stow.colors.divider)
             Group("Mac")
+            SettingRow(Icons.Outlined.Alarm, "Alarm remote", "Control the Mac's morning alarm from this phone", onClick = onRemote)
             SettingRow(Icons.Outlined.LinkOff, "Unpair this phone", "Paired with Firebase project ${repository.prefs.pairedProject ?: "–"}",
                        onClick = { confirmUnpair = true })
         }

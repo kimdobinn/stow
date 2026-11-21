@@ -722,6 +722,10 @@ extension AppModel: AlarmHost {
         notifier.notifyProblem(title: title, body: body)
     }
 
+    func pushToPhones(_ data: [String: String]) {
+        phone.pushToPhones(data)
+    }
+
     /// `ids` first (in their order), then the rest of `list` without duplicates, capped.
     private static func prepending(_ ids: [String], to list: [String], limit: Int) -> [String] {
         var seen = Set<String>()

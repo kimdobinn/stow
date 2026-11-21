@@ -36,6 +36,9 @@ struct MPVIPCTests {
         #expect((seek[1] as? NSNumber)?.doubleValue == -10)
         #expect(seek[2] as? String == "relative")
         #expect(try json(.playlistNext)["command"] as? [String] == ["playlist-next"])
+        #expect(try json(.playlistPlayIndex(3))["command"] as? [AnyHashable] == ["playlist-play-index", 3])
+        #expect(try json(.appendFile(URL(string: "https://www.youtube.com/watch?v=abc")!))["command"] as? [String]
+                == ["loadfile", "https://www.youtube.com/watch?v=abc", "append"])
     }
 
     @Test func parsesBooleanPropertiesAsFlags() {

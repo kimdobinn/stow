@@ -30,6 +30,10 @@ final class AlarmRunner {
     /// sound rings; restarted by each video that fails to load. Settable for tests.
     var startLimit: Duration = .seconds(90)
     private(set) var isStopping = false
+    /// What mpv plays, in order, including videos added from the phone; empty until it starts.
+    private(set) var playlist: [PlayableVideo] = []
+    /// The output the alarm plays on, once chosen.
+    private(set) var output: AudioOutput?
     /// Cancelled because the alarm time changed during prep: not recorded.
     private var isAbandoned = false
 
@@ -43,6 +47,10 @@ final class AlarmRunner {
     private var startDeadline: ContinuousClock.Instant?
     /// Why the watchdog stopped mpv.
     private var playerTimeout: String?
+    /// When the run is cut off; later for every video added from the phone.
+    private var runDeadline: ContinuousClock.Instant?
+    /// A volume the phone chose before the output was; it replaces the configured volume.
+    private var requestedVolume: Int?
 
     init(trigger: AlarmTrigger, scheduledFor: Date, services: AlarmServices, host: any AlarmHost,
          onPhase: @escaping (AlarmPhase) -> Void) {
@@ -72,6 +80,23 @@ final class AlarmRunner {
         Task { await player.stop() }
     }
 
+    /// Sets the output's own volume (0–100) while it plays; before that, the volume it will get.
+    func setOutputVolume(_ volume: Int) {
+        let volume = min(max(volume, AlarmSettings.volumeRange.lowerBound), AlarmSettings.volumeRange.upperBound)
+        guard let output else {
+            requestedVolume = volume
+            return
+        }
+        setVolume(volume, on: output)
+    }
+
+    /// The output's own volume, 0–100; before the output is chosen, the one it will get (so the
+    /// phone shows a volume it can change during prep).
+    var outputVolume: Int? {
+        guard let output else { return requestedVolume ?? host.currentSettings().alarm.volume }
+        return services.outputs.volume(deviceUID: output.uid).map { Int(($0 * 100).rounded()) }
+    }
+
     /// Cancels a run whose alarm time no longer exists (settings changed during prep).
     func abandon() {
         isAbandoned = true
@@ -90,9 +115,11 @@ final class AlarmRunner {
         // First, so a monitor's DisplayPort audio is back before the output is chosen.
         services.power.wakeDisplay()
         let output = await chooseOutput(settings)
+        self.output = output
         record.output = output?.name ?? "System default"
         let previousVolume = output.flatMap { services.outputs.volume(deviceUID: $0.uid) }
-        setVolume(settings.volume, on: output)
+        let volume = requestedVolume ?? settings.volume
+        setVolume(volume, on: output)
         defer { if let previousVolume { restoreVolume(previousVolume, on: output) } }
         onPhase(.starting(output: output?.name))
         record.fallbackRule = plan.fallbackRule
@@ -103,7 +130,7 @@ final class AlarmRunner {
         } else if plan.videos.isEmpty {
             failure = "Nothing to play: no new morning videos and no fallback rule matched."
         } else {
-            log(.info, "playing \(plan.videos.count) video(s) on \(record.output ?? "?") at \(settings.volume)%"
+            log(.info, "playing \(plan.videos.count) video(s) on \(record.output ?? "?") at \(volume)%"
                 + (plan.fallbackRule.map { " (fallback rule \(Self.describe($0)))" } ?? "") + ".")
             failure = await play(plan.videos, on: output, maxDurationMinutes: settings.maxDurationMinutes)
         }
@@ -212,18 +239,20 @@ final class AlarmRunner {
 
     /// Plays `playlist` until mpv exits. Returns why nothing could be played, or nil when
     /// something played or the user stopped it.
-    private func play(_ playlist: [PlayableVideo], on output: AudioOutput?, maxDurationMinutes: Int) async -> String? {
+    private func play(_ videos: [PlayableVideo], on output: AudioOutput?, maxDurationMinutes: Int) async -> String? {
         let events: AsyncStream<PlayerEvent>
         do {
-            events = try await services.player.play(playlist: playlist, outputDeviceUID: output?.uid,
+            events = try await services.player.play(playlist: videos, outputDeviceUID: output?.uid,
                                                     cookiesFile: host.playbackCookiesFile)
         } catch {
             return "The player couldn't start: \(error.logDescription)"
         }
+        playlist = videos
         if isStopping { await services.player.stop() }
         startDeadline = .now + startLimit
-        let longest = Double(playlist.count * maxDurationMinutes * 60) + Self.runMargin
-        let watchdog = Task { await watchPlayer(until: .now + .seconds(longest)) }
+        let maxDuration = Duration.seconds(maxDurationMinutes * 60)
+        runDeadline = .now + maxDuration * videos.count + .seconds(Self.runMargin)
+        let watchdog = Task { await watchPlayer() }
         defer { watchdog.cancel() }
 
         var exit = PlayerExit.failed("The player ended without reporting why.")
@@ -248,6 +277,10 @@ final class AlarmRunner {
                 lastLoadError = message
                 startDeadline = .now + startLimit
                 log(.warning, "couldn't load \(videoId): \(message)")
+            case .appended(let added):
+                playlist.append(added)
+                runDeadline = runDeadline.map { $0 + maxDuration }
+                log(.info, "added “\(added.video.title)” (\(added.video.channelTitle), \(added.video.id)) to the playlist.")
             case .exited(let reason):
                 exit = reason
             }
@@ -278,12 +311,12 @@ final class AlarmRunner {
     }
 
     /// Stops mpv when no video has started by `startDeadline`, or when the run outlasts `runDeadline`.
-    private func watchPlayer(until runDeadline: ContinuousClock.Instant) async {
+    private func watchPlayer() async {
         while !Task.isCancelled, !isStopping {
             let now = ContinuousClock.now
             if record.videoIds.isEmpty, let startDeadline, now >= startDeadline {
                 playerTimeout = "No video started within \(startLimit)."
-            } else if now >= runDeadline {
+            } else if let runDeadline, now >= runDeadline {
                 playerTimeout = "The alarm ran far longer than its videos."
             }
             if playerTimeout != nil { return await services.player.stop() }

@@ -16,6 +16,8 @@ final class FakePhoneBackend: PhoneBackend {
     let changes = Mutex<[PhoneVideoChange]>([])
     let pushes = Mutex<[(token: String, data: [String: String])]>([])
     let failure = Mutex<StowError?>(nil)
+    /// A push whose `state` is this takes a moment to go out.
+    let slowPushState = Mutex<String?>(nil)
 
     private func check() throws {
         if let error = failure.withLock({ $0 }) { throw error }
@@ -78,6 +80,9 @@ final class FakePhoneBackend: PhoneBackend {
     func saveCookies(sealed: Data) async throws { cookies.withLock { $0 = sealed } }
 
     func push(_ data: [String: String], to token: String) async throws -> Bool {
+        if let slow = slowPushState.withLock({ $0 }), data["state"] == slow {
+            try await Task.sleep(for: .milliseconds(100))
+        }
         pushes.withLock { $0.append((token, data)) }
         return token != "stale"
     }
@@ -160,6 +165,18 @@ struct PhoneSyncTests {
         await model.phone.sync()
         #expect(backend.videos.withLock { $0["v4"]?["sentBy"] } == "manual")
         #expect(model.phoneState.pending.isEmpty)
+    }
+
+    @Test func alarmPushesLeaveInOrder() async throws {
+        let model = try await makeModel()
+        backend.pushes.withLock { $0 = [] }
+        backend.slowPushState.withLock { $0 = "playing" }
+        model.phone.pushToPhones(["type": "alarm", "state": "playing"])
+        model.phone.pushToPhones(["type": "alarm", "state": "ended"])
+        for _ in 0..<200 where backend.pushes.withLock({ $0.count }) < 2 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(backend.pushes.withLock { $0.map { $0.data["state"] } } == ["playing", "ended"])
     }
 
     @Test func nothingIsSentBeforePairing() async throws {
