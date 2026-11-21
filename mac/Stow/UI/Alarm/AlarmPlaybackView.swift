@@ -5,6 +5,8 @@ import SwiftUI
 /// and a big "I'm Awake" button that ends the alarm.
 struct AlarmPlaybackView: View {
     let screen: PlaybackScreen
+    /// The spot (0–1) on the timeline under the pointer, for the preview above it.
+    @State private var scrub: Double?
 
     private var chrome: Bool { screen.showsChrome }
 
@@ -34,6 +36,11 @@ struct AlarmPlaybackView: View {
         .animation(.easeInOut(duration: 0.35), value: chrome)
         .animation(.easeInOut(duration: 0.25), value: screen.nowPlaying?.isPaused)
         .animation(.easeInOut(duration: 0.25), value: screen.nowPlaying?.isLoading)
+        .task(id: screen.nowPlaying?.video.id) {
+            // Signed out: no cookies file, and members-only videos just get no frames.
+            guard let videoId = screen.nowPlaying?.video.id else { return }
+            StoryboardLoader.shared.load(videoId: videoId, cookiesFile: AppPaths.cookiesFile)
+        }
     }
 
     // MARK: Background
@@ -136,8 +143,14 @@ struct AlarmPlaybackView: View {
             }
             .shadow(color: .black.opacity(0.5), radius: 10)
 
-            PlaybackProgressBar(position: nowPlaying.position, duration: nowPlaying.duration) { target in
+            PlaybackProgressBar(position: nowPlaying.position, duration: nowPlaying.duration,
+                                onScrub: { scrub = $0 }) { target in
                 screen.perform(.seekTo(target))
+            }
+            .overlay(alignment: .topLeading) {
+                if let scrub, let duration = nowPlaying.duration, duration > 0 {
+                    ScrubPreview(fraction: scrub, duration: duration, maxWidth: 320, fontSize: 15)
+                }
             }
 
             HStack(spacing: 14) {
