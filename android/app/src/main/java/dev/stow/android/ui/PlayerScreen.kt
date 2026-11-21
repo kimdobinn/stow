@@ -92,15 +92,77 @@ import dev.stow.android.data.VideoItem
 import dev.stow.android.player.PlayerConnection
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.util.lerp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 /** Each double-tap skips this far; taps in a row add up (5, 10, 15 s). */
 private const val SKIP_MS = 5_000L
 
 private val Speeds = listOf(0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f)
 
+/** How tall the mini player is, above the tabs. */
+val MiniPlayerHeight = 60.dp
+
+private val SheetSpring = spring<Float>(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+
 /**
- * The watch page: the video with YouTube-style controls (tap for controls, double-tap a side
- * to skip 5 s, red seek bar, full screen), the title and actions, then Up next.
+ * Where the player is, like YouTube's: 1 is the full watch page, 0 the mini player above the
+ * tabs, and anything between while it's dragged.
+ */
+@Stable
+class PlayerSheetState(private val scope: CoroutineScope) {
+    val progress = Animatable(0f)
+    /** The mini player's sideways swipe (to close it), in pixels. */
+    val swipe = Animatable(0f)
+    val isExpanded: Boolean get() = progress.targetValue > 0.5f
+
+    fun expand() { scope.launch { swipe.snapTo(0f) }; scope.launch { progress.animateTo(1f, SheetSpring) } }
+    fun collapse() { scope.launch { progress.animateTo(0f, SheetSpring) } }
+    /** Back to the mini position at once (nothing playing), so the next video slides up from it. */
+    fun reset() { scope.launch { progress.snapTo(0f) }; scope.launch { swipe.snapTo(0f) } }
+
+    internal fun dragBy(fraction: Float) {
+        scope.launch { progress.snapTo((progress.value + fraction).coerceIn(0f, 1f)) }
+    }
+
+    /** Lets go of a drag: a flick decides, otherwise whichever end is nearer. `velocity` is in progress per second. */
+    internal fun settle(velocity: Float) {
+        val target = when {
+            velocity > 1.5f -> 1f
+            velocity < -1.5f -> 0f
+            progress.value > 0.5f -> 1f
+            else -> 0f
+        }
+        scope.launch { progress.animateTo(target, SheetSpring, initialVelocity = velocity) }
+    }
+}
+
+@Composable
+fun rememberPlayerSheetState(): PlayerSheetState {
+    val scope = rememberCoroutineScope()
+    return remember { PlayerSheetState(scope) }
+}
+
+/**
+ * The player, drawn over the app while something plays. Expanded it's the watch page: the video
+ * with YouTube-style controls (tap for controls, double-tap a side to skip 5 s, red seek bar, full
+ * screen), the title and actions, then Up next. Drag the video down and it shrinks into the mini
+ * player above the tabs (still playing); tap or drag that up to bring it back, swipe it sideways to
+ * close. Swiping up on the video goes full screen; swiping down in full screen leaves it.
  */
 @Composable
 fun PlayerScreen(
@@ -109,22 +171,28 @@ fun PlayerScreen(
     upNext: List<VideoItem>,
     channel: Channel?,
     actions: VideoActions,
-    onCollapse: () -> Unit,
+    sheet: PlayerSheetState,
+    /** The height of the tabs (and the navigation bar) under the mini player. */
+    bottomInset: Dp,
     onAutoDownload: (String, Boolean) -> Unit,
 ) {
     val context = LocalContext.current
     val activity = context as? Activity
-    val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val density = LocalDensity.current
     val controller by connection.controller.collectAsStateCompat()
+    val playing by connection.isPlaying.collectAsStateCompat()
     var speedDialog by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    val uiScope = rememberCoroutineScope()
+    val expanded = sheet.isExpanded
+    val fullscreen = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE && expanded
 
-    // Full screen when sideways: hide the status and navigation bars.
-    DisposableEffect(landscape) {
+    // Full screen: sideways, without the status and navigation bars.
+    DisposableEffect(fullscreen) {
         val window = activity?.window
         if (window != null) {
             val insets = WindowCompat.getInsetsController(window, window.decorView)
-            if (landscape) {
+            if (fullscreen) {
                 insets.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                 insets.hide(WindowInsetsCompat.Type.systemBars())
             } else {
@@ -133,32 +201,179 @@ fun PlayerScreen(
         }
         onDispose { window?.let { WindowCompat.getInsetsController(it, it.decorView).show(WindowInsetsCompat.Type.systemBars()) } }
     }
-    // Leaving the watch page gives rotation back to the phone.
+    // Shrinking the player (or closing it) gives rotation back to the phone.
+    LaunchedEffect(expanded) { if (!expanded) activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED }
     DisposableEffect(Unit) { onDispose { activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED } }
 
     fun setFullscreen(on: Boolean) {
         activity?.requestedOrientation =
             if (on) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_USER_PORTRAIT
     }
-    BackHandler { if (landscape) setFullscreen(false) else onCollapse() }
+    BackHandler(enabled = fullscreen || expanded) { if (fullscreen) setFullscreen(false) else sheet.collapse() }
 
     val player = controller
     val resolving = connection.resolving.collectAsStateCompat().value
     val streamError = connection.error.collectAsStateCompat().value
     val queue = connection.queue.collectAsStateCompat().value
     val index = queue.indexOf(current?.id)
-    var dragDown by remember { mutableFloatStateOf(0f) }
-    val video: @Composable (Modifier) -> Unit = { modifier ->
-        Box(modifier.background(Color.Black)
-            // Swipe the video down to shrink it into the mini-player, like YouTube.
-            .then(if (landscape) Modifier else Modifier.pointerInput(Unit) {
-                detectVerticalDragGestures(
-                    onDragEnd = { if (dragDown > 120.dp.toPx()) onCollapse(); dragDown = 0f },
-                    onDragCancel = { dragDown = 0f },
-                    onVerticalDrag = { _, amount -> dragDown = (dragDown + amount).coerceAtLeast(0f) },
-                )
-            })
-            .offset { IntOffset(0, (dragDown * 0.5f).roundToInt()) }) {
+    var fraction by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(controller) {
+        while (true) {
+            controller?.let { fraction = if (it.duration > 0) it.currentPosition.toFloat() / it.duration else 0f }
+            delay(500)
+        }
+    }
+
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val width = constraints.maxWidth.toFloat()
+        val height = constraints.maxHeight.toFloat()
+        val p = sheet.progress.value
+        val statusTop = if (fullscreen) 0f else WindowInsets.statusBars.getTop(density).toFloat()
+        val miniHeight = with(density) { MiniPlayerHeight.toPx() }
+        val miniTop = height - with(density) { bottomInset.toPx() } - miniHeight
+        val range = (miniTop - statusTop).coerceAtLeast(1f)
+        // The video shrinks faster than it moves, like YouTube's.
+        val sizeP = 1f - (1f - p) * (1f - p)
+        val videoWidth = if (fullscreen) width else lerp(miniHeight * 16f / 9f, width, sizeP)
+        val videoHeight = if (fullscreen) height else lerp(miniHeight, width * 9f / 16f, sizeP)
+        val videoTop = if (fullscreen) 0f else lerp(miniTop, statusTop, p)
+        val swipe = sheet.swipe.value
+        val miniAlpha = ((1f - p * 4f) * (1f - abs(swipe) / width)).coerceIn(0f, 1f)
+
+        // Drag up and down: follows the finger, then settles at the nearer end (or where it was flicked).
+        val verticalDrag = Modifier.pointerInput(sheet, range, fullscreen) {
+            val tracker = VelocityTracker()
+            var total = 0f
+            var pullUp = 0f
+            detectVerticalDragGestures(
+                onDragStart = { tracker.resetTracking(); total = 0f; pullUp = 0f },
+                onVerticalDrag = { change, dy ->
+                    total += dy
+                    tracker.addPosition(change.uptimeMillis, Offset(0f, total))
+                    when {
+                        fullscreen -> {}
+                        sheet.progress.value >= 1f && dy < 0 -> pullUp -= dy
+                        else -> sheet.dragBy(-dy / range)
+                    }
+                },
+                onDragEnd = {
+                    val velocity = tracker.calculateVelocity().y
+                    when {
+                        fullscreen -> if (total > 80.dp.toPx() || velocity > 1500f) setFullscreen(false)
+                        pullUp > 60.dp.toPx() -> setFullscreen(true)
+                        else -> sheet.settle(-velocity / range)
+                    }
+                },
+                onDragCancel = { if (!fullscreen) sheet.settle(0f) },
+            )
+        }
+        // The mini player: swipe it sideways to close.
+        val sideSwipe = Modifier.pointerInput(sheet, width) {
+            detectHorizontalDragGestures(
+                onHorizontalDrag = { _, dx -> if (sheet.progress.value < 0.01f) uiScope.launch { sheet.swipe.snapTo(sheet.swipe.value + dx) } },
+                onDragEnd = {
+                    uiScope.launch {
+                        val gone = abs(sheet.swipe.value) > width * 0.35f
+                        if (gone) {
+                            sheet.swipe.animateTo(if (sheet.swipe.value > 0) width else -width)
+                            connection.stop()
+                        } else {
+                            sheet.swipe.animateTo(0f)
+                        }
+                    }
+                },
+                onDragCancel = { uiScope.launch { sheet.swipe.animateTo(0f) } },
+            )
+        }
+        fun Float.px() = with(density) { this@px.toDp() }
+
+        // The watch page behind the video, fading in as it grows.
+        if (p > 0.001f && !fullscreen) {
+            Box(Modifier.offset { IntOffset(0, (videoTop - statusTop).roundToInt()) }.fillMaxSize()
+                    .graphicsLayer { alpha = p }.background(Stow.colors.background))
+            if (current != null) {
+                LazyColumn(Modifier.offset { IntOffset(0, (videoTop + videoHeight).roundToInt()) }
+                        .width(width.px()).height((height - videoTop - videoHeight).coerceAtLeast(0f).px())
+                        .graphicsLayer { alpha = p }.navigationBarsPadding(),
+                           userScrollEnabled = p > 0.99f) {
+        item {
+            Column(Modifier.padding(horizontal = 12.dp, vertical = 12.dp)) {
+                Text(current.video.title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Stow.colors.text, lineHeight = 24.sp)
+                Spacer(Modifier.height(4.dp))
+                Text(listOf(Format.ago(current.video.publishedAt),
+                            current.durationMs.takeIf { it > 0 }?.let(Format::duration) ?: "",
+                            if (current.video.isMembersOnly) "Members only" else "")
+                         .filter { it.isNotEmpty() }.joinToString(" · "),
+                     fontSize = 12.sp, color = Stow.colors.secondaryText)
+            }
+            Row(Modifier.fillMaxWidth().clickable { actions.openChannel(current.video.channelId) }
+                    .padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                ChannelAvatar(channel?.avatarUrl, 36.dp, name = current.video.channelTitle)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(current.video.channelTitle, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Stow.colors.text, maxLines = 1)
+                    channel?.let {
+                        Text(Format.count(it.recent.size, "recent video"), fontSize = 12.sp, color = Stow.colors.secondaryText)
+                    }
+                }
+                // Where YouTube puts Subscribe.
+                if (channel != null) {
+                    if (channel.autoDownload) {
+                        PillButton("Auto-downloading", Icons.Filled.Check, onClick = { onAutoDownload(channel.id, false) })
+                    } else {
+                        PillButton("Auto-download", null, onClick = { onAutoDownload(channel.id, true) }, filled = true)
+                    }
+                }
+            }
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                PillButton(if (current.watched) "Watched" else "Mark watched", if (current.watched) Icons.Filled.Check else null,
+                           onClick = { actions.setWatched(current, !current.watched) })
+                when {
+                    current.isPlayable -> {}
+                    current.isDownloading -> PillButton("Downloading ${current.local?.progress ?: 0}%", Icons.Outlined.Download, onClick = {})
+                    else -> PillButton("Download", Icons.Outlined.Download, onClick = { actions.download(current) })
+                }
+                PillButton("Save", Icons.AutoMirrored.Outlined.PlaylistAdd, onClick = { actions.saveToPlaylist(current) })
+                PillButton("Speed", Icons.Outlined.Speed, onClick = { speedDialog = true })
+                if (current.isPlayable) PillButton("Delete", Icons.Outlined.Delete, onClick = { confirmDelete = true })
+            }
+        }
+                    if (upNext.isNotEmpty()) {
+                        item { SectionHeader("Up next") }
+                        items(upNext, key = { "n-" + it.id }) { VideoRow(it, actions) }
+                    }
+                }
+            }
+        }
+
+        // The mini player's bar: title, play/pause, close, and a thin progress line.
+        if (miniAlpha > 0.001f && current != null && !fullscreen) {
+            Column(Modifier.offset { IntOffset(swipe.roundToInt(), videoTop.roundToInt()) }
+                    .width(width.px()).height(videoHeight.px()).graphicsLayer { alpha = miniAlpha }
+                    .background(Stow.colors.raised)
+                    .then(verticalDrag).then(sideSwipe)
+                    .clickable(enabled = p < 0.01f) { sheet.expand() }) {
+                Row(Modifier.fillMaxWidth().weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                    Spacer(Modifier.width(videoWidth.px()))
+                    Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                        Text(current.video.title, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Stow.colors.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(current.video.channelTitle, fontSize = 12.sp, color = Stow.colors.secondaryText, maxLines = 1)
+                    }
+                    IconButton(onClick = { connection.togglePlay() }) {
+                        Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, contentDescription = if (playing) "Pause" else "Play", tint = Stow.colors.text)
+                    }
+                    IconButton(onClick = { connection.stop() }) { Icon(Icons.Filled.Close, contentDescription = "Close", tint = Stow.colors.text) }
+                }
+                Box(Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f)).height(2.dp).background(ProgressRed))
+            }
+        }
+
+        // The video itself: one player view, from full screen down to the mini player.
+        Box(Modifier.offset { IntOffset(if (p < 0.01f) swipe.roundToInt() else 0, videoTop.roundToInt()) }
+                .width(videoWidth.px()).height(videoHeight.px())
+                .graphicsLayer { alpha = if (p < 0.01f) (1f - abs(swipe) / width).coerceIn(0f, 1f) else 1f }
+                .background(Color.Black).then(verticalDrag).then(if (p < 0.01f) sideSwipe else Modifier)) {
             AndroidView(
                 factory = { ctx ->
                     PlayerView(ctx).apply {
@@ -172,93 +387,42 @@ fun PlayerScreen(
                 update = { it.player = player },
                 modifier = Modifier.fillMaxSize(),
             )
-            if (player != null && resolving == null && streamError == null) {
-                PlayerControls(
-                    player = player,
-                    fullscreen = landscape,
-                    hasPrevious = index > 0,
-                    hasNext = index in 0 until queue.lastIndex,
-                    nextTitle = upNext.firstOrNull()?.video?.title,
-                    onDone = { connection.stop(); onCollapse() },
-                    onFullscreen = { setFullscreen(!landscape) },
-                    onCollapse = { if (landscape) setFullscreen(false) else onCollapse() },
-                    onSettings = { speedDialog = true },
-                )
-            }
-            when {
-                streamError != null -> Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(streamError, color = Color.White, fontSize = 13.sp, maxLines = 4, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                    Spacer(Modifier.height(12.dp))
-                    if (current != null) PillButton("Try again", null, onClick = { connection.play(listOf(current), current) })
+            if (p < 0.99f) {
+                // Shrunk: a tap brings the watch page back.
+                Box(Modifier.fillMaxSize().clickable(enabled = p < 0.01f) { sheet.expand() })
+                if (resolving != null) {
+                    androidx.compose.material3.CircularProgressIndicator(Modifier.align(Alignment.Center).size(20.dp), color = Color.White, strokeWidth = 2.dp)
                 }
-                resolving != null -> Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                    androidx.compose.material3.CircularProgressIndicator(Modifier.size(40.dp), color = Color.White, strokeWidth = 3.dp)
-                    Spacer(Modifier.height(10.dp))
-                    Text("Getting the video from YouTube…", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+            } else {
+                if (player != null && resolving == null && streamError == null) {
+                    PlayerControls(
+                        player = player,
+                        fullscreen = fullscreen,
+                        hasPrevious = index > 0,
+                        hasNext = index in 0 until queue.lastIndex,
+                        nextTitle = upNext.firstOrNull()?.video?.title,
+                        onDone = { connection.stop() },
+                        onFullscreen = { setFullscreen(!fullscreen) },
+                        onCollapse = { if (fullscreen) setFullscreen(false) else sheet.collapse() },
+                        onSettings = { speedDialog = true },
+                    )
                 }
-            }
-            if (resolving != null || streamError != null) {
-                IconButton(onClick = onCollapse, modifier = Modifier.align(Alignment.TopStart).padding(4.dp)) {
-                    Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Minimize", tint = Color.White)
-                }
-            }
-        }
-    }
-
-    if (landscape) {
-        video(Modifier.fillMaxSize())
-    } else {
-        Column(Modifier.fillMaxSize().background(Stow.colors.background)) {
-            Spacer(Modifier.statusBarsPadding())
-            video(Modifier.fillMaxWidth().aspectRatio(16f / 9f))
-            if (current == null) return@Column
-            LazyColumn(Modifier.fillMaxSize().navigationBarsPadding()) {
-                item {
-                    Column(Modifier.padding(horizontal = 12.dp, vertical = 12.dp)) {
-                        Text(current.video.title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Stow.colors.text, lineHeight = 24.sp)
-                        Spacer(Modifier.height(4.dp))
-                        Text(listOf(Format.ago(current.video.publishedAt),
-                                    current.durationMs.takeIf { it > 0 }?.let(Format::duration) ?: "",
-                                    if (current.video.isMembersOnly) "Members only" else "")
-                                 .filter { it.isNotEmpty() }.joinToString(" · "),
-                             fontSize = 12.sp, color = Stow.colors.secondaryText)
+                when {
+                    streamError != null -> Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(streamError, color = Color.White, fontSize = 13.sp, maxLines = 4, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        Spacer(Modifier.height(12.dp))
+                        if (current != null) PillButton("Try again", null, onClick = { connection.play(listOf(current), current) })
                     }
-                    Row(Modifier.fillMaxWidth().clickable { actions.openChannel(current.video.channelId) }
-                            .padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        ChannelAvatar(channel?.avatarUrl, 36.dp, name = current.video.channelTitle)
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(current.video.channelTitle, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Stow.colors.text, maxLines = 1)
-                            channel?.let {
-                                Text(Format.count(it.recent.size, "recent video"), fontSize = 12.sp, color = Stow.colors.secondaryText)
-                            }
-                        }
-                        // Where YouTube puts Subscribe.
-                        if (channel != null) {
-                            if (channel.autoDownload) {
-                                PillButton("Auto-downloading", Icons.Filled.Check, onClick = { onAutoDownload(channel.id, false) })
-                            } else {
-                                PillButton("Auto-download", null, onClick = { onAutoDownload(channel.id, true) }, filled = true)
-                            }
-                        }
-                    }
-                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        PillButton(if (current.watched) "Watched" else "Mark watched", if (current.watched) Icons.Filled.Check else null,
-                                   onClick = { actions.setWatched(current, !current.watched) })
-                        when {
-                            current.isPlayable -> {}
-                            current.isDownloading -> PillButton("Downloading ${current.local?.progress ?: 0}%", Icons.Outlined.Download, onClick = {})
-                            else -> PillButton("Download", Icons.Outlined.Download, onClick = { actions.download(current) })
-                        }
-                        PillButton("Save", Icons.AutoMirrored.Outlined.PlaylistAdd, onClick = { actions.saveToPlaylist(current) })
-                        PillButton("Speed", Icons.Outlined.Speed, onClick = { speedDialog = true })
-                        if (current.isPlayable) PillButton("Delete", Icons.Outlined.Delete, onClick = { confirmDelete = true })
+                    resolving != null -> Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                        androidx.compose.material3.CircularProgressIndicator(Modifier.size(40.dp), color = Color.White, strokeWidth = 3.dp)
+                        Spacer(Modifier.height(10.dp))
+                        Text("Getting the video from YouTube…", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
                     }
                 }
-                if (upNext.isNotEmpty()) {
-                    item { SectionHeader("Up next") }
-                    items(upNext, key = { "n-" + it.id }) { VideoRow(it, actions) }
+                if (resolving != null || streamError != null) {
+                    IconButton(onClick = { sheet.collapse() }, modifier = Modifier.align(Alignment.TopStart).padding(4.dp)) {
+                        Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Minimize", tint = Color.White)
+                    }
                 }
             }
         }
@@ -292,7 +456,6 @@ fun PlayerScreen(
                     confirmDelete = false
                     connection.stop()
                     actions.delete(current)
-                    onCollapse()
                 }) { Text("Delete") }
             },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
@@ -482,37 +645,6 @@ private fun RoundControl(icon: androidx.compose.ui.graphics.vector.ImageVector, 
     Box(Modifier.size(size).clip(CircleShape).background(Color.Black.copy(alpha = 0.35f))
             .clickable(enabled = enabled, onClick = onClick), contentAlignment = Alignment.Center) {
         Icon(icon, contentDescription = label, tint = if (enabled) Color.White else Color.White.copy(alpha = 0.3f), modifier = Modifier.size(size * 0.6f))
-    }
-}
-
-/** The bar above the tabs while something plays: thumbnail, title, play/pause, close. */
-@Composable
-fun MiniPlayer(connection: PlayerConnection, item: VideoItem, onOpen: () -> Unit) {
-    val playing by connection.isPlaying.collectAsStateCompat()
-    val controller by connection.controller.collectAsStateCompat()
-    var fraction by remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(controller) {
-        while (true) {
-            controller?.let { fraction = if (it.duration > 0) it.currentPosition.toFloat() / it.duration else 0f }
-            delay(500)
-        }
-    }
-    Column(Modifier.fillMaxWidth().background(Stow.colors.raised).clickable(onClick = onOpen)) {
-        Row(Modifier.fillMaxWidth().height(60.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (!LocalCalm.current) {
-                AsyncImage(model = item.video.thumbnailUrl, contentDescription = null, contentScale = ContentScale.Crop,
-                           modifier = Modifier.fillMaxHeight().aspectRatio(16f / 9f).background(Color.Black))
-            }
-            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                Text(item.video.title, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Stow.colors.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(item.video.channelTitle, fontSize = 12.sp, color = Stow.colors.secondaryText, maxLines = 1)
-            }
-            IconButton(onClick = { connection.togglePlay() }) {
-                Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, contentDescription = if (playing) "Pause" else "Play", tint = Stow.colors.text)
-            }
-            IconButton(onClick = { connection.stop() }) { Icon(Icons.Filled.Close, contentDescription = "Close", tint = Stow.colors.text) }
-        }
-        Box(Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f)).height(2.dp).background(ProgressRed))
     }
 }
 

@@ -8,6 +8,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -59,7 +60,6 @@ import dev.stow.android.ui.ChannelsScreen
 import dev.stow.android.ui.DownloadsScreen
 import dev.stow.android.ui.Format
 import dev.stow.android.ui.HomeScreen
-import dev.stow.android.ui.MiniPlayer
 import dev.stow.android.ui.PairScreen
 import dev.stow.android.ui.PlayerScreen
 import dev.stow.android.ui.PlaylistScreen
@@ -186,9 +186,15 @@ class MainActivity : ComponentActivity() {
             storage = withContext(Dispatchers.IO) { "${Format.bytes(repository.storageUsedBytes())} used on this phone" }
         }
 
+        val sheet = dev.stow.android.ui.rememberPlayerSheetState()
+        var bottomBarHeight by remember { mutableStateOf(0.dp) }
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        // Nothing playing: the next video slides up from where the mini player sits.
+        LaunchedEffect(current) { if (current == null) sheet.reset() }
+
         fun play(list: List<VideoItem>, start: VideoItem) {
             player.play(list, start)
-            nav.navigate("watch") { launchSingleTop = true }
+            sheet.expand()
         }
         val actions = VideoActions(
             play = { item ->
@@ -229,7 +235,7 @@ class MainActivity : ComponentActivity() {
             Tab("subscriptions", "Subscriptions", Icons.Filled.Subscriptions, Icons.Outlined.Subscriptions),
             Tab("downloads", "Downloads", Icons.Filled.Download, Icons.Outlined.Download),
         )
-        val fullScreen = route == "watch" || route == "remote"
+        val fullScreen = route == "remote"
 
         val gray = if (grayscale) Modifier.graphicsLayer {
             renderEffect = android.graphics.RenderEffect.createColorFilterEffect(
@@ -237,7 +243,8 @@ class MainActivity : ComponentActivity() {
             ).asComposeRenderEffect()
         } else Modifier
         androidx.compose.runtime.CompositionLocalProvider(dev.stow.android.ui.LocalCalm provides calm) {
-        Column(Modifier.fillMaxSize().then(gray)) {
+        Box(Modifier.fillMaxSize().then(gray)) {
+        Column(Modifier.fillMaxSize()) {
             Box(Modifier.weight(1f)) {
                 androidx.compose.material3.SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).zIndex(1f)) { data ->
                     androidx.compose.material3.Snackbar(data, containerColor = androidx.compose.ui.graphics.Color(0xFF323232),
@@ -310,29 +317,31 @@ class MainActivity : ComponentActivity() {
                         ReportScreen(week, lastWeek, channels, dev.stow.android.ui.skippedChannels(channels, itemsById.values),
                                      onAutoDownloadOff = { setAutoDownload(it, false) }, onBack = { nav.popBackStack() })
                     }
-                    composable("watch") {
-                        val item = current?.let { itemsById[it] }
-                        val index = queue.indexOf(current)
-                        val upNext = if (index >= 0) queue.drop(index + 1).mapNotNull { itemsById[it] } else emptyList()
-                        PlayerScreen(
-                            connection = player, current = item, upNext = upNext,
-                            channel = channels.firstOrNull { it.id == item?.video?.channelId },
-                            actions = actions.copy(play = { next ->
-                                // Up next: jump within the same queue.
-                                player.play(queue.mapNotNull { itemsById[it] }, next)
-                            }),
-                            onCollapse = { nav.popBackStack() },
-                            onAutoDownload = ::setAutoDownload,
-                        )
-                        LaunchedEffect(current) { if (current == null) nav.popBackStack() }
-                    }
                 }
             }
             if (!fullScreen) {
-                val playing = current?.let { itemsById[it] }
-                if (playing != null) MiniPlayer(player, playing, onOpen = { nav.navigate("watch") { launchSingleTop = true } })
-                BottomBar(tabs, route, nav)
+                // Room for the mini player, which is drawn over everything (it grows into the watch page).
+                if (current != null) Spacer(Modifier.height(dev.stow.android.ui.MiniPlayerHeight))
+                Box(Modifier.onSizeChanged { bottomBarHeight = with(density) { it.height.toDp() } }) { BottomBar(tabs, route, nav) }
             }
+        }
+        val playing = current?.let { itemsById[it] }
+        if (playing != null && !fullScreen) {
+            val index = queue.indexOf(current)
+            val upNext = if (index >= 0) queue.drop(index + 1).mapNotNull { itemsById[it] } else emptyList()
+            PlayerScreen(
+                connection = player, current = playing, upNext = upNext,
+                channel = channels.firstOrNull { it.id == playing.video.channelId },
+                actions = actions.copy(
+                    // Up next: jump within the same queue.
+                    play = { next -> player.play(queue.mapNotNull { itemsById[it] }, next) },
+                    // Opening a channel from the watch page shrinks the player, like YouTube.
+                    openChannel = { id -> sheet.collapse(); nav.navigate("channel/$id") },
+                ),
+                sheet = sheet, bottomInset = bottomBarHeight,
+                onAutoDownload = ::setAutoDownload,
+            )
+        }
         }
         }
 
