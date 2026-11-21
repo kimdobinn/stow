@@ -102,9 +102,12 @@ final class PlayerDock {
     }
     #endif
 
-    /// Stops the video (closing the panel once mpv has stopped).
+    /// Stops the video and closes the panel at once (mpv may take a few seconds to stop while
+    /// it's still looking the video up).
     func stop() {
-        screen?.perform(.stop)
+        guard let screen else { return }
+        screen.perform(.stop)
+        clear(ifShowing: screen)
     }
 
     func toggleExpanded() {
@@ -158,9 +161,9 @@ final class PlayerDock {
 
     // MARK: Keys
 
-    /// While a video is in the panel, the main window's keys without ⌘ control it (except while
-    /// typing in a text field): space, ←/→, ↑/↓, M, F, and esc to leave full screen, shrink the
-    /// panel, then close it.
+    /// While a video is in the panel, ⌘W closes it, and the main window's keys without ⌘ control
+    /// it (except while typing in a text field): space, ←/→, ↑/↓, M, F, and esc to leave full
+    /// screen, shrink the panel, then close it.
     private func installKeys() {
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -174,6 +177,13 @@ final class PlayerDock {
     }
 
     private func handleKey(_ event: NSEvent) -> Bool {
+        // ⌘W closes the video, not the window.
+        if screen != nil, let window = event.window, window === hostWindow,
+           event.modifierFlags.intersection([.command, .control, .option, .shift]) == .command,
+           event.charactersIgnoringModifiers?.lowercased() == "w" {
+            stop()
+            return true
+        }
         guard let screen, let window = event.window, window === hostWindow,
               event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
               !(window.firstResponder is NSText) else { return false }
