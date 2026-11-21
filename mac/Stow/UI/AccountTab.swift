@@ -44,7 +44,6 @@ struct AccountTab: View {
                     set: { model.setLaunchAtLogin($0) }
                 ))
             }
-            ScrollingSection()
         }
         .formStyle(.grouped)
         .confirmationDialog("Sign out of YouTube?", isPresented: $confirmsSignOut) {

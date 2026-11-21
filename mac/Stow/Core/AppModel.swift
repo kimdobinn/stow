@@ -569,12 +569,6 @@ final class AppModel {
 
     // MARK: Launch at login
 
-    var scrolling: ScrollSettings { settings.scrolling }
-
-    func setScrolling(_ scrolling: ScrollSettings) {
-        updateSettings { $0.scrolling = scrolling }
-    }
-
     func setLaunchAtLogin(_ on: Bool) {
         updateSettings { $0.launchAtLogin = on }
         applyLoginItem(on)

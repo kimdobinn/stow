@@ -136,24 +136,21 @@ struct AppSettings: Codable, Equatable, Sendable {
     var alarm: AlarmSettings
     /// Keep watched videos in step with the signed-in YouTube account's watch history.
     var syncWatchedWithYouTube: Bool
-    /// How the mouse wheel and trackpad scroll Stow's window.
-    var scrolling: ScrollSettings
 
     static let `default` = AppSettings(schemaVersion: 1, channels: [], checkIntervalMinutes: 30, launchAtLogin: true)
 
     init(schemaVersion: Int, channels: [Channel], checkIntervalMinutes: Int, launchAtLogin: Bool,
-         alarm: AlarmSettings = .default, syncWatchedWithYouTube: Bool = true, scrolling: ScrollSettings = .default) {
+         alarm: AlarmSettings = .default, syncWatchedWithYouTube: Bool = true) {
         self.schemaVersion = schemaVersion
         self.channels = channels
         self.checkIntervalMinutes = checkIntervalMinutes
         self.launchAtLogin = launchAtLogin
         self.alarm = alarm
         self.syncWatchedWithYouTube = syncWatchedWithYouTube
-        self.scrolling = scrolling
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, channels, checkIntervalMinutes, launchAtLogin, alarm, syncWatchedWithYouTube, scrolling
+        case schemaVersion, channels, checkIntervalMinutes, launchAtLogin, alarm, syncWatchedWithYouTube
     }
 
     init(from decoder: Decoder) throws {
@@ -164,7 +161,6 @@ struct AppSettings: Codable, Equatable, Sendable {
         checkIntervalMinutes = try c.decodeIfPresent(Int.self, forKey: .checkIntervalMinutes) ?? d.checkIntervalMinutes
         launchAtLogin = try c.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? d.launchAtLogin
         syncWatchedWithYouTube = try c.decodeIfPresent(Bool.self, forKey: .syncWatchedWithYouTube) ?? d.syncWatchedWithYouTube
-        scrolling = (try? c.decodeIfPresent(ScrollSettings.self, forKey: .scrolling)) ?? d.scrolling
         // A hand edit that breaks "alarm" (e.g. not an object) must not cost the channel list.
         do {
             alarm = try c.decodeIfPresent(AlarmSettings.self, forKey: .alarm) ?? d.alarm
@@ -173,30 +169,6 @@ struct AppSettings: Codable, Equatable, Sendable {
             decoder.settingsIssues?.add("\"alarm\" isn't an object; using the default alarm settings.")
         }
     }
-}
-
-/// settings.json "scrolling".
-struct ScrollSettings: Codable, Equatable, Sendable {
-    static let speedRange: ClosedRange<Double> = 0.5...6
-    static let `default` = ScrollSettings(speed: 3, smooth: true)
-
-    /// Multiplies how far each wheel notch or trackpad swipe scrolls (1 = macOS's own distance).
-    var speed: Double
-    /// Mouse wheels glide instead of jumping line by line.
-    var smooth: Bool
-
-    init(speed: Double, smooth: Bool) {
-        self.speed = min(max(speed, Self.speedRange.lowerBound), Self.speedRange.upperBound)
-        self.smooth = smooth
-    }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.init(speed: try c.decodeIfPresent(Double.self, forKey: .speed) ?? Self.default.speed,
-                  smooth: try c.decodeIfPresent(Bool.self, forKey: .smooth) ?? Self.default.smooth)
-    }
-
-    private enum CodingKeys: String, CodingKey { case speed, smooth }
 }
 
 /// A channel's video feeds.
