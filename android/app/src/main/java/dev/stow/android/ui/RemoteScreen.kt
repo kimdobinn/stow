@@ -25,10 +25,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Forward10
+import androidx.compose.material.icons.filled.Forward5
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Replay10
+import androidx.compose.material.icons.filled.Replay5
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
@@ -75,7 +75,7 @@ import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
 /** Each double-tap on the picture seeks this far on the Mac; taps in a row add up (10, 20, 30 s). */
-private const val REMOTE_SKIP_SECONDS = 10
+private const val REMOTE_SKIP_SECONDS = 5
 
 private const val SAME_WIFI = "Phone and Mac must be on the same Wi-Fi."
 
@@ -160,10 +160,10 @@ private fun Live(state: AlarmState, model: RemoteModel, onChoose: () -> Unit) {
             item(key = "controls") {
                 Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically) {
-                    Control(Icons.Filled.Replay10, "Back 10 seconds", 48.dp) { model.seekBy(-REMOTE_SKIP_SECONDS) }
+                    Control(Icons.Filled.Replay5, "Back 5 seconds", 48.dp) { model.seekBy(-REMOTE_SKIP_SECONDS) }
                     Control(if (state.isPaused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
                             if (state.isPaused) "Play" else "Pause", 68.dp, filled = true, onClick = model::togglePaused)
-                    Control(Icons.Filled.Forward10, "Forward 10 seconds", 48.dp) { model.seekBy(REMOTE_SKIP_SECONDS) }
+                    Control(Icons.Filled.Forward5, "Forward 5 seconds", 48.dp) { model.seekBy(REMOTE_SKIP_SECONDS) }
                     Control(Icons.Filled.SkipNext, "Next", 48.dp, onClick = model::next)
                 }
             }
