@@ -7,6 +7,8 @@ struct AlarmPlaybackView: View {
     let screen: PlaybackScreen
     /// The spot (0–1) on the timeline under the pointer, for the preview above it.
     @State private var scrub: Double?
+    @AppStorage(PlaybackScreen.seekStepKey) private var storedSeekStep = PlaybackScreen.defaultSeekStep
+    private var seekStep: Int { PlaybackScreen.seekStep(stored: storedSeekStep) }
 
     private var chrome: Bool { screen.showsChrome }
 
@@ -158,11 +160,11 @@ struct AlarmPlaybackView: View {
                               help: nowPlaying.isPaused ? "Play (space)" : "Pause (space)", size: 34) {
                     screen.togglePause()
                 }
-                ControlButton(systemImage: "gobackward.10", help: "Back 10 seconds (←)", size: 26) {
-                    screen.perform(.seekBy(-PlaybackScreen.seekStep))
+                ControlButton(systemImage: "gobackward.\(seekStep)", help: "Back \(seekStep) seconds (←)", size: 26) {
+                    screen.perform(.seekBy(-TimeInterval(seekStep)))
                 }
-                ControlButton(systemImage: "goforward.10", help: "Forward 10 seconds (→)", size: 26) {
-                    screen.perform(.seekBy(PlaybackScreen.seekStep))
+                ControlButton(systemImage: "goforward.\(seekStep)", help: "Forward \(seekStep) seconds (→)", size: 26) {
+                    screen.perform(.seekBy(TimeInterval(seekStep)))
                 }
                 ControlButton(systemImage: "forward.end.fill", help: "Next video (N)", size: 26) {
                     screen.perform(.next)
@@ -432,10 +434,11 @@ private struct VolumeControl: View {
 }
 
 private struct KeyboardHints: View {
+    @AppStorage(PlaybackScreen.seekStepKey) private var storedSeekStep = PlaybackScreen.defaultSeekStep
     var body: some View {
         HStack(spacing: 18) {
             hint("space", "pause")
-            hint("← →", "10 s")
+            hint("← →", "\(PlaybackScreen.seekStep(stored: storedSeekStep)) s")
             hint("↑ ↓", "volume")
             hint("N", "next")
             hint("esc", "I'm awake")

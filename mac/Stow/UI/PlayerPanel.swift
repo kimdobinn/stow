@@ -13,6 +13,8 @@ struct PlayerPanel: View {
     var onDetailsHeight: (CGFloat) -> Void = { _ in }
     /// The spot (0–1) on the timeline under the pointer, for the preview above it.
     @State private var scrub: Double?
+    @AppStorage(PlaybackScreen.seekStepKey) private var storedSeekStep = PlaybackScreen.defaultSeekStep
+    private var seekStep: Int { PlaybackScreen.seekStep(stored: storedSeekStep) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -104,11 +106,11 @@ struct PlayerPanel: View {
         HStack(spacing: 4) {
             PanelButton(systemImage: nowPlaying.isPaused ? "play.fill" : "pause.fill",
                         help: nowPlaying.isPaused ? "Play (space)" : "Pause (space)") { screen.togglePause() }
-            PanelButton(systemImage: "gobackward.10", help: "Back 10 seconds (←)") {
-                screen.perform(.seekBy(-PlaybackScreen.seekStep))
+            PanelButton(systemImage: "gobackward.\(seekStep)", help: "Back \(seekStep) seconds (←)") {
+                screen.perform(.seekBy(-TimeInterval(seekStep)))
             }
-            PanelButton(systemImage: "goforward.10", help: "Forward 10 seconds (→)") {
-                screen.perform(.seekBy(PlaybackScreen.seekStep))
+            PanelButton(systemImage: "goforward.\(seekStep)", help: "Forward \(seekStep) seconds (→)") {
+                screen.perform(.seekBy(TimeInterval(seekStep)))
             }
             PanelButton(systemImage: volumeSymbol(nowPlaying), help: nowPlaying.isMuted ? "Unmute (M)" : "Mute (M)") {
                 screen.toggleMute()

@@ -47,12 +47,26 @@ enum AlarmWindow {
     }
 }
 
+/// Letter keys' positions (as on a US keyboard), whatever the input source types there.
+enum KeyCode {
+    static let f: UInt16 = 3
+    static let w: UInt16 = 13
+    static let n: UInt16 = 45
+    static let m: UInt16 = 46
+}
+
 /// What the alarm screen shows, plus when its controls fade out.
 @MainActor
 @Observable
 final class PlaybackScreen {
     static let chromeTimeout: Duration = .seconds(4)
-    static let seekStep: TimeInterval = 10
+    /// How far ←/→ and the skip buttons jump, chosen under Account › General.
+    static let seekStepKey = "seekStep"
+    static let seekSteps: [Int] = [5, 10, 15, 30]
+    static let defaultSeekStep = 5
+    static var seekStep: TimeInterval { TimeInterval(seekStep(stored: UserDefaults.standard.integer(forKey: seekStepKey))) }
+    /// The stored choice, or the default when there's none (or it isn't one of the choices).
+    static func seekStep(stored: Int) -> Int { seekSteps.contains(stored) ? stored : defaultSeekStep }
     static let volumeStep: Double = 5
 
     let mode: PlaybackMode
@@ -112,7 +126,7 @@ final class PlaybackScreen {
         perform(.setMuted(!nowPlaying.isMuted))
     }
 
-    /// Keyboard: space pauses, ←/→ seek 10 s, ↑/↓ volume, M mutes, N skips, F full screen; esc (or
+    /// Keyboard: space pauses, ←/→ seek (5 s unless changed), ↑/↓ volume, M mutes, N skips, F full screen; esc (or
     /// return, for the alarm) ends the alarm or closes the video. Every key also brings up the controls.
     func handleKey(code: UInt16, characters: String?) {
         revealChrome()
@@ -124,13 +138,11 @@ final class PlaybackScreen {
         case 124: perform(.seekBy(Self.seekStep))
         case 126: changeVolume(by: Self.volumeStep)
         case 125: changeVolume(by: -Self.volumeStep)
-        default:
-            switch characters?.lowercased() {
-            case "n": if nowPlaying?.upNext != nil { perform(.next) }
-            case "m": toggleMute()
-            case "f": toggleFullScreen()
-            default: break
-            }
+        // Letters by key position, so they work with any input source (Korean gives "ㄹ" for F).
+        case KeyCode.n: if nowPlaying?.upNext != nil { perform(.next) }
+        case KeyCode.m: toggleMute()
+        case KeyCode.f: toggleFullScreen()
+        default: break
         }
     }
 

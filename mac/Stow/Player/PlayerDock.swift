@@ -180,7 +180,7 @@ final class PlayerDock {
         // ⌘W closes the video, not the window.
         if screen != nil, let window = event.window, window === hostWindow,
            event.modifierFlags.intersection([.command, .control, .option, .shift]) == .command,
-           event.charactersIgnoringModifiers?.lowercased() == "w" {
+           event.keyCode == KeyCode.w {
             stop()
             return true
         }
@@ -197,17 +197,11 @@ final class PlayerDock {
                 stop()
             }
             return true
-        case 49, 123, 124, 125, 126:
+        case 49, 123, 124, 125, 126, KeyCode.m, KeyCode.f:
             screen.handleKey(code: event.keyCode, characters: event.charactersIgnoringModifiers)
             return true
         default:
-            switch event.charactersIgnoringModifiers?.lowercased() {
-            case "m", "f":
-                screen.handleKey(code: event.keyCode, characters: event.charactersIgnoringModifiers)
-                return true
-            default:
-                return false
-            }
+            return false
         }
     }
 }

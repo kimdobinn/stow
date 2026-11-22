@@ -1,10 +1,11 @@
 import SwiftUI
 
-/// Sign-in state, Sign in / Sign out, launch at login.
+/// Sign-in state, Sign in / Sign out, launch at login, how far the player skips.
 struct AccountTab: View {
     @Environment(AppModel.self) private var model
     @State private var isBusy = false
     @State private var confirmsSignOut = false
+    @AppStorage(PlaybackScreen.seekStepKey) private var storedSeekStep = PlaybackScreen.defaultSeekStep
 
     var body: some View {
         Form {
@@ -43,6 +44,12 @@ struct AccountTab: View {
                     get: { model.launchAtLogin },
                     set: { model.setLaunchAtLogin($0) }
                 ))
+                Picker("Skip back and forward", selection: Binding(
+                    get: { PlaybackScreen.seekStep(stored: storedSeekStep) },
+                    set: { storedSeekStep = $0 }
+                )) {
+                    ForEach(PlaybackScreen.seekSteps, id: \.self) { Text("\($0) seconds").tag($0) }
+                }
             }
         }
         .formStyle(.grouped)
