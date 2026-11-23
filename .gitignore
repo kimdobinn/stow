@@ -10,3 +10,4 @@ mac/Stow/Info.plist
 # Firebase: the Android config and any service-account key stay local
 firebase/google-services.json
 *firebase-adminsdk*.json
+*.apk
