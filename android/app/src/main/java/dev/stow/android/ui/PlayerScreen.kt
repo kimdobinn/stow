@@ -296,34 +296,34 @@ fun PlayerScreen(
                         .graphicsLayer { alpha = p }.navigationBarsPadding(),
                            userScrollEnabled = p > 0.99f) {
         item {
-            Column(Modifier.padding(horizontal = 12.dp, vertical = 12.dp)) {
-                Text(current.video.title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Stow.colors.text, lineHeight = 24.sp)
+            Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 10.dp)) {
+                Text(current.video.title, style = StowType.title3, color = Stow.colors.text)
                 Spacer(Modifier.height(4.dp))
                 Text(listOf(Format.ago(current.video.publishedAt),
                             current.durationMs.takeIf { it > 0 }?.let(Format::duration) ?: "",
                             if (current.video.isMembersOnly) "Members only" else "")
                          .filter { it.isNotEmpty() }.joinToString(" · "),
-                     fontSize = 12.sp, color = Stow.colors.secondaryText)
+                     style = StowType.footnote, color = Stow.colors.secondaryText)
             }
             Row(Modifier.fillMaxWidth().clickable { actions.openChannel(current.video.channelId) }
-                    .padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                ChannelAvatar(channel?.avatarUrl, 36.dp, name = current.video.channelTitle)
+                    .padding(horizontal = 16.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                ChannelAvatar(channel?.avatarUrl, 40.dp, name = current.video.channelTitle)
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(current.video.channelTitle, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Stow.colors.text, maxLines = 1)
+                    Text(current.video.channelTitle, style = StowType.headline, fontSize = 16.sp, color = Stow.colors.text, maxLines = 1)
                     channel?.let {
-                        Text(Format.count(it.recent.size, "recent video"), fontSize = 12.sp, color = Stow.colors.secondaryText)
+                        Text(Format.count(it.recent.size, "recent video"), style = StowType.footnote, color = Stow.colors.secondaryText)
                     }
                 }
             }
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp),
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PillButton(if (current.watched) "Watched" else "Mark watched", if (current.watched) Icons.Filled.Check else null,
+                PillButton(if (current.watched) "Watched" else "Mark Watched", if (current.watched) Icons.Filled.Check else null,
                            onClick = { actions.setWatched(current, !current.watched) })
                 when {
                     current.isPlayable -> {}
                     current.isDownloading -> PillButton("Downloading ${current.local?.progress ?: 0}%", Icons.Outlined.Download, onClick = {})
-                    else -> PillButton("Download", Icons.Outlined.Download, onClick = { actions.download(current) })
+                    else -> PillButton("Download", Icons.Outlined.Download, onClick = { actions.download(current) }, filled = true)
                 }
                 PillButton("Save", Icons.AutoMirrored.Outlined.PlaylistAdd, onClick = { actions.saveToPlaylist(current) })
                 PillButton("Speed", Icons.Outlined.Speed, onClick = { speedDialog = true })

@@ -1,6 +1,14 @@
 package dev.stow.android.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -12,18 +20,18 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Alarm
-import androidx.compose.material.icons.outlined.BarChart
-import androidx.compose.material.icons.outlined.Contrast
-import androidx.compose.material.icons.outlined.DeleteForever
-import androidx.compose.material.icons.outlined.DeleteSweep
-import androidx.compose.material.icons.outlined.HideImage
-import androidx.compose.material.icons.outlined.PlayCircle
+import androidx.compose.material.icons.rounded.Alarm
+import androidx.compose.material.icons.rounded.BarChart
+import androidx.compose.material.icons.rounded.Contrast
+import androidx.compose.material.icons.rounded.DeleteForever
+import androidx.compose.material.icons.rounded.DeleteSweep
+import androidx.compose.material.icons.rounded.HideImage
+import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.material.icons.outlined.LinkOff
-import androidx.compose.material.icons.outlined.SdStorage
-import androidx.compose.material.icons.outlined.SystemUpdateAlt
-import androidx.compose.material.icons.outlined.Wifi
+import androidx.compose.material.icons.rounded.LinkOff
+import androidx.compose.material.icons.rounded.SdStorage
+import androidx.compose.material.icons.rounded.SystemUpdateAlt
+import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -73,50 +81,51 @@ fun SettingsScreen(repository: Repository, wifiOnly: Boolean, onReport: () -> Un
         }
     }
 
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().background(Stow.colors.groupedBackground)) {
         BackTopBar("Settings", onBack)
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-            Group("Watching")
-            SettingRow(Icons.Outlined.BarChart, "Your week", "Time watched per day and channel", onClick = onReport)
-            SettingRow(Icons.Outlined.PlayCircle, "Autoplay next video", if (autoplay) "Plays the next video in the list" else "Stops at the end of each video",
-                       onClick = { repository.prefs.setAutoplay(!autoplay) }) {
-                Switch(checked = autoplay, onCheckedChange = repository.prefs::setAutoplay)
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+            Section("Watching") {
+                SettingRow(Icons.Rounded.BarChart, Purple, "Your week", "Time watched per day and channel", onClick = onReport, chevron = true)
+                SettingRow(Icons.Rounded.PlayArrow, Blue, "Autoplay next video", if (autoplay) "Plays the next video in the list" else "Stops at the end of each video",
+                           onClick = { repository.prefs.setAutoplay(!autoplay) }) {
+                    StowSwitch(autoplay, repository.prefs::setAutoplay)
+                }
+                SettingRow(Icons.Rounded.HideImage, Teal, "Calm mode", "Titles only, no thumbnails",
+                           onClick = { repository.prefs.setCalm(!calm) }) {
+                    StowSwitch(calm, repository.prefs::setCalm)
+                }
+                SettingRow(Icons.Rounded.Contrast, Gray, "Black and white", "The app in grayscale (videos stay in color)",
+                           onClick = { repository.prefs.setGrayscale(!grayscale) }, last = true) {
+                    StowSwitch(grayscale, repository.prefs::setGrayscale)
+                }
             }
-            SettingRow(Icons.Outlined.HideImage, "Calm mode", "Titles only, no thumbnails",
-                       onClick = { repository.prefs.setCalm(!calm) }) {
-                Switch(checked = calm, onCheckedChange = repository.prefs::setCalm)
+            Section("Downloads", footer = "Videos download only when you tap the download button, here or with Send to Phone on the Mac.") {
+                SettingRow(Icons.Rounded.Wifi, Blue, "Download on Wi-Fi only", if (wifiOnly) "Waits for Wi-Fi" else "Also uses mobile data",
+                           onClick = { repository.setWifiOnly(!wifiOnly) }) {
+                    StowSwitch(wifiOnly, repository::setWifiOnly)
+                }
+                SettingRow(Icons.Rounded.SdStorage, Gray, "Storage used", storage?.let(Format::bytes) ?: "…")
+                SettingRow(Icons.Rounded.DeleteSweep, Orange, "Delete watched downloads", "Frees space; videos stay in your lists",
+                           onClick = { confirmDeleteWatched = true })
+                SettingRow(Icons.Rounded.DeleteForever, Red, "Delete all downloads", "Every video on this phone, watched or not",
+                           onClick = { confirmDeleteAll = true }, destructive = true, last = true)
             }
-            SettingRow(Icons.Outlined.Contrast, "Black and white", "The app in grayscale (videos stay in color)",
-                       onClick = { repository.prefs.setGrayscale(!grayscale) }) {
-                Switch(checked = grayscale, onCheckedChange = repository.prefs::setGrayscale)
+            Section("Downloader") {
+                SettingRow(Icons.Rounded.SystemUpdateAlt, Green, "Update yt-dlp",
+                           if (updating) "Updating…" else "Version ${ytdlp ?: "…"} · checks daily by itself",
+                           onClick = if (updating) null else ({
+                               updating = true
+                               scope.launch {
+                                   YtDlp.updateIfDue(context, repository.prefs, force = true)
+                                   updating = false
+                               }
+                           }), last = true)
             }
-            HorizontalDivider(color = Stow.colors.divider)
-            Group("Downloads")
-            SettingRow(Icons.Outlined.Wifi, "Download on Wi-Fi only", if (wifiOnly) "Waits for Wi-Fi" else "Also uses mobile data",
-                       onClick = { repository.setWifiOnly(!wifiOnly) }) {
-                Switch(checked = wifiOnly, onCheckedChange = repository::setWifiOnly)
+            Section("Mac") {
+                SettingRow(Icons.Rounded.Alarm, Indigo, "Alarm remote", "Control the Mac's morning alarm from this phone", onClick = onRemote, chevron = true)
+                SettingRow(Icons.Rounded.LinkOff, Red, "Unpair this phone", "Paired with Firebase project ${repository.prefs.pairedProject ?: "–"}",
+                           onClick = { confirmUnpair = true }, destructive = true, last = true)
             }
-            SettingRow(Icons.Outlined.SdStorage, "Storage used", storage?.let(Format::bytes) ?: "…")
-            SettingRow(Icons.Outlined.DeleteSweep, "Delete watched downloads", "Frees space; videos stay in your lists",
-                       onClick = { confirmDeleteWatched = true })
-            SettingRow(Icons.Outlined.DeleteForever, "Delete all downloads", "Every video on this phone, watched or not",
-                       onClick = { confirmDeleteAll = true })
-            HorizontalDivider(color = Stow.colors.divider)
-            Group("Downloader")
-            SettingRow(Icons.Outlined.SystemUpdateAlt, "Update yt-dlp",
-                       if (updating) "Updating…" else "Version ${ytdlp ?: "…"} · checks daily by itself",
-                       onClick = if (updating) null else ({
-                           updating = true
-                           scope.launch {
-                               YtDlp.updateIfDue(context, repository.prefs, force = true)
-                               updating = false
-                           }
-                       }))
-            HorizontalDivider(color = Stow.colors.divider)
-            Group("Mac")
-            SettingRow(Icons.Outlined.Alarm, "Alarm remote", "Control the Mac's morning alarm from this phone", onClick = onRemote)
-            SettingRow(Icons.Outlined.LinkOff, "Unpair this phone", "Paired with Firebase project ${repository.prefs.pairedProject ?: "–"}",
-                       onClick = { confirmUnpair = true })
         }
     }
 
@@ -166,23 +175,51 @@ fun SettingsScreen(repository: Repository, wifiOnly: Boolean, onReport: () -> Un
     }
 }
 
+private val Purple = Color(0xFFAF52DE)
+private val Blue = Color(0xFF007AFF)
+private val Teal = Color(0xFF30B0C7)
+private val Gray = Color(0xFF8E8E93)
+private val Orange = Color(0xFFFF9500)
+private val Red = Color(0xFFFF3B30)
+private val Green = Color(0xFF34C759)
+private val Indigo = Color(0xFF5856D6)
+
+/** An inset grouped section: a small header, rounded rows, and an optional note under it. */
 @Composable
-private fun Group(text: String) {
-    Text(text, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Stow.colors.secondaryText,
-         modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 4.dp))
+private fun Section(title: String, footer: String? = null, content: @Composable () -> Unit) {
+    Text(title, style = StowType.footnote, fontWeight = FontWeight.SemiBold, color = Stow.colors.secondaryText,
+         modifier = Modifier.padding(start = 32.dp, end = 32.dp, top = 24.dp, bottom = 7.dp))
+    Column(Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Stow.colors.raised)) {
+        content()
+    }
+    if (footer != null) {
+        Text(footer, style = StowType.footnote, color = Stow.colors.secondaryText,
+             modifier = Modifier.padding(start = 32.dp, end = 32.dp, top = 7.dp))
+    }
 }
 
+/** A row: a white symbol on a colored rounded square, the title and a line under it, then a control. */
 @Composable
-private fun SettingRow(icon: ImageVector, title: String, subtitle: String, onClick: (() -> Unit)? = null,
+private fun SettingRow(icon: ImageVector, tint: Color, title: String, subtitle: String, onClick: (() -> Unit)? = null,
+                       chevron: Boolean = false, destructive: Boolean = false, last: Boolean = false,
                        trailing: (@Composable () -> Unit)? = null) {
-    Row(Modifier.fillMaxWidth().then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, contentDescription = null, tint = Stow.colors.text, modifier = Modifier.size(24.dp))
-        Spacer(Modifier.width(20.dp))
-        Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 16.sp, color = Stow.colors.text)
-            Text(subtitle, fontSize = 13.sp, color = Stow.colors.secondaryText)
+    Column(Modifier.fillMaxWidth().then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).padding(start = 16.dp, end = 14.dp, top = 10.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(30.dp).clip(RoundedCornerShape(8.dp)).background(tint), contentAlignment = Alignment.Center) {
+                Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(19.dp))
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = StowType.body, color = if (destructive) Red else Stow.colors.text)
+                Text(subtitle, style = StowType.footnote, color = Stow.colors.secondaryText)
+            }
+            trailing?.invoke()
+            if (chevron) {
+                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null, tint = Stow.colors.secondaryText,
+                     modifier = Modifier.size(22.dp))
+            }
         }
-        trailing?.invoke()
+        if (!last) HorizontalDivider(Modifier.padding(start = 60.dp), thickness = 0.5.dp, color = Stow.colors.divider)
     }
 }

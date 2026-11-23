@@ -23,6 +23,14 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.border
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Subscriptions
@@ -365,25 +373,34 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun BottomBar(tabs: List<Tab>, route: String?, nav: NavHostController) {
-        Column(Modifier.fillMaxWidth().background(Stow.colors.background).navigationBarsPadding()) {
-            HorizontalDivider(color = Stow.colors.divider, thickness = 0.5.dp)
-            Row(Modifier.fillMaxWidth().height(52.dp)) {
+        // A floating capsule, as in iOS: filled symbols, the selected tab in the accent on a soft highlight.
+        val behind = if (route == "settings") Stow.colors.groupedBackground else Stow.colors.background
+        Box(Modifier.fillMaxWidth().background(behind).navigationBarsPadding()
+                .padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 8.dp)) {
+            Row(Modifier.fillMaxWidth().height(62.dp)
+                    .shadow(10.dp, RoundedCornerShape(31.dp), ambientColor = Color.Black.copy(alpha = 0.18f), spotColor = Color.Black.copy(alpha = 0.18f))
+                    .clip(RoundedCornerShape(31.dp)).background(Stow.colors.raised)
+                    .border(0.5.dp, Stow.colors.divider.copy(alpha = 0.6f), RoundedCornerShape(31.dp))
+                    .padding(4.dp)) {
                 tabs.forEach { tab ->
                     val selected = route == tab.route
+                    val tint = if (selected) Stow.colors.accent else Stow.colors.text
                     Column(
-                        Modifier.weight(1f).fillMaxWidth().clickable {
-                            nav.navigate(tab.route) {
-                                popUpTo("home") { saveState = true }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        }.padding(top = 6.dp),
+                        Modifier.weight(1f).fillMaxSize().clip(RoundedCornerShape(27.dp))
+                            .background(if (selected) Stow.colors.chip else Color.Transparent)
+                            .selectable(selected, role = androidx.compose.ui.semantics.Role.Tab) {
+                                nav.navigate(tab.route) {
+                                    popUpTo("home") { saveState = true }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            },
                         horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
                     ) {
-                        Icon(if (selected) tab.selected else tab.unselected, contentDescription = tab.label, tint = Stow.colors.text,
-                             modifier = Modifier.size(24.dp))
+                        Icon(tab.selected, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
                         Spacer(Modifier.height(2.dp))
-                        Text(tab.label, fontSize = 10.sp, color = Stow.colors.text)
+                        Text(tab.label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = tint, maxLines = 1)
                     }
                 }
             }

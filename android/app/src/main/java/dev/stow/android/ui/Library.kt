@@ -95,7 +95,7 @@ fun DownloadsScreen(
     }.sortedFor(sort)
 
     Column(Modifier.fillMaxSize()) {
-        LogoTopBar(onSearch, onSettings)
+        LargeTitleBar("Downloads", onSearch, onSettings)
         LazyColumn(Modifier.fillMaxSize()) {
             item { SectionHeader("Playlists") }
             item {

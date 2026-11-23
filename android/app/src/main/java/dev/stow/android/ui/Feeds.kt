@@ -16,6 +16,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.material.icons.automirrored.rounded.ArrowBackIos
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -57,44 +64,64 @@ import dev.stow.android.data.VideoItem
 import dev.stow.android.sync.SyncWorker
 import kotlinx.coroutines.delay
 
-/** Home's two sources side by side: your channels, or YouTube's own feeds. */
+/** Home's two sources: an iOS segmented control, your channels or YouTube's own feeds. */
 @Composable
 private fun SourceSwitch(source: HomeSource, onSource: (HomeSource) -> Unit) {
     val colors = Stow.colors
-    Row(Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp)).background(colors.chip).padding(2.dp),
+    Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth().height(36.dp)
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(10.dp)).background(colors.chip).padding(2.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        listOf(HomeSource.CHANNELS to "My channels", HomeSource.YOUTUBE to "YouTube").forEach { (value, label) ->
+        listOf(HomeSource.CHANNELS to "My Channels", HomeSource.YOUTUBE to "YouTube").forEach { (value, label) ->
             val selected = source == value
-            Text(label, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1,
-                 color = if (selected) colors.chipSelectedText else colors.text,
-                 modifier = Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
-                     .background(if (selected) colors.chipSelected else androidx.compose.ui.graphics.Color.Transparent)
-                     .clickable { onSource(value) }.padding(horizontal = 10.dp, vertical = 5.dp))
+            Box(Modifier.weight(1f).fillMaxSize()
+                    .then(if (selected) Modifier.shadow(2.dp, androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                              .background(colors.raised, androidx.compose.foundation.shape.RoundedCornerShape(8.dp)) else Modifier)
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                    .selectable(selected, role = androidx.compose.ui.semantics.Role.Tab) { onSource(value) },
+                contentAlignment = Alignment.Center) {
+                Text(label, style = StowType.footnote, fontSize = 14.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                     color = colors.text, maxLines = 1)
+            }
         }
     }
-    Box(Modifier.padding(vertical = 4.dp).width(1.dp).height(26.dp).background(colors.chip))
 }
 
-/** The logo bar of YouTube's Home and Subscriptions tabs. */
+/** A tab's large title with its toolbar buttons (search, settings), as in iOS. */
 @Composable
-fun LogoTopBar(onSearch: () -> Unit, onSettings: () -> Unit) {
-    Row(Modifier.fillMaxWidth().statusBarsPadding().height(52.dp).padding(start = 14.dp, end = 4.dp),
+fun LargeTitleBar(title: String, onSearch: () -> Unit, onSettings: () -> Unit) {
+    Row(Modifier.fillMaxWidth().statusBarsPadding().padding(start = 16.dp, end = 12.dp, top = 10.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        StowLogo()
-        Spacer(Modifier.weight(1f))
-        IconButton(onClick = onSearch) { Icon(Icons.Filled.Search, contentDescription = "Search", tint = Stow.colors.text) }
-        IconButton(onClick = onSettings) { Icon(Icons.Outlined.Settings, contentDescription = "Settings", tint = Stow.colors.text) }
+        Text(title, style = StowType.largeTitle, color = Stow.colors.text, modifier = Modifier.weight(1f),
+             maxLines = 1, overflow = TextOverflow.Ellipsis)
+        ToolbarButton(Icons.Rounded.Search, "Search", onSearch)
+        Spacer(Modifier.width(10.dp))
+        ToolbarButton(Icons.Rounded.Settings, "Settings", onSettings)
     }
 }
 
-/** A plain title bar with a back arrow. */
+/** A round toolbar button on a light fill. */
+@Composable
+fun ToolbarButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
+    Box(Modifier.size(44.dp).clip(CircleShape).background(Stow.colors.chip)
+            .clickable(onClickLabel = label, role = androidx.compose.ui.semantics.Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center) {
+        Icon(icon, contentDescription = label, tint = Stow.colors.text, modifier = Modifier.size(22.dp))
+    }
+}
+
+/** A navigation bar: back on the left, the title centered, actions on the right. */
 @Composable
 fun BackTopBar(title: String, onBack: () -> Unit, actions: @Composable () -> Unit = {}) {
-    Row(Modifier.fillMaxWidth().statusBarsPadding().height(52.dp).padding(end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Stow.colors.text) }
-        Text(title, fontSize = 18.sp, fontWeight = FontWeight.Medium, color = Stow.colors.text, maxLines = 1,
-             overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        actions()
+    Box(Modifier.fillMaxWidth().statusBarsPadding().height(52.dp)) {
+        Box(Modifier.align(Alignment.CenterStart).padding(start = 8.dp).size(44.dp).clip(CircleShape)
+                .clickable(onClickLabel = "Back", role = androidx.compose.ui.semantics.Role.Button, onClick = onBack),
+            contentAlignment = Alignment.Center) {
+            Icon(Icons.AutoMirrored.Rounded.ArrowBackIos, contentDescription = "Back", tint = Stow.colors.accent,
+                 modifier = Modifier.size(22.dp).offset(x = 4.dp))
+        }
+        Text(title, style = StowType.headline, color = Stow.colors.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
+             textAlign = TextAlign.Center, modifier = Modifier.align(Alignment.Center).padding(horizontal = 64.dp))
+        Row(Modifier.align(Alignment.CenterEnd).padding(end = 4.dp), verticalAlignment = Alignment.CenterVertically) { actions() }
     }
 }
 
@@ -141,11 +168,11 @@ fun HomeScreen(
     val fresh = matching.filter { !it.watched }
     val watched = matching.filter { it.watched }
     Column(Modifier.fillMaxSize()) {
-        LogoTopBar(onSearch, onSettings)
+        LargeTitleBar("Home", onSearch, onSettings)
         alarmMac?.let { AlarmBanner(it, onRemote) }
+        SourceSwitch(source, onSource)
         if (source == HomeSource.YOUTUBE) {
             ChipRow {
-                SourceSwitch(source, onSource)
                 YouTubeFilter.entries.forEach { f -> Chip(f.label, youtubeFilter == f, onClick = { youtubeFilter = f }) }
             }
             val videos = if (youtubeFilter == YouTubeFilter.RECOMMENDED) recommended else subscriptions
@@ -165,7 +192,6 @@ fun HomeScreen(
             return@Column
         }
         ChipRow {
-            SourceSwitch(source, onSource)
             HomeFilter.entries.forEach { f ->
                 Chip(f.label, filter == f && channelId == null, onClick = { filter = f; channelId = null })
             }
@@ -189,10 +215,10 @@ fun HomeScreen(
 /** While the Mac's alarm plays (its push came in the last two hours): one tap to the remote. */
 @Composable
 private fun AlarmBanner(macName: String, onOpen: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
             .background(Stow.colors.chip).clickable(onClick = onOpen).padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        Icon(Icons.Filled.Alarm, contentDescription = null, tint = Stow.colors.text, modifier = Modifier.size(22.dp))
+        Icon(Icons.Filled.Alarm, contentDescription = null, tint = Stow.colors.accent, modifier = Modifier.size(22.dp))
         Spacer(Modifier.width(12.dp))
         Text("Alarm playing on $macName", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Stow.colors.text,
              maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
@@ -204,15 +230,15 @@ private fun AlarmBanner(macName: String, onOpen: () -> Unit) {
 @Composable
 private fun CaughtUp(todaySeconds: Long, watchedCount: Int, showingWatched: Boolean, onToggle: () -> Unit, onReport: () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.size(56.dp).clip(CircleShape).background(Stow.colors.chip), contentAlignment = Alignment.Center) {
-            Icon(Icons.Filled.Check, contentDescription = null, tint = Stow.colors.text, modifier = Modifier.size(30.dp))
+        Box(Modifier.size(60.dp).clip(CircleShape).background(StowGradient), contentAlignment = Alignment.Center) {
+            Icon(Icons.Rounded.Check, contentDescription = null, tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(32.dp))
         }
-        Spacer(Modifier.height(12.dp))
-        Text("You're all caught up", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Stow.colors.text)
+        Spacer(Modifier.height(14.dp))
+        Text("You're All Caught Up", style = StowType.title3, color = Stow.colors.text)
         Spacer(Modifier.height(4.dp))
-        Text("That's everything new from your channels.", fontSize = 14.sp, color = Stow.colors.secondaryText, textAlign = TextAlign.Center)
+        Text("That's everything new from your channels.", style = StowType.subheadline, color = Stow.colors.secondaryText, textAlign = TextAlign.Center)
         Spacer(Modifier.height(4.dp))
-        Text("Watched today: ${Format.minutes(todaySeconds)}", fontSize = 13.sp, color = Stow.colors.secondaryText,
+        Text("Watched today: ${Format.minutes(todaySeconds)}", style = StowType.footnote, color = Stow.colors.secondaryText,
              modifier = Modifier.clickable(onClick = onReport).padding(4.dp))
         if (watchedCount > 0) {
             Spacer(Modifier.height(8.dp))
@@ -233,7 +259,7 @@ fun SubscriptionsScreen(
     val avatars = channels.associate { it.id to it.avatarUrl }
     val shown = feed.filter { selected == null || it.video.channelId == selected }
     Column(Modifier.fillMaxSize()) {
-        LogoTopBar(onSearch, onSettings)
+        LargeTitleBar("Subscriptions", onSearch, onSettings)
         Row(verticalAlignment = Alignment.CenterVertically) {
             LazyRow(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -243,7 +269,7 @@ fun SubscriptionsScreen(
                             .clickable { selected = if (selected == channel.id) null else channel.id }.padding(vertical = 4.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        val ring = if (selected == channel.id) Modifier.border(2.dp, Stow.colors.text, CircleShape).padding(3.dp) else Modifier.padding(3.dp)
+                        val ring = if (selected == channel.id) Modifier.border(2.dp, Stow.colors.accent, CircleShape).padding(3.dp) else Modifier.padding(3.dp)
                         Box(ring) { ChannelAvatar(channel.avatarUrl, 52.dp, name = channel.title) }
                         Spacer(Modifier.height(4.dp))
                         Text(channel.title, fontSize = 11.sp, color = if (selected == null || selected == channel.id) Stow.colors.text else Stow.colors.secondaryText,
@@ -269,9 +295,9 @@ fun SubscriptionsScreen(
     }
 }
 
-/** YouTube's blue link color. */
+/** Links and text buttons: the accent. */
 @Composable
-fun Color3D() = androidx.compose.material3.MaterialTheme.colorScheme.primary
+fun Color3D() = Stow.colors.accent
 
 /** Every channel the Mac follows. */
 @Composable

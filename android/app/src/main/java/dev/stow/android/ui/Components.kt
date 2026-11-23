@@ -1,6 +1,31 @@
 package dev.stow.android.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material.icons.rounded.ArrowDownward
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -81,7 +106,7 @@ fun ChannelAvatar(url: String?, size: Dp, modifier: Modifier = Modifier, name: S
     }
 }
 
-/** A thumbnail with the duration badge and the red "how far you got" bar, like YouTube's. */
+/** A thumbnail with the duration badge and the accent "how far you got" bar. */
 @Composable
 fun Thumbnail(item: VideoItem, modifier: Modifier = Modifier, rounded: Dp = 0.dp, overlay: @Composable BoxScope.() -> Unit = {}) {
     Box(modifier.aspectRatio(16f / 9f).clip(RoundedCornerShape(rounded)).background(Stow.colors.chip)) {
@@ -90,17 +115,100 @@ fun Thumbnail(item: VideoItem, modifier: Modifier = Modifier, rounded: Dp = 0.dp
         if (item.durationMs > 0) {
             Text(
                 Format.duration(item.durationMs),
-                color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium,
-                modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp)
-                    .background(Color.Black.copy(alpha = 0.8f), RoundedCornerShape(4.dp))
-                    .padding(horizontal = 4.dp, vertical = 1.dp),
+                color = Color.White, style = StowType.caption, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp)
+                    .background(Color.Black.copy(alpha = 0.72f), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
             )
         }
         if (item.progress > 0.01f) {
-            Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(3.dp).background(Color(0x66FFFFFF)))
-            Box(Modifier.align(Alignment.BottomStart).fillMaxWidth(item.progress).height(3.dp).background(ProgressRed))
+            Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(4.dp).background(Color(0x59FFFFFF)))
+            Box(Modifier.align(Alignment.BottomStart).fillMaxWidth(item.progress).height(4.dp).background(ProgressRed))
         }
         overlay()
+    }
+}
+
+/**
+ * Stow's download control: one disc that tells the whole story. An arrow to stow the video on the
+ * phone; a ring in the app icon's colors while it downloads (tap to stop); a filled disc with a
+ * check once it's here. `onMedia` draws it dimmed for sitting on a thumbnail.
+ */
+@Composable
+fun DownloadDisc(item: VideoItem, actions: VideoActions, modifier: Modifier = Modifier, onMedia: Boolean = true, size: Dp = 40.dp) {
+    val colors = Stow.colors
+    val state = when {
+        item.isPlayable -> DiscState.DONE
+        item.isDownloading -> DiscState.LOADING
+        item.state == DownloadState.FAILED -> DiscState.FAILED
+        else -> DiscState.IDLE
+    }
+    val face = if (onMedia) Color.White else colors.text
+    val label = when (state) {
+        DiscState.IDLE -> "Download"
+        DiscState.LOADING -> "Stop download"
+        DiscState.FAILED -> "Retry download"
+        DiscState.DONE -> "Downloaded"
+    }
+    val click: (() -> Unit)? = when (state) {
+        DiscState.IDLE, DiscState.FAILED -> ({ actions.download(item) })
+        DiscState.LOADING -> ({ actions.delete(item) })
+        DiscState.DONE -> null
+    }
+    // 48 dp to touch, whatever the disc's drawn size.
+    Box(modifier.size(maxOf(size, 48.dp)).then(
+            if (click != null) Modifier.clip(CircleShape).clickable(onClickLabel = label, role = Role.Button, onClick = click) else Modifier
+        ).semantics { contentDescription = label },
+        contentAlignment = Alignment.Center) {
+        AnimatedContent(state, transitionSpec = {
+            (fadeIn(tween(180)) + scaleIn(tween(220), initialScale = 0.7f)) togetherWith fadeOut(tween(120))
+        }, label = "disc") { shown ->
+            val discSize = if (shown == DiscState.DONE) size * 0.78f else size
+            Box(
+                Modifier.size(discSize).clip(CircleShape).then(
+                    when {
+                        shown == DiscState.DONE -> Modifier.background(StowGradient)
+                        onMedia -> Modifier.background(Color.Black.copy(alpha = 0.45f)).border(1.dp, Color.White.copy(alpha = 0.28f), CircleShape)
+                        else -> Modifier.background(colors.chip)
+                    }
+                ),
+                contentAlignment = Alignment.Center,
+            ) {
+                when (shown) {
+                    DiscState.IDLE -> Icon(Icons.Rounded.ArrowDownward, contentDescription = null, tint = face, modifier = Modifier.size(size * 0.5f))
+                    DiscState.FAILED -> Icon(Icons.Rounded.Refresh, contentDescription = null, tint = face, modifier = Modifier.size(size * 0.5f))
+                    DiscState.DONE -> Icon(Icons.Rounded.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(size * 0.46f))
+                    DiscState.LOADING -> {
+                        val percent = item.local?.progress ?: 0
+                        DownloadRing(if (item.state == DownloadState.DOWNLOADING && percent > 0) percent / 100f else null,
+                                     track = face.copy(alpha = 0.25f), modifier = Modifier.fillMaxSize().padding(3.dp))
+                        Box(Modifier.size(size * 0.24f).clip(RoundedCornerShape(2.dp)).background(face))
+                    }
+                }
+            }
+        }
+    }
+}
+
+private enum class DiscState { IDLE, LOADING, FAILED, DONE }
+
+/** The ring around the stop square: how much is down, or a turning arc while it waits to start. */
+@Composable
+private fun DownloadRing(fraction: Float?, track: Color, modifier: Modifier) {
+    val shown by animateFloatAsState(fraction ?: 0f, tween(400), label = "ring")
+    val turn = if (fraction == null) {
+        val spin = rememberInfiniteTransition(label = "wait")
+        spin.animateFloat(0f, 360f, infiniteRepeatable(tween(1100, easing = LinearEasing)), label = "spin").value
+    } else 0f
+    val brush = Brush.sweepGradient(StowGradientColors)
+    Canvas(modifier) {
+        val stroke = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+        drawArc(track, 0f, 360f, useCenter = false, style = stroke)
+        if (fraction == null) {
+            rotate(turn) { drawArc(brush, 0f, 100f, useCenter = false, style = stroke) }
+        } else if (shown > 0f) {
+            rotate(-90f) { drawArc(brush, 0f, 360f * shown, useCenter = false, style = stroke) }
+        }
     }
 }
 
@@ -114,13 +222,13 @@ fun DownloadStatus(item: VideoItem) {
             Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = color, modifier = Modifier.size(14.dp))
             Spacer(Modifier.width(4.dp))
             Text(listOfNotNull("Downloaded", local?.sizeBytes?.takeIf { it > 0 }?.let(Format::bytes)).joinToString(" · "),
-                 fontSize = 12.sp, color = color)
+                 style = StowType.caption, color = color)
         }
         DownloadState.DOWNLOADING, DownloadState.QUEUED -> Row(verticalAlignment = Alignment.CenterVertically) {
             val percent = local?.progress ?: 0
             if (item.state == DownloadState.DOWNLOADING && percent > 0) {
                 CircularProgressIndicator(progress = { percent / 100f }, modifier = Modifier.size(12.dp), strokeWidth = 2.dp,
-                                          color = MaterialTheme.colorScheme.primary)
+                                          color = Stow.colors.accent, trackColor = Stow.colors.chip)
             } else {
                 CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 2.dp, color = color)
             }
@@ -131,13 +239,13 @@ fun DownloadStatus(item: VideoItem) {
                     local?.error != null -> "Retrying soon"
                     else -> "Waiting to download"
                 },
-                fontSize = 12.sp, color = MaterialTheme.colorScheme.primary,
+                style = StowType.caption, fontWeight = FontWeight.Medium, color = Stow.colors.accent,
             )
         }
         DownloadState.FAILED -> Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Filled.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(14.dp))
             Spacer(Modifier.width(4.dp))
-            Text("Download failed", fontSize = 12.sp, color = MaterialTheme.colorScheme.error, maxLines = 1)
+            Text("Download failed", style = StowType.caption, color = MaterialTheme.colorScheme.error, maxLines = 1)
         }
         else -> {}
     }
@@ -192,7 +300,7 @@ fun VideoMenu(item: VideoItem, actions: VideoActions, expanded: Boolean, onDismi
 /** Tapping a video plays it: from the phone when downloaded, otherwise streamed. */
 fun VideoActions.open(item: VideoItem) = play(item)
 
-/** Home and Subscriptions: a full-width thumbnail with the channel avatar and title below. */
+/** Home and Subscriptions: a rounded thumbnail with the download disc, the channel and title below. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun VideoCard(item: VideoItem, avatarUrl: String?, actions: VideoActions) {
@@ -201,31 +309,31 @@ fun VideoCard(item: VideoItem, avatarUrl: String?, actions: VideoActions) {
     Column(Modifier.fillMaxWidth().combinedClickable(onClick = { actions.open(item) }, onLongClick = {
         haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
         menu = true
-    })) {
+    }).padding(horizontal = 16.dp)) {
         val calm = LocalCalm.current
         if (!calm) {
-            Thumbnail(item, Modifier.fillMaxWidth()) {
-                if (!item.isPlayable && !item.isDownloading) {
-                    DownloadBadge(Modifier.align(Alignment.TopEnd).padding(8.dp).clickable { actions.download(item) })
-                }
+            Thumbnail(item, Modifier.fillMaxWidth().padding(top = 8.dp), rounded = 14.dp) {
+                DownloadDisc(item, actions, Modifier.align(Alignment.TopEnd).padding(4.dp))
             }
         }
-        Row(Modifier.padding(start = 12.dp, top = 12.dp, bottom = if (calm) 12.dp else 20.dp)) {
-            ChannelAvatar(avatarUrl, 36.dp, Modifier.clickable { actions.openChannel(item.video.channelId) }, name = item.video.channelTitle)
+        Row(Modifier.padding(top = 12.dp, bottom = if (calm) 12.dp else 20.dp)) {
+            ChannelAvatar(avatarUrl, 36.dp, Modifier.clickable(onClickLabel = "Go to channel") { actions.openChannel(item.video.channelId) },
+                          name = item.video.channelTitle)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(item.video.title, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 2,
-                     overflow = TextOverflow.Ellipsis, color = Stow.colors.text, lineHeight = 20.sp)
+                Text(item.video.title, style = StowType.headline, fontSize = 16.sp, lineHeight = 21.sp, maxLines = 2,
+                     overflow = TextOverflow.Ellipsis, color = Stow.colors.text)
                 Spacer(Modifier.height(3.dp))
-                Text(Format.meta(item, withDuration = calm), fontSize = 12.sp, color = Stow.colors.secondaryText, maxLines = 1)
-                Spacer(Modifier.height(3.dp))
-                DownloadStatus(item)
+                Text(Format.meta(item, withDuration = calm), style = StowType.footnote, color = Stow.colors.secondaryText, maxLines = 1)
+                if (item.isDownloading || item.state == DownloadState.FAILED) {
+                    Spacer(Modifier.height(3.dp))
+                    DownloadStatus(item)
+                }
                 if (calm && item.progress > 0.01f) WatchedLine(item.progress)
             }
+            if (calm) DownloadDisc(item, actions, onMedia = false, size = 34.dp)
             Box {
-                IconButton(onClick = { menu = true }) {
-                    Icon(Icons.Filled.MoreVert, contentDescription = "More", tint = Stow.colors.text, modifier = Modifier.size(20.dp))
-                }
+                MoreButton { menu = true }
                 VideoMenu(item, actions, menu) { menu = false }
             }
         }
@@ -243,36 +351,38 @@ fun VideoRow(item: VideoItem, actions: VideoActions, showChannel: Boolean = true
             haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
             menu = true
         })
-            .padding(start = 12.dp, top = 6.dp, bottom = 6.dp),
+            .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
     ) {
         val calm = LocalCalm.current
         if (!calm) {
-            Thumbnail(item, Modifier.width(168.dp), rounded = 8.dp)
+            Thumbnail(item, Modifier.width(156.dp), rounded = 10.dp)
             Spacer(Modifier.width(12.dp))
         }
-        Column(Modifier.weight(1f).padding(top = 2.dp)) {
-            Text(item.video.title, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 2,
-                 overflow = TextOverflow.Ellipsis, color = Stow.colors.text, lineHeight = 19.sp)
+        Column(Modifier.weight(1f).padding(top = 1.dp)) {
+            Text(item.video.title, style = StowType.subheadline, fontWeight = FontWeight.SemiBold, maxLines = 2,
+                 overflow = TextOverflow.Ellipsis, color = Stow.colors.text)
             Spacer(Modifier.height(3.dp))
             Text(if (showChannel) Format.meta(item, withDuration = calm)
                  else listOfNotNull(Format.ago(item.video.publishedAt), item.durationMs.takeIf { calm && it > 0 }?.let(Format::duration)).joinToString(" · "),
-                 fontSize = 12.sp, color = Stow.colors.secondaryText, maxLines = 2)
+                 style = StowType.footnote, color = Stow.colors.secondaryText, maxLines = 2)
             Spacer(Modifier.height(3.dp))
             DownloadStatus(item)
             if (calm && item.progress > 0.01f) WatchedLine(item.progress)
         }
         if (trailing != null) trailing()
-        if (!item.isPlayable && !item.isDownloading) {
-            IconButton(onClick = { actions.download(item) }) {
-                Icon(Icons.Outlined.Download, contentDescription = "Download", tint = Stow.colors.text, modifier = Modifier.size(20.dp))
-            }
-        }
+        if (!item.isPlayable) DownloadDisc(item, actions, onMedia = false, size = 34.dp)
         Box {
-            IconButton(onClick = { menu = true }) {
-                Icon(Icons.Filled.MoreVert, contentDescription = "More", tint = Stow.colors.text, modifier = Modifier.size(20.dp))
-            }
+            MoreButton { menu = true }
             VideoMenu(item, actions, menu) { menu = false }
         }
+    }
+}
+
+/** "⋯", like iOS's More buttons. */
+@Composable
+private fun MoreButton(onClick: () -> Unit) {
+    IconButton(onClick = onClick) {
+        Icon(Icons.Rounded.MoreHoriz, contentDescription = "More", tint = Stow.colors.secondaryText, modifier = Modifier.size(22.dp))
     }
 }
 
@@ -284,56 +394,65 @@ private fun WatchedLine(fraction: Float) {
     }
 }
 
-@Composable
-private fun DownloadBadge(modifier: Modifier) {
-    Box(modifier.background(Color.Black.copy(alpha = 0.7f), CircleShape).padding(5.dp)) {
-        Icon(Icons.Outlined.Download, contentDescription = "Not downloaded", tint = Color.White, modifier = Modifier.size(16.dp))
-    }
-}
-
-/** A YouTube filter chip. */
+/** A filter token: a capsule, filled with the text color when selected (no accent, so content leads). */
 @Composable
 fun Chip(label: String, selected: Boolean, onClick: () -> Unit, leading: (@Composable () -> Unit)? = null) {
     val colors = Stow.colors
     Row(
-        Modifier.clip(RoundedCornerShape(8.dp)).background(if (selected) colors.chipSelected else colors.chip)
-            .clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 7.dp),
+        Modifier.heightIn(min = 36.dp).clip(CircleShape).background(if (selected) colors.chipSelected else colors.chip)
+            .clickable(role = Role.Tab, onClick = onClick).padding(horizontal = 14.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         leading?.let { it(); Spacer(Modifier.width(6.dp)) }
-        Text(label, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = if (selected) colors.chipSelectedText else colors.text, maxLines = 1)
+        Text(label, style = StowType.subheadline, fontWeight = FontWeight.SemiBold,
+             color = if (selected) colors.chipSelectedText else colors.text, maxLines = 1)
     }
 }
 
 @Composable
 fun ChipRow(content: @Composable () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp),
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) { content() }
 }
 
-/** A rounded grey action button, like YouTube's Like/Share/Save row. */
+/** An iOS-style switch: green when on. */
+@Composable
+fun StowSwitch(checked: Boolean, onChange: (Boolean) -> Unit) {
+    androidx.compose.material3.Switch(
+        checked = checked, onCheckedChange = onChange,
+        colors = androidx.compose.material3.SwitchDefaults.colors(
+            checkedTrackColor = Color(0xFF34C759), checkedThumbColor = Color.White, checkedBorderColor = Color.Transparent,
+            uncheckedTrackColor = Stow.colors.divider, uncheckedThumbColor = Color.White, uncheckedBorderColor = Color.Transparent,
+        ),
+        thumbContent = null,
+    )
+}
+
+/** A capsule button; `filled` is the screen's one primary action, in the accent. */
 @Composable
 fun PillButton(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector?, onClick: () -> Unit, filled: Boolean = false) {
     val colors = Stow.colors
+    val content = if (filled) Color.White else colors.text
     Row(
-        Modifier.clip(RoundedCornerShape(50)).background(if (filled) colors.chipSelected else colors.chip)
-            .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 8.dp),
+        Modifier.heightIn(min = 40.dp).clip(CircleShape).background(if (filled) colors.accent else colors.chip)
+            .clickable(role = Role.Button, onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (icon != null) {
-            Icon(icon, contentDescription = null, tint = if (filled) colors.chipSelectedText else colors.text, modifier = Modifier.size(18.dp))
+            Icon(icon, contentDescription = null, tint = content, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
         }
-        Text(label, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = if (filled) colors.chipSelectedText else colors.text)
+        Text(label, style = StowType.subheadline, fontWeight = FontWeight.SemiBold, color = content, maxLines = 1)
     }
 }
 
 @Composable
 fun SectionHeader(text: String, modifier: Modifier = Modifier, trailing: (@Composable () -> Unit)? = null) {
-    Row(modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 16.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(text, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Stow.colors.text, modifier = Modifier.weight(1f))
+    Row(modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 20.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(text, style = StowType.title3, fontWeight = FontWeight.Bold, color = Stow.colors.text, modifier = Modifier.weight(1f))
         trailing?.invoke()
     }
 }
@@ -341,7 +460,7 @@ fun SectionHeader(text: String, modifier: Modifier = Modifier, trailing: (@Compo
 @Composable
 fun EmptyState(text: String, padding: PaddingValues = PaddingValues(32.dp)) {
     Box(Modifier.fillMaxWidth().padding(padding), contentAlignment = Alignment.Center) {
-        Text(text, color = Stow.colors.secondaryText, fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        Text(text, color = Stow.colors.secondaryText, style = StowType.subheadline, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
     }
 }
 
