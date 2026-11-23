@@ -264,6 +264,17 @@ class Repository(private val context: Context) {
         if (item(id)?.sent != null) scope.launch { runCatching { remote.reportDownload(id, "deleted") } }
     }
 
+    /** Videos downloaded, downloading or waiting to download. */
+    fun downloadIds(): List<String> = items.value.values
+        .filter { it.state == DownloadState.QUEUED || it.state == DownloadState.DOWNLOADING || it.state == DownloadState.DOWNLOADED }
+        .map { it.id }
+
+    /** Deletes every download, stops the ones under way, and clears out anything left in the folder. */
+    fun deleteAllDownloads() {
+        downloadIds().forEach(::deleteDownload)
+        YtDlp.downloadDir(context).listFiles()?.forEach { it.deleteRecursively() }
+    }
+
     /** The YouTube cookies (members-only videos) as a temporary cookies.txt; the caller deletes it. */
     suspend fun cookiesFile(): File? {
         val key = prefs.pairingKey ?: return null

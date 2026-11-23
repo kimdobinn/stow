@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Alarm
 import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.Contrast
+import androidx.compose.material.icons.outlined.DeleteForever
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.HideImage
 import androidx.compose.material.icons.outlined.PlayCircle
@@ -63,6 +64,7 @@ fun SettingsScreen(repository: Repository, wifiOnly: Boolean, onReport: () -> Un
     var updating by remember { mutableStateOf(false) }
     var confirmUnpair by remember { mutableStateOf(false) }
     var confirmDeleteWatched by remember { mutableStateOf(false) }
+    var confirmDeleteAll by remember { mutableStateOf(false) }
 
     LaunchedEffect(updating) {
         if (!updating) {
@@ -97,6 +99,8 @@ fun SettingsScreen(repository: Repository, wifiOnly: Boolean, onReport: () -> Un
             SettingRow(Icons.Outlined.SdStorage, "Storage used", storage?.let(Format::bytes) ?: "…")
             SettingRow(Icons.Outlined.DeleteSweep, "Delete watched downloads", "Frees space; videos stay in your lists",
                        onClick = { confirmDeleteWatched = true })
+            SettingRow(Icons.Outlined.DeleteForever, "Delete all downloads", "Every video on this phone, watched or not",
+                       onClick = { confirmDeleteAll = true })
             HorizontalDivider(color = Stow.colors.divider)
             Group("Downloader")
             SettingRow(Icons.Outlined.SystemUpdateAlt, "Update yt-dlp",
@@ -123,6 +127,25 @@ fun SettingsScreen(repository: Repository, wifiOnly: Boolean, onReport: () -> Un
             text = { Text("It stops getting videos until you scan a new code. Downloads stay. Also unpair it on the Mac (Stow › Phone).") },
             confirmButton = { TextButton(onClick = { confirmUnpair = false; repository.unpair(); onBack() }) { Text("Unpair") } },
             dismissButton = { TextButton(onClick = { confirmUnpair = false }) { Text("Cancel") } },
+        )
+    }
+    if (confirmDeleteAll) {
+        val count = remember { repository.downloadIds().size }
+        AlertDialog(
+            onDismissRequest = { confirmDeleteAll = false },
+            title = { Text("Delete all downloads?") },
+            text = {
+                Text("Deletes ${if (count == 1) "1 video" else "$count videos"} (${storage?.let(Format::bytes) ?: "…"}) from this phone " +
+                     "and stops downloads under way. Videos stay in your lists; they aren't downloaded again unless you ask.")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDeleteAll = false
+                    repository.deleteAllDownloads()
+                    storage = repository.storageUsedBytes()
+                }) { Text("Delete All") }
+            },
+            dismissButton = { TextButton(onClick = { confirmDeleteAll = false }) { Text("Cancel") } },
         )
     }
     if (confirmDeleteWatched) {
