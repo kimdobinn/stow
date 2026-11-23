@@ -151,6 +151,7 @@ fun HomeScreen(
             val videos = if (youtubeFilter == YouTubeFilter.RECOMMENDED) recommended else subscriptions
             Refreshable {
                 LazyColumn(Modifier.fillMaxSize()) {
+                    topAnchor()
                     if (videos.isEmpty()) {
                         item(key = "empty") {
                             EmptyState(if (recommended.isEmpty() && subscriptions.isEmpty())
@@ -174,6 +175,7 @@ fun HomeScreen(
         }
         Refreshable {
             LazyColumn(Modifier.fillMaxSize()) {
+                topAnchor()
                 items(fresh, key = { it.id }) { VideoCard(it, avatars[it.video.channelId], actions) }
                 item(key = "caught-up") {
                     CaughtUp(todaySeconds, watched.size, showWatched, onToggle = { showWatched = !showWatched }, onReport = onReport)
@@ -259,6 +261,7 @@ fun SubscriptionsScreen(
         }
         Refreshable {
             LazyColumn(Modifier.fillMaxSize()) {
+                topAnchor()
                 if (shown.isEmpty()) item { EmptyState("No videos yet.") }
                 items(shown, key = { it.id }) { VideoCard(it, avatars[it.video.channelId], actions) }
             }
@@ -382,6 +385,7 @@ fun SearchScreen(all: List<VideoItem>, actions: VideoActions, onBack: () -> Unit
             )
         }
         LazyColumn(Modifier.fillMaxSize()) {
+            topAnchor()
             if (words.isNotEmpty() && results.isEmpty()) item { EmptyState("No videos match “${query.trim()}”.") }
             items(results, key = { it.id }) { VideoRow(it, actions) }
         }

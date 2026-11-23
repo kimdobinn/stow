@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -342,4 +343,13 @@ fun EmptyState(text: String, padding: PaddingValues = PaddingValues(32.dp)) {
     Box(Modifier.fillMaxWidth().padding(padding), contentAlignment = Alignment.Center) {
         Text(text, color = Stow.colors.secondaryText, fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
     }
+}
+
+/**
+ * A fixed first row, so a list stays at the top while its videos arrive: a list keeps its first
+ * visible row on screen, and without this the videos loading in land above it (as when only
+ * "You're caught up" was there at first) and have to be scrolled up to.
+ */
+fun LazyListScope.topAnchor() {
+    item(key = "top-anchor", contentType = "top-anchor") { Spacer(Modifier.fillMaxWidth().height(1.dp)) }
 }
