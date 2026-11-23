@@ -28,8 +28,6 @@ data class Channel(
     val title: String,
     val handle: String?,
     val avatarUrl: String?,
-    /** New uploads download to the phone automatically. */
-    val autoDownload: Boolean,
     val order: Int,
     /** Newest first. */
     val recent: List<RecentVideo>,

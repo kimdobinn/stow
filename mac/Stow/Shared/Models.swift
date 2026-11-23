@@ -22,21 +22,18 @@ struct Channel: Codable, Hashable, Identifiable, Sendable {
     var avatarURL: URL?
     /// Include this channel's new videos in the morning alarm.
     var morning: Bool
-    /// Send this channel's new videos to the phone.
-    var phone: Bool
 
-    init(info: ChannelInfo, morning: Bool = true, phone: Bool = true) {
+    init(info: ChannelInfo, morning: Bool = true) {
         id = info.id
         title = info.title
         handle = info.handle
         avatarURL = info.avatarURL
         self.morning = morning
-        self.phone = phone
     }
 
     var url: URL { URL(string: "https://www.youtube.com/channel/\(id)")! }
 
-    private enum CodingKeys: String, CodingKey { case id, title, handle, avatarURL, morning, phone }
+    private enum CodingKeys: String, CodingKey { case id, title, handle, avatarURL, morning }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -45,7 +42,6 @@ struct Channel: Codable, Hashable, Identifiable, Sendable {
         handle = try c.decodeIfPresent(String.self, forKey: .handle)
         avatarURL = try c.decodeIfPresent(URL.self, forKey: .avatarURL)
         morning = try c.decodeIfPresent(Bool.self, forKey: .morning) ?? true
-        phone = try c.decodeIfPresent(Bool.self, forKey: .phone) ?? true
     }
 }
 

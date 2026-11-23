@@ -263,7 +263,6 @@ final class AppModel {
             .filter { ids.insert($0.id).inserted }
         let foundAt = Date.now
         state.inbox = Array((added.map { InboxItem(video: $0, foundAt: foundAt) } + state.inbox).prefix(Self.inboxLimit))
-        phone.newVideosFound(added)
         return added
     }
 
@@ -390,10 +389,6 @@ final class AppModel {
 
     func setMorning(_ on: Bool, channelId: String) {
         updateChannel(channelId) { $0.morning = on }
-    }
-
-    func setPhone(_ on: Bool, channelId: String) {
-        updateChannel(channelId) { $0.phone = on }
     }
 
     private func updateChannel(_ id: String, _ change: (inout Channel) -> Void) {
@@ -748,12 +743,6 @@ extension AppModel: PhoneSyncHost {
 
     func phoneRecentVideos(channelId: String) -> [Video] {
         (state.recentVideos[channelId] ?? []).sorted { ($0.publishedAt ?? .distantPast) > ($1.publishedAt ?? .distantPast) }
-    }
-
-    func applyPhoneChannelSetting(phone: Bool, channelId: String) {
-        guard let channel = channels.first(where: { $0.id == channelId }) else { return }
-        record(.info, "\(channel.title): auto-download to the phone turned \(phone ? "on" : "off") on the phone.")
-        setPhone(phone, channelId: channelId)
     }
 
     func phoneVideo(id: String) -> Video? {

@@ -189,20 +189,11 @@ class Remote {
                 watched = entry["watched"] as? Boolean ?: false,
             )
         }
-        return Channel(id, title, getString("handle"), getString("avatarURL"), getBoolean("phone") ?: false,
+        return Channel(id, title, getString("handle"), getString("avatarURL"),
                        getLong("order")?.toInt() ?: 0, recent)
     }
 
     // Writing (only the fields the rules let a phone change)
-
-    /** Turns a channel's auto-download (new uploads to the phone) on or off; the Mac applies it. */
-    suspend fun setAutoDownload(channelId: String, on: Boolean) {
-        db.collection("channels").document(channelId).update(mapOf(
-            "phone" to on,
-            "updatedAt" to FieldValue.serverTimestamp(),
-            "updatedBy" to "phone",
-        )).await()
-    }
 
     /** Asks for a video the Mac didn't send (picked from a channel page): files videos/{id}. */
     suspend fun requestDownload(video: Video) {

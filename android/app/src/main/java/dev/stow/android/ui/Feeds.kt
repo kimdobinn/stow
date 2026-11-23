@@ -273,16 +273,12 @@ fun SubscriptionsScreen(
 @Composable
 fun Color3D() = androidx.compose.material3.MaterialTheme.colorScheme.primary
 
-/** Every channel, each with its auto-download switch. */
+/** Every channel the Mac follows. */
 @Composable
-fun ChannelsScreen(channels: List<Channel>, onOpen: (String) -> Unit, onAutoDownload: (String, Boolean) -> Unit, onBack: () -> Unit) {
+fun ChannelsScreen(channels: List<Channel>, onOpen: (String) -> Unit, onBack: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         BackTopBar("All channels", onBack)
         LazyColumn(Modifier.fillMaxSize()) {
-            item {
-                Text("Turn on auto-download to get a channel's new uploads on this phone as soon as the Mac finds them.",
-                     fontSize = 13.sp, color = Stow.colors.secondaryText, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-            }
             items(channels, key = { it.id }) { channel ->
                 Row(Modifier.fillMaxWidth().clickable { onOpen(channel.id) }.padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically) {
@@ -293,17 +289,16 @@ fun ChannelsScreen(channels: List<Channel>, onOpen: (String) -> Unit, onAutoDown
                         Text(listOfNotNull(channel.handle, Format.count(channel.recent.size, "recent video")).joinToString(" · "),
                              fontSize = 12.sp, color = Stow.colors.secondaryText, maxLines = 1)
                     }
-                    androidx.compose.material3.Switch(checked = channel.autoDownload, onCheckedChange = { onAutoDownload(channel.id, it) })
                 }
             }
         }
     }
 }
 
-/** A channel's page: its header with the auto-download button, then its recent videos. */
+/** A channel's page: its header, then its recent videos. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun ChannelScreen(channel: Channel?, videos: List<VideoItem>, actions: VideoActions, onAutoDownload: (Boolean) -> Unit, onBack: () -> Unit) {
+fun ChannelScreen(channel: Channel?, videos: List<VideoItem>, actions: VideoActions, onBack: () -> Unit) {
     var oldestFirst by rememberSaveable { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
         BackTopBar(channel?.title ?: videos.firstOrNull()?.video?.channelTitle.orEmpty(), onBack)
@@ -332,19 +327,6 @@ fun ChannelScreen(channel: Channel?, videos: List<VideoItem>, actions: VideoActi
                         Text(listOfNotNull(channel.handle, Format.count(channel.recent.size, "recent video")).joinToString(" · "),
                              fontSize = 13.sp, color = Stow.colors.secondaryText)
                     }
-                }
-                Column(Modifier.padding(horizontal = 16.dp)) {
-                    if (channel.autoDownload) {
-                        PillButton("Auto-downloading", Icons.Filled.Check,
-                                   onClick = { onAutoDownload(false) })
-                    } else {
-                        PillButton("Auto-download new uploads", Icons.Outlined.Download,
-                                   onClick = { onAutoDownload(true) }, filled = true)
-                    }
-                    Spacer(Modifier.height(6.dp))
-                    Text(if (channel.autoDownload) "New uploads download to this phone automatically. Tap to stop."
-                         else "Or tap any video below to download just that one.",
-                         fontSize = 12.sp, color = Stow.colors.secondaryText)
                 }
                 ChipRow {
                     Chip("Latest", !oldestFirst, onClick = { oldestFirst = false })

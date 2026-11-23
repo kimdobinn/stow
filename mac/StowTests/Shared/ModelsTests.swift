@@ -10,7 +10,7 @@ struct ModelsTests {
         #expect(settings.launchAtLogin)
         let channel = try #require(settings.channels.first)
         #expect(channel.title == channel.id)
-        #expect(channel.morning && channel.phone)
+        #expect(channel.morning)
     }
 
     @Test func emptyStateDecodes() throws {

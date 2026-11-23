@@ -40,7 +40,7 @@ struct StoreTests {
         let json = #"{"alarm": {"time": "07:00", "snooze": 5}, "phoneSync": {"on": true}, "channels": [{"id": "UCeUP5Kb-EDDplwAi0H02XlA", "note": "keep"}, {"id": "UCgone"}]}"#
         try Data(json.utf8).write(to: store.settingsFile)
         var settings = try store.loadSettings()
-        settings.channels[0].phone = false
+        settings.channels[0].morning = false
         settings.channels.removeLast()
         settings.alarm.volume = 40
         try store.save(settings)
@@ -54,7 +54,7 @@ struct StoreTests {
         let channels = saved?["channels"] as? [[String: Any]]
         #expect(channels?.count == 1)
         #expect(channels?.first?["note"] as? String == "keep")
-        #expect(channels?.first?["phone"] as? Bool == false)
+        #expect(channels?.first?["morning"] as? Bool == false)
         #expect(try store.loadSettings() == settings)
     }
 

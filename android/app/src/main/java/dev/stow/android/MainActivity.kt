@@ -226,11 +226,6 @@ class MainActivity : ComponentActivity() {
             openChannel = { id -> nav.navigate("channel/$id") },
             notify = ::notify,
         )
-        fun setAutoDownload(channelId: String, on: Boolean) {
-            repository.setAutoDownload(channelId, on)
-            val name = channels.firstOrNull { it.id == channelId }?.title ?: "this channel"
-            notify(if (on) "New uploads from $name will download automatically" else "Auto-download off for $name")
-        }
 
         val tabs = listOf(
             Tab("home", "Home", Icons.Filled.Home, Icons.Outlined.Home),
@@ -276,8 +271,7 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                     composable("channels") {
-                        ChannelsScreen(channels, onOpen = { nav.navigate("channel/$it") },
-                                       onAutoDownload = ::setAutoDownload, onBack = { nav.popBackStack() })
+                        ChannelsScreen(channels, onOpen = { nav.navigate("channel/$it") }, onBack = { nav.popBackStack() })
                     }
                     composable("channel/{id}") { entry ->
                         val id = entry.arguments?.getString("id")
@@ -285,8 +279,7 @@ class MainActivity : ComponentActivity() {
                         val videos = channel?.recent?.mapNotNull { itemsById[it.video.id] }
                             ?: (youtubeFeeds.recommended + youtubeFeeds.subscriptions).filter { it.channelId == id }
                                 .distinctBy { it.id }.mapNotNull { itemsById[it.id] }
-                        ChannelScreen(channel, videos, actions, onAutoDownload = { on -> id?.let { setAutoDownload(it, on) } },
-                                      onBack = { nav.popBackStack() })
+                        ChannelScreen(channel, videos, actions, onBack = { nav.popBackStack() })
                     }
                     composable("playlist/{id}") { entry ->
                         val playlist = playlists.firstOrNull { it.id == entry.arguments?.getString("id") }
@@ -321,8 +314,7 @@ class MainActivity : ComponentActivity() {
                     composable("report") {
                         val week = remember(statsVersion) { repository.stats.week() }
                         val lastWeek = remember(statsVersion) { repository.stats.week(java.time.LocalDate.now().minusDays(7)) }
-                        ReportScreen(week, lastWeek, channels, dev.stow.android.ui.skippedChannels(channels, itemsById.values),
-                                     onAutoDownloadOff = { setAutoDownload(it, false) }, onBack = { nav.popBackStack() })
+                        ReportScreen(week, lastWeek, channels, onBack = { nav.popBackStack() })
                     }
                 }
             }
@@ -346,7 +338,6 @@ class MainActivity : ComponentActivity() {
                     openChannel = { id -> sheet.collapse(); nav.navigate("channel/$id") },
                 ),
                 sheet = sheet, bottomInset = bottomBarHeight,
-                onAutoDownload = ::setAutoDownload,
             )
         }
         }

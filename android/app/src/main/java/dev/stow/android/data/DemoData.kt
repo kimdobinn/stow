@@ -17,8 +17,8 @@ object DemoData {
     )
 
     val channels = listOf(
-        Channel("UC4QobU6STFB0P71PMvOGN5A", "jawed", "@jawed", null, true, 0, jawed.map { RecentVideo(it, false) }),
-        Channel("UCuAXFkgsw1L7xaCfnd5JJOw", "Rick Astley", "@RickAstleyYT", null, false, 1,
+        Channel("UC4QobU6STFB0P71PMvOGN5A", "jawed", "@jawed", null, 0, jawed.map { RecentVideo(it, false) }),
+        Channel("UCuAXFkgsw1L7xaCfnd5JJOw", "Rick Astley", "@RickAstleyYT", null, 1,
                 rick.mapIndexed { i, v -> RecentVideo(v, i == 1) }),
     )
 

@@ -11,8 +11,6 @@ protocol PhoneSyncHost: AnyObject {
     var phoneChannels: [Channel] { get }
     /// A channel's recent videos (Inbox ones too), newest first.
     func phoneRecentVideos(channelId: String) -> [Video]
-    /// The phone switched a channel's auto-download on or off.
-    func applyPhoneChannelSetting(phone: Bool, channelId: String)
     /// A video from the Inbox or Recent.
     func phoneVideo(id: String) -> Video?
     func isWatched(videoId: String) -> Bool
@@ -229,17 +227,6 @@ final class PhoneSync {
         enqueue([videoId], reason: .manual)
     }
 
-    /// New Inbox videos: those of channels with "phone" on go to the phone.
-    func newVideosFound(_ videos: [Video]) {
-        guard let host, isPaired else { return }
-        let channels = Set(host.phoneChannels.filter(\.phone).map(\.id))
-        let ids = videos
-            .filter { channels.contains($0.channelId) && $0.liveStatus != .live && $0.liveStatus != .upcoming }
-            .map(\.id)
-            .filter { host.phoneState.sent[$0] == nil }
-        enqueue(ids, reason: .auto)
-    }
-
     func isSent(videoId: String) -> Bool {
         host?.phoneState.sent[videoId] != nil || host?.phoneState.pending.contains { $0.id == videoId } == true
     }
@@ -295,8 +282,6 @@ final class PhoneSync {
             host.updatePhoneState { $0.members = members }
             connection = .connected
             if !members.isEmpty {
-                // The phone's switches first, so writing the channels doesn't undo them.
-                try await pullChannelChanges(backend, host)
                 try await syncChannels(backend, host)
                 try await syncCookies(backend, host)
                 try await syncAccountFeeds(backend, host)
@@ -313,17 +298,6 @@ final class PhoneSync {
             if lastError != message { host.logPhone(.warning, "Phone sync failed: \(message)") }
             lastError = message
         }
-    }
-
-    private func pullChannelChanges(_ backend: any PhoneBackend, _ host: any PhoneSyncHost) async throws {
-        let changes = try await backend.channelChanges(after: host.phoneState.channelCursor)
-        guard let last = changes.last else { return }
-        for change in changes where change.updatedBy == "phone" {
-            guard let phone = change.phone, let channel = host.phoneChannels.first(where: { $0.id == change.id }),
-                  channel.phone != phone else { continue }
-            host.applyPhoneChannelSetting(phone: phone, channelId: change.id)
-        }
-        host.updatePhoneState { $0.channelCursor = last.updatedAt }
     }
 
     private func syncChannels(_ backend: any PhoneBackend, _ host: any PhoneSyncHost) async throws {

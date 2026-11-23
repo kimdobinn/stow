@@ -174,7 +174,6 @@ fun PlayerScreen(
     sheet: PlayerSheetState,
     /** The height of the tabs (and the navigation bar) under the mini player. */
     bottomInset: Dp,
-    onAutoDownload: (String, Boolean) -> Unit,
 ) {
     val context = LocalContext.current
     val activity = context as? Activity
@@ -314,14 +313,6 @@ fun PlayerScreen(
                     Text(current.video.channelTitle, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Stow.colors.text, maxLines = 1)
                     channel?.let {
                         Text(Format.count(it.recent.size, "recent video"), fontSize = 12.sp, color = Stow.colors.secondaryText)
-                    }
-                }
-                // Where YouTube puts Subscribe.
-                if (channel != null) {
-                    if (channel.autoDownload) {
-                        PillButton("Auto-downloading", Icons.Filled.Check, onClick = { onAutoDownload(channel.id, false) })
-                    } else {
-                        PillButton("Auto-download", null, onClick = { onAutoDownload(channel.id, true) }, filled = true)
                     }
                 }
             }

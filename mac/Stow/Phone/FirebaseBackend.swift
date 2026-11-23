@@ -55,7 +55,6 @@ struct FirebaseBackend: PhoneBackend {
                 "title": .string(channel.title),
                 "handle": .optional(channel.handle),
                 "avatarURL": .optional(channel.avatarURL?.absoluteString),
-                "phone": .bool(channel.phone),
                 "morning": .bool(channel.morning),
                 "order": .int(order),
                 "recent": .array(feed.recent.map { video in

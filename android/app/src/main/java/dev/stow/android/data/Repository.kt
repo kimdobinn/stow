@@ -241,13 +241,6 @@ class Repository(private val context: Context) {
         scope.launch { runCatching { remote.setWatched(id, watched) }.onFailure { Log.w(TAG, "setWatched failed", it) } }
     }
 
-    fun setAutoDownload(channelId: String, on: Boolean) {
-        // Show it right away; the listener confirms it.
-        _channels.value = _channels.value.map { if (it.id == channelId) it.copy(autoDownload = on) else it }
-        if (demo) return
-        scope.launch { runCatching { remote.setAutoDownload(channelId, on) }.onFailure { Log.w(TAG, "setAutoDownload failed", it) } }
-    }
-
     fun savePosition(id: String, positionMs: Long, durationMs: Long) {
         local.update(id) { it?.copy(positionMs = positionMs, durationMs = if (durationMs > 0) durationMs else it.durationMs) }
     }

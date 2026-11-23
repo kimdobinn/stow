@@ -13,7 +13,7 @@ struct ChannelsTab: View {
         VStack(alignment: .leading, spacing: 16) {
             addBar
             channelList
-            Text("**Morning:** the alarm can play this channel's new videos.  **Auto-download:** each new upload goes to the phone by itself; with it off, only the videos you send (Send to Phone) or pick on the phone are downloaded.")
+            Text("**Morning:** the alarm can play this channel's new videos. Nothing downloads to the phone by itself: send a video (Send to Phone) or download it on the phone.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
             subscriptionsBar
@@ -60,16 +60,6 @@ struct ChannelsTab: View {
                 .help("Include in the morning alarm")
             }
             .width(90)
-            .alignment(.center)
-            TableColumn("Auto-download") { channel in
-                ColumnToggle(isOn: Binding(
-                    get: { channel.phone },
-                    set: { model.setPhone($0, channelId: channel.id) }
-                ))
-                .help(channel.phone ? "New uploads download to the phone automatically"
-                      : "Only videos you send download to the phone")
-            }
-            .width(120)
             .alignment(.center)
         }
         .alternatingRowBackgrounds(.disabled)

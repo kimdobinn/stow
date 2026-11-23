@@ -153,7 +153,7 @@ private struct SentList: View {
         let sent = model.phoneState.sent.sorted { $0.value.sentAt > $1.value.sentAt }.map(\.key)
         let ids = Array((pending + sent.filter { !pending.contains($0) }).prefix(20))
         if ids.isEmpty {
-            Text("Nothing sent yet. New videos of channels with Phone on go automatically; right-click any video in the Inbox to send it.")
+            Text("Nothing sent yet. Right-click any video in the Inbox and choose Send to Phone, or press the download button on the phone.")
                 .foregroundStyle(.secondary)
         }
         ForEach(ids, id: \.self) { id in

@@ -29,24 +29,11 @@ import dev.stow.android.data.WatchStats
 import java.time.format.TextStyle
 import java.util.Locale
 
-/** A channel that keeps sending videos you don't watch. */
-data class SkippedChannel(val channel: Channel, val sent: Int, val watched: Int)
-
-/** Channels with auto-download on whose recent sent videos you mostly didn't watch. */
-fun skippedChannels(channels: List<Channel>, items: Collection<VideoItem>): List<SkippedChannel> {
-    val monthAgo = System.currentTimeMillis() - 30L * 86_400_000
-    return channels.filter { it.autoDownload }.mapNotNull { channel ->
-        val recent = items.filter { it.video.channelId == channel.id && (it.sent?.sentAt?.time ?: 0) > monthAgo }
-        val watched = recent.count { it.watched }
-        SkippedChannel(channel, recent.size, watched).takeIf { recent.size >= 3 && watched * 10 < recent.size * 3 }
-    }
-}
-
-/** This week's watching: total, per day, per channel, and channels worth dropping. */
+/** This week's watching: total, per day and per channel. */
 @Composable
 fun ReportScreen(
     thisWeek: List<WatchStats.Day>, lastWeek: List<WatchStats.Day>, channels: List<Channel>,
-    skipped: List<SkippedChannel>, onAutoDownloadOff: (String) -> Unit, onBack: () -> Unit,
+    onBack: () -> Unit,
 ) {
     val total = thisWeek.sumOf { it.seconds }
     val previous = lastWeek.sumOf { it.seconds }
@@ -99,20 +86,6 @@ fun ReportScreen(
                     }
                     Box(Modifier.padding(start = 38.dp, top = 6.dp).fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(Stow.colors.chip)) {
                         Box(Modifier.fillMaxWidth((seconds.toFloat() / channelMax).coerceIn(0.02f, 1f)).height(4.dp).background(ProgressRed))
-                    }
-                }
-            }
-            if (skipped.isNotEmpty()) {
-                item { SectionHeader("Worth a look") }
-                items(skipped, key = { "s-" + it.channel.id }) { s ->
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        ChannelAvatar(s.channel.avatarUrl, 36.dp, name = s.channel.title)
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(s.channel.title, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Stow.colors.text)
-                            Text("You watched ${s.watched} of its last ${s.sent} videos", fontSize = 12.sp, color = Stow.colors.secondaryText)
-                        }
-                        PillButton("Stop auto-download", null, onClick = { onAutoDownloadOff(s.channel.id) })
                     }
                 }
             }

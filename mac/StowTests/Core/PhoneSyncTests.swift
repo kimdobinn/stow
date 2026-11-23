@@ -177,24 +177,18 @@ struct PhoneSyncTests {
         #expect(backend.channels.withLock { $0.isEmpty })
     }
 
-    @Test func newVideosOfPhoneChannelsAreSentAndThePhoneWoken() async throws {
+    @Test func newVideosStayOffThePhoneUntilSent() async throws {
         let model = try await makeModel()
-        // The new channel's first videos were found while a phone was paired, so they went too.
-        #expect(Set(backend.videos.withLock { $0.keys }) == ["v1", "v2"])
-        #expect(backend.pushes.withLock { $0.map(\.token) } == ["token1"])
-        #expect(backend.pushes.withLock { $0.first?.data["ids"] }.map { Set($0.split(separator: ",").map(String.init)) } == ["v1", "v2"])
-
         youtube.publicFeeds.withLock { $0[channelId] = [video("v0", channel: channelId, minutesAgo: 0)] + $0[channelId]! }
         await model.check(.manual)
         await model.phone.sync()
-        #expect(backend.videos.withLock { $0["v0"]?["sentBy"] } == "auto")
-        #expect(model.phone.isSent(videoId: "v0"))
+        #expect(backend.videos.withLock { $0.isEmpty })
+        #expect(!model.phone.isSent(videoId: "v0"))
 
-        model.setPhone(false, channelId: channelId)
-        youtube.publicFeeds.withLock { $0[channelId] = [video("v9", channel: channelId, minutesAgo: -1)] + $0[channelId]! }
-        await model.check(.manual)
+        model.phone.send(videoId: "v0")
         await model.phone.sync()
-        #expect(backend.videos.withLock { $0["v9"] } == nil)
+        #expect(backend.videos.withLock { $0["v0"]?["sentBy"] } == "manual")
+        #expect(backend.pushes.withLock { $0.map(\.token) } == ["token1"])
     }
 
     @Test func sendToPhoneSendsAnyVideo() async throws {
@@ -227,6 +221,9 @@ struct PhoneSyncTests {
 
     @Test func watchedSyncsBothWays() async throws {
         let model = try await makeModel()
+        model.phone.send(videoId: "v1")
+        model.phone.send(videoId: "v2")
+        await model.phone.sync()
         // Watched on the phone.
         backend.changes.withLock { $0 = [PhoneVideoChange(id: "v1", watched: true, download: PhoneDownload(state: .downloaded),
                                                           updatedBy: "phone", updatedAt: "2026-11-20T05:00:00.000001Z")] }
@@ -273,23 +270,6 @@ struct PhoneSyncTests {
         model.setWatched(true, videoId: "v4")
         await model.phone.sync()
         #expect(backend.feeds.withLock { $0[channelId]?.watched } == ["v4"])
-    }
-
-    @Test func phoneSwitchesAutoDownload() async throws {
-        let model = try await makeModel()
-        #expect(model.channels.first?.phone == true)
-        backend.channelChangeList.withLock {
-            $0 = [PhoneChannelChange(id: channelId, phone: false, updatedBy: "phone", updatedAt: "2026-11-20T06:00:00.000001Z")]
-        }
-        await model.phone.sync()
-        #expect(model.channels.first?.phone == false)
-        #expect(backend.channels.withLock { $0[channelId]?.phone } == false)
-        // A change the Mac wrote itself is not applied again.
-        backend.channelChangeList.withLock {
-            $0 = [PhoneChannelChange(id: channelId, phone: true, updatedBy: "mac", updatedAt: "2026-11-20T06:00:01.000001Z")]
-        }
-        await model.phone.sync()
-        #expect(model.channels.first?.phone == false)
     }
 
     @Test func failuresAreReportedThenClear() async throws {

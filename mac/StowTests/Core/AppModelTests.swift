@@ -26,7 +26,7 @@ struct AppModelTests {
         setUpChannel()
         let model = makeModel()
         let channel = try await model.addChannel(input: "  @JackhopkinsCEO\n")
-        #expect(channel.morning && channel.phone)
+        #expect(channel.morning)
         #expect(model.inbox.map(\.id) == ["v1", "v2"])
         #expect(model.inbox.first?.video.channelTitle == "Jack Hopkins")
         #expect(notifier.newVideoBatches.isEmpty)
