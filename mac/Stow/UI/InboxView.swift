@@ -202,6 +202,7 @@ private struct ChannelShelf: View {
         .frame(width: Self.headerWidth)
         .help("Drag to reorder")
         .contentShape(Rectangle())
+        .noDragScroll()
         .draggable(channel.id) {
             HStack(spacing: 8) {
                 ChannelAvatar(url: channel.avatarURL, size: 24)

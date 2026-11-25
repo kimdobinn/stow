@@ -43,6 +43,7 @@ struct ChannelsTab: View {
                     .font(.caption)
                     .foregroundStyle(.red)
                     .textSelection(.enabled)
+                    .noDragScroll()
             }
         }
     }

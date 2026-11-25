@@ -18,6 +18,7 @@ struct LastAlarmSection: View {
                         Text(error)
                             .foregroundStyle(.red)
                             .textSelection(.enabled)
+                            .noDragScroll()
                     }
                     if let rule = run.fallbackRule {
                         Text("Picked by fallback rule: \(AlarmText.kindTitle(rule.kind).lowercased())")

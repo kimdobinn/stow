@@ -44,11 +44,12 @@ struct MiddleDragScrollerTests {
         return (window, page, shelf)
     }
 
-    /// A middle-button event at window point (x, y) (y up from the bottom).
+    /// A mouse event at window point (x, y) (y up from the bottom); middle button unless it's a left one.
     private func mouse(_ type: CGEventType, x: CGFloat, y: CGFloat, time: TimeInterval) -> NSEvent {
         let screenHeight = NSScreen.screens.first?.frame.height ?? 0
+        let left = [CGEventType.leftMouseDown, .leftMouseDragged, .leftMouseUp].contains(type)
         let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: CGPoint(x: x, y: screenHeight - y),
-                            mouseButton: .center)!
+                            mouseButton: left ? .left : .center)!
         event.timestamp = CGEventTimestamp(time * 1_000_000_000)
         return NSEvent(cgEvent: event)!
     }
@@ -92,6 +93,33 @@ struct MiddleDragScrollerTests {
         #expect(scroller.isFlinging)
         for _ in 0..<200 where scroller.isFlinging { scroller.advanceFling(by: 1.0 / 60) }
         #expect(shelf.contentView.bounds.origin.x > released + 100)
+    }
+
+    @Test func leftDragScrollsButAClickStaysAClick() {
+        let (window, page, shelf) = makeWindow()
+        let scroller = MiddleDragScroller()
+        // A click (moving less than the threshold) goes through untouched.
+        #expect(scroller.handle(mouse(.leftMouseDown, x: 300, y: 250, time: 1), in: window) != nil)
+        #expect(scroller.handle(mouse(.leftMouseDragged, x: 303, y: 250, time: 1.1), in: window) != nil)
+        let click = scroller.handle(mouse(.leftMouseUp, x: 303, y: 250, time: 1.2), in: window)
+        #expect(click?.locationInWindow.x == 303)
+        #expect(shelf.contentView.bounds.origin.x == 0)
+
+        // Dragging sideways over the shelf scrolls it; letting go is no longer a click there.
+        #expect(scroller.handle(mouse(.leftMouseDown, x: 300, y: 250, time: 2), in: window) != nil)
+        #expect(scroller.handle(mouse(.leftMouseDragged, x: 250, y: 250, time: 2.5), in: window) == nil)
+        #expect(scroller.handle(mouse(.leftMouseDragged, x: 200, y: 250, time: 3), in: window) == nil)
+        let release = scroller.handle(mouse(.leftMouseUp, x: 200, y: 250, time: 4), in: window)
+        #expect(shelf.contentView.bounds.origin.x == 100)
+        #expect(release.map { window.contentView!.bounds.contains($0.locationInWindow) } == false)
+
+        // Dragging up over the shelf scrolls the page instead.
+        _ = scroller.handle(mouse(.leftMouseDown, x: 300, y: 210, time: 5), in: window)
+        _ = scroller.handle(mouse(.leftMouseDragged, x: 300, y: 250, time: 5.5), in: window)
+        _ = scroller.handle(mouse(.leftMouseDragged, x: 300, y: 290, time: 6), in: window)
+        _ = scroller.handle(mouse(.leftMouseUp, x: 300, y: 290, time: 7), in: window)
+        #expect(page.contentView.bounds.origin.y == 80)
+        #expect(shelf.contentView.bounds.origin.x == 100)
     }
 
     @Test func aMiddleClickWithoutMovingDoesNothing() {
