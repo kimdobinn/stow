@@ -12,6 +12,8 @@ private struct PreviewYouTube: YouTubeService {
     func fetchAccountFeeds(cookiesFile: URL, limit: Int) async throws -> AccountFeeds {
         AccountFeeds(recommended: [], subscriptions: [])
     }
+
+    func memberAccess(videoId: String, cookiesFile: URL) async throws -> MemberAccess { .watchable }
 }
 
 @MainActor

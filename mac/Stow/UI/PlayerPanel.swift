@@ -168,12 +168,7 @@ struct PlayerPanel: View {
                 }
                 Text(video.channelTitle).font(.headline)
                 if video.isMembersOnly {
-                    Label("Members only", systemImage: "star.fill")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 2)
-                        .background(Color.green, in: Capsule())
+                    MembersBadge(access: model.memberAccess(videoId: video.id))
                 }
             }
             HStack(spacing: 8) {
@@ -181,7 +176,7 @@ struct PlayerPanel: View {
                        systemImage: isWatched ? "eye.slash" : "checkmark.circle") {
                     model.setWatched(!isWatched, videoId: video.id)
                 }
-                PhoneButton(videoId: video.id)
+                PhoneButton(videoId: video.id, isMembersOnly: video.isMembersOnly)
                 Button("Open on YouTube", systemImage: "safari") {
                     dock.stop()
                     openURL(video.watchURL)
@@ -200,9 +195,11 @@ struct PlayerPanel: View {
 private struct PhoneButton: View {
     @Environment(AppModel.self) private var model
     let videoId: String
+    let isMembersOnly: Bool
 
     var body: some View {
         let phone = model.phone
+        let allowed = model.canSendToPhone(videoId: videoId, isMembersOnly: isMembersOnly)
         if let download = phone.download(videoId: videoId), download.state != .deleted, download.state != .failed {
             Label(status(download.state), systemImage: download.state == .downloaded ? "iphone" : "arrow.down.circle")
                 .font(.callout)
@@ -217,8 +214,11 @@ private struct PhoneButton: View {
             Button(phone.download(videoId: videoId) == nil ? "Send to Phone" : "Send to Phone Again", systemImage: "iphone.and.arrow.forward") {
                 phone.send(videoId: videoId)
             }
-            .disabled(!phone.isPaired)
-            .help(phone.isPaired ? "Download this video on the phone" : "Pair a phone under Phone first")
+            .disabled(!phone.isPaired || !allowed)
+            .help(!phone.isPaired ? "Pair a phone under Phone first"
+                  : !allowed ? (model.isLocked(videoId: videoId) ? "Your membership level can't watch this video"
+                                : "Checking whether your membership level can watch this video")
+                  : "Download this video on the phone")
         }
     }
 

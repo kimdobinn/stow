@@ -33,6 +33,9 @@ protocol YouTubeService: Sendable {
     /// :ytrec / :ytsubs), long-form videos only, at most `limit` each. Throws like
     /// `fetchMembersVideos`.
     func fetchAccountFeeds(cookiesFile: URL, limit: Int) async throws -> AccountFeeds
+    /// Whether the signed-in account's membership level can watch the members-only video.
+    /// Throws when the lookup fails without saying.
+    func memberAccess(videoId: String, cookiesFile: URL) async throws -> MemberAccess
 }
 
 /// What YouTube itself would show the account: its Home recommendations and Subscriptions feed.

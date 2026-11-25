@@ -294,7 +294,7 @@ private struct VideoCard: View {
             Button(model.phone.isSent(videoId: video.id) ? "Send to Phone Again" : "Send to Phone") {
                 model.phone.send(videoId: video.id)
             }
-            .disabled(!model.phone.isPaired)
+            .disabled(!model.phone.isPaired || !model.canSendToPhone(videoId: video.id, isMembersOnly: video.isMembersOnly))
             if let onDismiss {
                 Button("Move to Recent", action: onDismiss)
             }
@@ -322,7 +322,7 @@ private struct VideoCard: View {
             .clipShape(RoundedRectangle(cornerRadius: 10))
             .overlay(alignment: .bottomLeading) {
                 if video.isMembersOnly {
-                    MembersBadge().padding(8).padding(.bottom, isWatched ? 4 : 0)
+                    MembersBadge(access: model.memberAccess(videoId: video.id)).padding(8).padding(.bottom, isWatched ? 4 : 0)
                 }
             }
             .overlay(alignment: .bottomTrailing) {
@@ -442,14 +442,27 @@ private struct WatchedBadge: View {
     }
 }
 
-private struct MembersBadge: View {
+/// Members only, or locked when it's for a higher membership level than the account's.
+struct MembersBadge: View {
+    var access: MemberAccess?
+
     var body: some View {
-        Label("Members only", systemImage: "star.fill")
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(Color.green, in: Capsule())
+        if case .locked(let level) = access {
+            Label("Higher tier", systemImage: "lock.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Color.gray, in: Capsule())
+                .help("Needs \(level.map { "the “\($0)” membership level" } ?? "a higher membership level"). It isn't sent to the phone or played by the alarm.")
+        } else {
+            Label("Members only", systemImage: "star.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Color.green, in: Capsule())
+        }
     }
 }
 

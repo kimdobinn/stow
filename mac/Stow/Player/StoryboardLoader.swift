@@ -67,14 +67,11 @@ final class StoryboardLoader {
         if let saved = StreamCache.cached(videoId), let storyboard = Storyboard.parse(json: saved) {
             return storyboard
         }
-        // Members-only videos need the sign-in to be listed at all.
-        let cookies = cookiesFile.flatMap { try? CookieCopy.make(of: $0) }
-        defer { if let cookies { try? FileManager.default.removeItem(at: cookies) } }
-        // The same lookup mpv makes, so it's kept for the next time this video plays.
-        let arguments = StreamCache.arguments(videoId: videoId, format: MPVPlayer.format, cookies: cookies)
-        guard let output = try? await YTDLP().run(arguments, timeout: .seconds(60)) else { return nil }
-        StreamCache.store(json: output.stdout, videoId: videoId)
-        return Storyboard.parse(json: output.stdout)
+        // The same lookup mpv makes (members-only videos need the sign-in), kept for the next time
+        // this video plays.
+        guard let json = await StreamCache.lookUp(videoId: videoId, cookiesFile: cookiesFile) else { return nil }
+        StreamCache.store(json: json, videoId: videoId)
+        return Storyboard.parse(json: json)
     }
 
     private nonisolated static func download(_ url: URL) async -> CGImage? {

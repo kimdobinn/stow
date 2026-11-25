@@ -34,4 +34,8 @@ struct YouTubeClient: YouTubeService {
     func fetchAccountFeeds(cookiesFile: URL, limit: Int) async throws -> AccountFeeds {
         try await AccountFeedClient(ytdlp: ytdlp).fetch(cookiesFile: cookiesFile, limit: limit)
     }
+
+    func memberAccess(videoId: String, cookiesFile: URL) async throws -> MemberAccess {
+        try await MemberAccessClient(ytdlp: ytdlp).access(videoId: videoId, cookiesFile: cookiesFile)
+    }
 }

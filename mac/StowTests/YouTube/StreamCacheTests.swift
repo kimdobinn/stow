@@ -77,4 +77,26 @@ struct StreamCacheTests {
         #expect(try run("https://www.youtube.com/watch?v=zzzzzzzzzzz")
                 == "ran: --ignore-config --no-warnings -J -- https://www.youtube.com/watch?v=zzzzzzzzzzz\n")
     }
+
+    /// A signed-in lookup that fails is tried once more without the sign-in.
+    @Test func wrapperRetriesWithoutTheSignIn() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let fake = directory.appending(path: "fake-yt-dlp")
+        // Fails whenever it's given cookies.
+        try "#!/bin/sh\ncase \"$*\" in *--cookies*) exit 1 ;; esac\necho \"ran: $*\"\n".write(to: fake, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: fake.path)
+        let wrapper = try StreamCache.wrapper(realYtDlp: fake, directory: directory)
+        let process = Process()
+        process.executableURL = wrapper
+        process.arguments = ["-J", "--cookies", "/tmp/c.txt", "--format", "b", "--", "https://www.youtube.com/watch?v=zzzzzzzzzzz"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        try process.run()
+        process.waitUntilExit()
+        #expect(process.terminationStatus == 0)
+        #expect(String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                == "ran: --ignore-config -J --format b -- https://www.youtube.com/watch?v=zzzzzzzzzzz\n")
+    }
 }

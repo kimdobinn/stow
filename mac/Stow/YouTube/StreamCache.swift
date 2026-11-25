@@ -54,6 +54,20 @@ enum StreamCache {
         }
     }
 
+    /// yt-dlp's answer for `videoId`, as mpv would get it. A signed-in lookup that fails is tried
+    /// again without the sign-in (enough for any video that isn't members-only), like the wrapper.
+    static func lookUp(videoId: String, cookiesFile: URL?) async -> Data? {
+        if let cookiesFile {
+            let cookies = try? CookieCopy.make(of: cookiesFile)
+            defer { if let cookies { try? FileManager.default.removeItem(at: cookies) } }
+            if let cookies, let output = try? await YTDLP().run(arguments(videoId: videoId, format: MPVPlayer.format, cookies: cookies),
+                                                                 timeout: .seconds(60)) {
+                return output.stdout
+            }
+        }
+        return try? await YTDLP().run(arguments(videoId: videoId, format: MPVPlayer.format, cookies: nil), timeout: .seconds(60)).stdout
+    }
+
     /// Deletes answers too old to use.
     static func removeStale(in directory: URL = directory, now: Date = .now) {
         let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
@@ -96,6 +110,18 @@ enum StreamCache {
           age=$(( $(date +%s) - $(stat -f %m "$cache") ))
           if [ "$age" -lt \(lifetime) ] && cat "$cache"; then exit 0; fi
         fi
+        \(quoted(realYtDlp)) --ignore-config "$@" && exit 0
+        status=$?
+        # A signed-in lookup can fail where a signed-out one works (YouTube's signed-in pages change
+        # before yt-dlp catches up): try once more without the sign-in, enough for public videos.
+        case "$*" in *--cookies*) ;; *) exit $status ;; esac
+        skip=""; first=1
+        for arg in "$@"; do
+          if [ "$first" = 1 ]; then set --; first=0; fi
+          if [ -n "$skip" ]; then skip=""; continue; fi
+          case "$arg" in --cookies) skip=1; continue ;; --cookies=*) continue ;; esac
+          set -- "$@" "$arg"
+        done
         exec \(quoted(realYtDlp)) --ignore-config "$@"
 
         """
@@ -141,10 +167,7 @@ final class StreamPrefetcher {
     }
 
     private nonisolated static func lookUp(videoId: String, cookiesFile: URL?) async {
-        let cookies = cookiesFile.flatMap { try? CookieCopy.make(of: $0) }
-        defer { if let cookies { try? FileManager.default.removeItem(at: cookies) } }
-        let arguments = StreamCache.arguments(videoId: videoId, format: MPVPlayer.format, cookies: cookies)
-        guard let output = try? await YTDLP().run(arguments, timeout: .seconds(60)) else { return }
-        StreamCache.store(json: output.stdout, videoId: videoId)
+        guard let json = await StreamCache.lookUp(videoId: videoId, cookiesFile: cookiesFile) else { return }
+        StreamCache.store(json: json, videoId: videoId)
     }
 }

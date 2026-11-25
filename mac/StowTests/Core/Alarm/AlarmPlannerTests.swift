@@ -39,6 +39,13 @@ struct AlarmPlannerTests {
                 == ["members", "dated"])
     }
 
+    @Test func lockedMembersVideosAreSkipped() {
+        let state = AppState(seenVideoIds: [:], inbox: [item(video("locked", minutesAgo: 30, members: true)),
+                                                        item(video("open", minutesAgo: 20, members: true))],
+                             lastCheck: nil, memberAccess: ["locked": .locked(level: "Gold"), "open": .watchable])
+        #expect(AlarmPlanner.inboxCandidates(settings: .default, channels: [alarmChannel()], state: state).map(\.id) == ["open"])
+    }
+
     @Test func inboxSkipsPlayedLiveAndNonMorningChannels() {
         let state = AppState(
             seenVideoIds: [:],

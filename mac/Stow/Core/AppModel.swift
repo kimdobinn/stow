@@ -78,6 +78,12 @@ final class AppModel {
     @ObservationIgnored private var authGeneration = 0
     /// settings.json's modification date when last read or written, to pick up hand edits.
     @ObservationIgnored private var settingsStamp: Date?
+    /// Members-only videos seen in YouTube's feeds for the phone, to check access like the others.
+    @ObservationIgnored private var feedMembersVideos: [(id: String, label: String)] = []
+    /// The running pass that checks members-only videos' access (tests await it).
+    @ObservationIgnored private(set) var memberAccessChecks: Task<Void, Never>?
+    /// At most this many lookups (a few seconds each) per pass; the rest wait for the next check.
+    static let accessChecksPerPass = 15
 
     convenience init(youtube: any YouTubeService, account: any AccountService, alarmServices: AlarmServices) {
         self.init(youtube: youtube, account: account, store: Store(), notifier: Notifier(),
@@ -196,6 +202,57 @@ final class AppModel {
         if let failure = fetches.first(where: \.membersFailed)?.errors.last {
             notifier.notifyProblem(title: "Members-only check is failing", body: failure)
         }
+        checkMemberAccess()
+    }
+
+    // MARK: Membership levels
+
+    /// What the account's membership level can do with `videoId` (nil until checked, or not members-only).
+    func memberAccess(videoId: String) -> MemberAccess? { state.memberAccess[videoId] }
+
+    /// A members-only video for a higher membership level than the account's.
+    func isLocked(videoId: String) -> Bool { state.memberAccess[videoId]?.isLocked == true }
+
+    /// Checks, in the background, which new members-only videos the account's level can watch.
+    func checkMemberAccess() {
+        guard memberAccessChecks == nil, signInState == .signedIn else { return }
+        var seen = Set<String>()
+        let videos = (state.inbox.map(\.video) + state.recentVideos.values.flatMap { $0 })
+            .filter { $0.isMembersOnly }
+            .map { (id: $0.id, label: "\($0.channelTitle): “\($0.title)”") }
+        let pending = (videos + feedMembersVideos)
+            .filter { state.memberAccess[$0.id] == nil && seen.insert($0.id).inserted }
+        guard !pending.isEmpty else { return }
+        memberAccessChecks = Task { [weak self] in
+            await self?.checkMemberAccess(Array(pending.prefix(Self.accessChecksPerPass)))
+            self?.memberAccessChecks = nil
+        }
+    }
+
+    private func checkMemberAccess(_ videos: [(id: String, label: String)]) async {
+        var changed = false
+        for video in videos {
+            guard signInState == .signedIn else { break }
+            do {
+                let access = try await youtube.memberAccess(videoId: video.id, cookiesFile: cookiesFile)
+                state.memberAccess[video.id] = access
+                changed = true
+                if case .locked(let level) = access {
+                    record(.info, "\(video.label) needs \(level.map { "the “\($0)” membership level" } ?? "a higher membership level"); it stays off the phone and out of the alarm.")
+                }
+            } catch StowError.authExpired {
+                markExpired("YouTube rejected the saved sign-in; members-only videos can't be checked reliably.")
+                break
+            } catch {
+                continue   // Asked again on the next check.
+            }
+        }
+        guard changed else { return }
+        // Forget videos that are gone everywhere.
+        let known = Set(state.inbox.map(\.id) + state.recentVideos.values.flatMap { $0.map(\.id) } + feedMembersVideos.map(\.id))
+        state.memberAccess = state.memberAccess.filter { known.contains($0.key) }
+        saveState()
+        phone.localChange()
     }
 
     /// Notifies once checks have failed `failureNotifyStreak` times in a row (e.g. the RSS feeds
@@ -741,8 +798,15 @@ extension AppModel: PhoneSyncHost {
 
     var phoneChannels: [Channel] { channels }
 
+    /// Members-only videos go only once their access is checked and the account's level can watch them.
     func phoneRecentVideos(channelId: String) -> [Video] {
-        (state.recentVideos[channelId] ?? []).sorted { ($0.publishedAt ?? .distantPast) > ($1.publishedAt ?? .distantPast) }
+        (state.recentVideos[channelId] ?? [])
+            .filter { !$0.isMembersOnly || state.memberAccess[$0.id] == .watchable }
+            .sorted { ($0.publishedAt ?? .distantPast) > ($1.publishedAt ?? .distantPast) }
+    }
+
+    func canSendToPhone(videoId: String, isMembersOnly: Bool) -> Bool {
+        !isMembersOnly || state.memberAccess[videoId] == .watchable
     }
 
     func phoneVideo(id: String) -> Video? {
@@ -762,7 +826,13 @@ extension AppModel: PhoneSyncHost {
     func phoneAccountFeeds() async -> AccountFeeds? {
         guard let cookiesFile = phoneCookiesFile else { return nil }
         do {
-            return try await youtube.fetchAccountFeeds(cookiesFile: cookiesFile, limit: PhoneSync.accountFeedLimit)
+            let feeds = try await youtube.fetchAccountFeeds(cookiesFile: cookiesFile, limit: PhoneSync.accountFeedLimit)
+            var seen = Set<String>()
+            feedMembersVideos = (feeds.recommended + feeds.subscriptions)
+                .filter { $0.isMembersOnly && seen.insert($0.id).inserted }
+                .map { (id: $0.id, label: "\($0.channelTitle): “\($0.title)”") }
+            checkMemberAccess()
+            return feeds
         } catch {
             record(.warning, "Couldn't read YouTube's Home and Subscriptions for the phone: \(error.logDescription)")
             return nil

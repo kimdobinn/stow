@@ -11,6 +11,8 @@ protocol PhoneSyncHost: AnyObject {
     var phoneChannels: [Channel] { get }
     /// A channel's recent videos (Inbox ones too), newest first.
     func phoneRecentVideos(channelId: String) -> [Video]
+    /// False for a members-only video the account's level can't watch, or not checked yet.
+    func canSendToPhone(videoId: String, isMembersOnly: Bool) -> Bool
     /// A video from the Inbox or Recent.
     func phoneVideo(id: String) -> Video?
     func isWatched(videoId: String) -> Bool
@@ -224,6 +226,7 @@ final class PhoneSync {
 
     /// "Send to Phone".
     func send(videoId: String) {
+        guard let host, host.canSendToPhone(videoId: videoId, isMembersOnly: host.phoneVideo(id: videoId)?.isMembersOnly ?? false) else { return }
         enqueue([videoId], reason: .manual)
     }
 
@@ -348,7 +351,11 @@ final class PhoneSync {
                 self.localChange()
             }
         }
-        guard let feeds = accountFeeds else { return }
+        guard let read = accountFeeds else { return }
+        // Only members-only videos the account's level can watch.
+        let feeds = AccountFeeds(
+            recommended: read.recommended.filter { host.canSendToPhone(videoId: $0.id, isMembersOnly: $0.isMembersOnly) },
+            subscriptions: read.subscriptions.filter { host.canSendToPhone(videoId: $0.id, isMembersOnly: $0.isMembersOnly) })
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
         let data = try encoder.encode(feeds)

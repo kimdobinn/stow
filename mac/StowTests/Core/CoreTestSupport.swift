@@ -49,6 +49,15 @@ final class FakeYouTube: YouTubeService {
         return try accountFeeds.withLock { $0 }.get()
     }
 
+    /// Members-only videos the account's level can't watch; anything else is watchable.
+    let lockedVideos = Mutex<[String: String]>([:])
+    let accessChecks = Mutex<[String]>([])
+
+    func memberAccess(videoId: String, cookiesFile: URL) async throws -> MemberAccess {
+        accessChecks.withLock { $0.append(videoId) }
+        return lockedVideos.withLock { $0[videoId] }.map { .locked(level: $0) } ?? .watchable
+    }
+
     func markWatched(videoId: String, cookiesFile: URL) async throws {
         if let error = markWatchedError.withLock({ $0 }) { throw error }
         markedWatched.withLock { $0.append(videoId) }

@@ -45,6 +45,16 @@ struct Channel: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
+/// Whether the saved sign-in can watch a members-only video: channels can have membership levels,
+/// and a video for a higher level is locked even to members.
+enum MemberAccess: Codable, Equatable, Sendable {
+    case watchable
+    /// Needs a higher membership level (YouTube's name for it, when it gives one).
+    case locked(level: String?)
+
+    var isLocked: Bool { if case .locked = self { true } else { false } }
+}
+
 enum LiveStatus: String, Codable, Sendable {
     /// Regular upload.
     case none
@@ -204,6 +214,8 @@ struct AppState: Codable, Equatable, Sendable {
     var youTubeHistory: [String]
     var lastWatchSync: Date?
     var phone: PhoneSyncState
+    /// What the saved sign-in's membership level can do with members-only videos, by video id.
+    var memberAccess: [String: MemberAccess]
     var lastAlarmRun: AlarmRunRecord?
     /// The alarm time of the newest scheduled run (played or skipped), so a test run that
     /// replaces `lastAlarmRun` can't make that alarm fire again after a relaunch.
@@ -214,7 +226,8 @@ struct AppState: Codable, Equatable, Sendable {
     init(seenVideoIds: [String: [String]], checkedFeeds: [String: [FeedKind]] = [:], inbox: [InboxItem],
          recentVideos: [String: [Video]] = [:], lastCheck: CheckResult?, failedCheckStreak: Int = 0,
          alarmPlayedIds: [String] = [], watchedIds: [String] = [], pendingYouTubeWatched: [String] = [],
-         youTubeHistory: [String] = [], lastWatchSync: Date? = nil, phone: PhoneSyncState = .empty, lastAlarmRun: AlarmRunRecord? = nil,
+         youTubeHistory: [String] = [], lastWatchSync: Date? = nil, phone: PhoneSyncState = .empty,
+         memberAccess: [String: MemberAccess] = [:], lastAlarmRun: AlarmRunRecord? = nil,
          lastScheduledAlarm: Date? = nil) {
         self.seenVideoIds = seenVideoIds
         self.checkedFeeds = checkedFeeds
@@ -228,13 +241,14 @@ struct AppState: Codable, Equatable, Sendable {
         self.youTubeHistory = youTubeHistory
         self.lastWatchSync = lastWatchSync
         self.phone = phone
+        self.memberAccess = memberAccess
         self.lastAlarmRun = lastAlarmRun
         self.lastScheduledAlarm = lastScheduledAlarm
     }
 
     private enum CodingKeys: String, CodingKey {
         case seenVideoIds, checkedFeeds, inbox, recentVideos, lastCheck, failedCheckStreak, alarmPlayedIds, watchedIds,
-             pendingYouTubeWatched, youTubeHistory, lastWatchSync, phone, lastAlarmRun, lastScheduledAlarm
+             pendingYouTubeWatched, youTubeHistory, lastWatchSync, phone, memberAccess, lastAlarmRun, lastScheduledAlarm
     }
 
     init(from decoder: Decoder) throws {
@@ -251,6 +265,7 @@ struct AppState: Codable, Equatable, Sendable {
         youTubeHistory = try c.decodeIfPresent([String].self, forKey: .youTubeHistory) ?? []
         lastWatchSync = try c.decodeIfPresent(Date.self, forKey: .lastWatchSync)
         phone = (try? c.decodeIfPresent(PhoneSyncState.self, forKey: .phone)) ?? .empty
+        memberAccess = (try? c.decodeIfPresent([String: MemberAccess].self, forKey: .memberAccess)) ?? [:]
         // Written by a newer build with an outcome this one doesn't know: forget it, keep the rest.
         lastAlarmRun = try? c.decodeIfPresent(AlarmRunRecord.self, forKey: .lastAlarmRun)
         lastScheduledAlarm = (try? c.decodeIfPresent(Date.self, forKey: .lastScheduledAlarm))

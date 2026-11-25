@@ -48,6 +48,7 @@ enum AlarmPlanner {
         let played = Set(state.alarmPlayedIds).union(state.watchedIds)
         let items = state.inbox.enumerated().filter { _, item in
             morning.contains(item.video.channelId) && !played.contains(item.id) && isStreamable(item.video)
+                && state.memberAccess[item.id]?.isLocked != true
         }
         let sorted = items.sorted { lhs, rhs in
             let (a, b) = (lhs.element.video.publishedAt ?? lhs.element.foundAt, rhs.element.video.publishedAt ?? rhs.element.foundAt)
@@ -63,7 +64,7 @@ enum AlarmPlanner {
                            using generator: inout some RandomNumberGenerator) -> [Video] {
         let pool = poolChannels(for: rule, channels: channels)
             .flatMap { state.recentVideos[$0] ?? [] }
-            .filter(isStreamable)
+            .filter { isStreamable($0) && state.memberAccess[$0.id]?.isLocked != true }
         let newestFirst = pool.sorted { ($0.publishedAt ?? .distantPast) > ($1.publishedAt ?? .distantPast) }
         let played = Set(state.alarmPlayedIds).union(state.watchedIds)
         let cutoff = now.addingTimeInterval(-Double(rule.withinDays) * 86_400)

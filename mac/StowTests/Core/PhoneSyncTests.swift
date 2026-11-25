@@ -191,6 +191,31 @@ struct PhoneSyncTests {
         #expect(backend.pushes.withLock { $0.map(\.token) } == ["token1"])
     }
 
+    @Test func membersVideosGoOnlyWhenTheLevelCanWatchThem() async throws {
+        youtube.lockedVideos.withLock { $0 = ["m2": "Gold"] }
+        youtube.membersFeeds.withLock {
+            $0[channelId] = .success(MembersFeed(videos: [video("m1", channel: channelId, minutesAgo: 0, members: true),
+                                                          video("m2", channel: channelId, minutesAgo: 0.5, members: true)]))
+        }
+        let model = try await makeModel()
+        await model.check(.manual)
+        await model.memberAccessChecks?.value
+        #expect(model.memberAccess(videoId: "m1") == .watchable)
+        #expect(model.memberAccess(videoId: "m2") == .locked(level: "Gold"))
+        #expect(Set(youtube.accessChecks.withLock { $0 }) == ["m1", "m2"])
+        await model.phone.sync()
+        let recent = try #require(backend.feeds.withLock { $0[channelId] }).recent.map(\.id)
+        #expect(recent.contains("m1"))
+        #expect(!recent.contains("m2"))
+        // Sending a locked video does nothing; checks aren't repeated.
+        model.phone.send(videoId: "m2")
+        await model.phone.sync()
+        #expect(backend.videos.withLock { $0["m2"] } == nil)
+        await model.check(.manual)
+        await model.memberAccessChecks?.value
+        #expect(youtube.accessChecks.withLock { $0.count } == 2)
+    }
+
     @Test func sendToPhoneSendsAnyVideo() async throws {
         let model = try await makeModel()
         model.phone.send(videoId: "v4")
