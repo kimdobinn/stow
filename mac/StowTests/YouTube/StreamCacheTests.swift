@@ -75,7 +75,7 @@ struct StreamCacheTests {
         }
         #expect(try run("https://www.youtube.com/watch?v=abcdefghijk") == String(decoding: json("abcdefghijk"), as: UTF8.self))
         #expect(try run("https://www.youtube.com/watch?v=zzzzzzzzzzz")
-                == "ran: --ignore-config --no-warnings -J -- https://www.youtube.com/watch?v=zzzzzzzzzzz\n")
+                == "ran: --ignore-config --extractor-args youtube:player_js_variant=tv --no-warnings -J -- https://www.youtube.com/watch?v=zzzzzzzzzzz\n")
     }
 
     /// A signed-in lookup that fails is tried once more without the sign-in.
@@ -97,6 +97,6 @@ struct StreamCacheTests {
         process.waitUntilExit()
         #expect(process.terminationStatus == 0)
         #expect(String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-                == "ran: --ignore-config -J --format b -- https://www.youtube.com/watch?v=zzzzzzzzzzz\n")
+                == "ran: --ignore-config --extractor-args youtube:player_js_variant=tv -J --format b -- https://www.youtube.com/watch?v=zzzzzzzzzzz\n")
     }
 }

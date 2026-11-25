@@ -98,7 +98,8 @@ enum StreamCache {
     }
 
     static func script(realYtDlp: String, directory: String, lifetime: Int) -> String {
-        """
+        let workaround = YTDLP.youTubeWorkaround.map(quoted).joined(separator: " ")
+        return """
         #!/bin/sh
         # Written by Stow. mpv looks YouTube videos up through this: an answer Stow fetched in the
         # last \(lifetime / 60) minutes (yt-dlp -J with these same arguments) is reused, anything else runs yt-dlp.
@@ -110,7 +111,7 @@ enum StreamCache {
           age=$(( $(date +%s) - $(stat -f %m "$cache") ))
           if [ "$age" -lt \(lifetime) ] && cat "$cache"; then exit 0; fi
         fi
-        \(quoted(realYtDlp)) --ignore-config "$@" && exit 0
+        \(quoted(realYtDlp)) --ignore-config \(workaround) "$@" && exit 0
         status=$?
         # A signed-in lookup can fail where a signed-out one works (YouTube's signed-in pages change
         # before yt-dlp catches up): try once more without the sign-in, enough for public videos.
@@ -122,7 +123,7 @@ enum StreamCache {
           case "$arg" in --cookies) skip=1; continue ;; --cookies=*) continue ;; esac
           set -- "$@" "$arg"
         done
-        exec \(quoted(realYtDlp)) --ignore-config "$@"
+        exec \(quoted(realYtDlp)) --ignore-config \(workaround) "$@"
 
         """
     }

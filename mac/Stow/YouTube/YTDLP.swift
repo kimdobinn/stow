@@ -12,7 +12,12 @@ struct YTDLP: Sendable {
     }
 
     /// Keeps the user's yt-dlp config from changing the output format.
-    private static let baseArguments = ["--ignore-config", "--no-progress"]
+    private static let baseArguments = ["--ignore-config", "--no-progress"] + youTubeWorkaround
+
+    /// Has yt-dlp read YouTube's TV player script: with yt-dlp 2026.10.26 the challenge solver
+    /// fails on the default script whenever you're signed in (no playable formats, so members-only
+    /// videos wouldn't play), and works on this one. Drop it once a newer yt-dlp is installed.
+    static let youTubeWorkaround = ["--extractor-args", "youtube:player_js_variant=tv"]
 
     struct Output {
         var stdout: Data
