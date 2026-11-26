@@ -251,7 +251,7 @@ private struct ChannelChips: View {
     }
 }
 
-private struct VideoCard: View {
+struct VideoCard: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
     let video: Video

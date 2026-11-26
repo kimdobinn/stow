@@ -36,6 +36,16 @@ struct CommentsTests {
         #expect(CommentsParser.parse(json: Data("not json".utf8)) == nil)
     }
 
+    @Test func timestampsInCommentsSeekTheVideo() {
+        let text = "7:15 we were waiting, and 1:02:03 too. Not 12:345, 3:75, 10:30pm-ish 4:5 or 2026:11:26"
+        #expect(CommentText.timestamps(in: text).map(\.seconds) == [435, 3723, 630])
+        let linked = CommentText.linked("at 7:15!")
+        let links = linked.runs.compactMap { run in run.link.map { (String(linked[run.range].characters), $0) } }
+        #expect(links.map(\.0) == ["7:15"])
+        #expect(links.first.flatMap { CommentText.seconds(fromSeekURL: $0.1) } == 435)
+        #expect(CommentText.seconds(fromSeekURL: URL(string: "https://youtube.com")!) == nil)
+    }
+
     @Test func countsReadLikeYouTubes() {
         #expect(CommentText.count(950) == "950")
         #expect(CommentText.count(1_000) == "1K")

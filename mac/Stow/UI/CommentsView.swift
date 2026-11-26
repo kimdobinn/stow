@@ -5,9 +5,26 @@ import SwiftUI
 struct CommentsView: View {
     @Environment(AppModel.self) private var model
     let videoId: String
+    /// Clicking a timestamp ("7:15") in a comment.
+    var onSeek: ((TimeInterval) -> Void)? = nil
     var loader = CommentsLoader.shared
+    @AppStorage(CommentsPlacement.storageKey) private var placement: CommentsPlacement = .below
 
     var body: some View {
+        VStack(spacing: 0) {
+            header
+            list
+        }
+        .task(id: videoId) { loader.load(videoId: videoId, cookiesFile: model.playbackCookiesFile) }
+        .environment(\.openURL, OpenURLAction { url in
+            guard let seconds = CommentText.seconds(fromSeekURL: url) else { return .systemAction }
+            onSeek?(seconds)
+            return .handled
+        })
+    }
+
+    @ViewBuilder
+    private var list: some View {
         Group {
             switch loader.videoId == videoId ? loader.state : .loading {
             case .idle, .loading:
@@ -34,8 +51,7 @@ struct CommentsView: View {
                 }
             }
         }
-        .safeAreaInset(edge: .top, spacing: 0) { header }
-        .task(id: videoId) { loader.load(videoId: videoId, cookiesFile: model.playbackCookiesFile) }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var header: some View {
@@ -45,6 +61,13 @@ struct CommentsView: View {
                 Text(CommentText.count(count)).foregroundStyle(.secondary)
             }
             Spacer()
+            Button {
+                withAnimation(.snappy(duration: 0.25)) { placement = placement == .below ? .beside : .below }
+            } label: {
+                Image(systemName: placement == .below ? "rectangle.righthalf.inset.filled" : "rectangle.bottomhalf.inset.filled")
+            }
+            .buttonStyle(.borderless)
+            .help(placement == .below ? "Show the comments beside the video" : "Show the comments under the video")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -114,7 +137,7 @@ private struct CommentRow: View {
                         Text(postedAt, format: .relative(presentation: .named)).font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                Text(comment.text)
+                Text(CommentText.linked(comment.text))
                     .font(.callout)
                     .textSelection(.enabled)
                     .lineLimit(isLong && !showsAll ? 5 : nil)
@@ -139,7 +162,49 @@ private struct CommentRow: View {
     }
 }
 
+/// Where the comments go in the player panel.
+enum CommentsPlacement: String {
+    case below, beside
+    static let storageKey = "commentsPlacement"
+}
+
 enum CommentText {
+    static let seekScheme = "stow-seek"
+
+    /// The timestamps in a comment ("7:15", "1:02:03"), with their offsets in seconds.
+    static func timestamps(in text: String) -> [(range: Range<String.Index>, seconds: TimeInterval)] {
+        let ns = text as NSString
+        return stampPattern.matches(in: text, range: NSRange(location: 0, length: ns.length)).compactMap { match in
+            func group(_ i: Int) -> Int? {
+                let range = match.range(at: i)
+                return range.location == NSNotFound ? nil : Int(ns.substring(with: range))
+            }
+            guard let minutes = group(2), let seconds = group(3), seconds < 60,
+                  let range = Range(match.range, in: text) else { return nil }
+            let hours = group(1) ?? 0
+            if hours > 0 && minutes >= 60 { return nil }
+            return (range, TimeInterval(hours * 3600 + minutes * 60 + seconds))
+        }
+    }
+
+    private static let stampPattern = try! NSRegularExpression(pattern: #"(?<![\d:])(?:(\d{1,2}):)?(\d{1,2}):(\d{2})(?![\d:])"#)
+
+    /// The comment with its timestamps as links that seek the video.
+    static func linked(_ text: String) -> AttributedString {
+        var result = AttributedString(text)
+        for stamp in timestamps(in: text) {
+            guard let lower = AttributedString.Index(stamp.range.lowerBound, within: result),
+                  let upper = AttributedString.Index(stamp.range.upperBound, within: result) else { continue }
+            result[lower..<upper].link = URL(string: "\(seekScheme):\(Int(stamp.seconds))")
+        }
+        return result
+    }
+
+    static func seconds(fromSeekURL url: URL) -> TimeInterval? {
+        guard url.scheme == seekScheme else { return nil }
+        return TimeInterval(url.absoluteString.dropFirst(seekScheme.count + 1))
+    }
+
     /// 950, 1.2K, 34K, 1.5M: YouTube's short counts.
     static func count(_ value: Int) -> String {
         switch value {

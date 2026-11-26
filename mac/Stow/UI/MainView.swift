@@ -2,12 +2,14 @@ import SwiftUI
 
 /// The sections in the sidebar.
 enum SidebarItem: String, CaseIterable, Identifiable {
-    case inbox, channels, alarm, phone, account, log
+    case home, subscriptions, inbox, channels, alarm, phone, account, log
 
     var id: Self { self }
 
     var title: String {
         switch self {
+        case .home: "Home"
+        case .subscriptions: "Subscriptions"
         case .inbox: "Inbox"
         case .channels: "Channels"
         case .alarm: "Alarm"
@@ -19,6 +21,8 @@ enum SidebarItem: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
+        case .home: "house"
+        case .subscriptions: "play.square.stack"
         case .inbox: "tray.full"
         case .channels: "person.2"
         case .alarm: "alarm"
@@ -37,6 +41,7 @@ struct MainView: View {
     @State private var selection: SidebarItem
     /// The player panel's width as last dragged; 0 until then (an automatic width).
     @AppStorage("playerPanelWidth") private var preferredPanelWidth: Double = 0
+    @AppStorage(CommentsPlacement.storageKey) private var commentsPlacement: CommentsPlacement = .below
     /// The width when a drag of the panel's edge began.
     @State private var dragStartWidth: CGFloat?
     /// The height of the title and buttons under the video.
@@ -80,6 +85,8 @@ struct MainView: View {
                 dock.detailWidth = $0.width
             }
             .onChange(of: plannedPanelWidth, initial: true) { dock.plannedPanelWidth = $1 }
+            // Moving the comments changes the panel's shape: back to the automatic width.
+            .onChange(of: commentsPlacement) { preferredPanelWidth = 0 }
             .background(WindowReader { window in
                 dock.hostWindow = window
                 paintWindow(window)
@@ -103,26 +110,36 @@ struct MainView: View {
         window.backgroundColor = theme == .paper ? Paper.nsBackground : .windowBackgroundColor
     }
 
-    private static let minPanelWidth: CGFloat = 420
-    /// The space under the details the panel keeps for the comments, at least.
-    private static let commentsHeight: CGFloat = 240
+    /// The video's narrowest width in the panel.
+    private static let minVideoWidth: CGFloat = 420
+    /// The space under the details the panel keeps for the comments, at least, when they're below.
+    private static let commentsHeight: CGFloat = 360
+
+    private var commentsBeside: Bool { commentsPlacement == .beside }
+    /// The comments column beside the video, when it's there.
+    private var besideWidth: CGFloat { commentsBeside ? PlayerPanel.besideCommentsWidth + 1 : 0 }
+    private var minPanelWidth: CGFloat { Self.minVideoWidth + besideWidth }
+
+    /// The panel's width at which the video and what's under it fill `height`.
+    private func fillsHeight(_ height: CGFloat) -> CGFloat {
+        (height - panelDetailsHeight - (commentsBeside ? 0 : Self.commentsHeight)) * 16 / 9 + besideWidth
+    }
     /// What the panel always leaves of the section beside it.
     private static let minSectionWidth: CGFloat = 320
 
     /// The panel's widths: at most as wide as lets the video and the details under it fill the
     /// height (wider would only push them off the bottom), and leaving room for the section.
     private func panelWidthRange(in size: CGSize) -> ClosedRange<CGFloat> {
-        let fillsHeight = (size.height - panelDetailsHeight - Self.commentsHeight) * 16 / 9
-        let upper = min(size.width - Self.minSectionWidth, fillsHeight)
-        return Self.minPanelWidth...max(Self.minPanelWidth, upper)
+        let upper = min(size.width - Self.minSectionWidth, fillsHeight(size.height))
+        return minPanelWidth...max(minPanelWidth, upper)
     }
 
     /// The video and the details under it fill the height at this width.
-    private var fillsHeightWidth: CGFloat { (detailSize.height - panelDetailsHeight - Self.commentsHeight) * 16 / 9 }
+    private var fillsHeightWidth: CGFloat { fillsHeight(detailSize.height) }
 
     /// How wide the panel is when it opens (the window grows by this much).
     private var plannedPanelWidth: CGFloat {
-        max(preferredPanelWidth > 0 ? preferredPanelWidth : fillsHeightWidth, Self.minPanelWidth)
+        max(preferredPanelWidth > 0 ? preferredPanelWidth : fillsHeightWidth, minPanelWidth)
     }
 
     /// When the window grew for the panel, the section keeps its width and the panel takes the
@@ -139,7 +156,7 @@ struct MainView: View {
     private func keptSectionWidth(in width: CGFloat) -> CGFloat? {
         guard let kept = dock.keptSectionWidth else { return nil }
         if dock.isResizingWindow { return min(kept, width - 1) }
-        return min(max(kept, Self.minSectionWidth), max(width - 1 - Self.minPanelWidth, Self.minSectionWidth))
+        return min(max(kept, Self.minSectionWidth), max(width - 1 - minPanelWidth, Self.minSectionWidth))
     }
 
     private static func clamp(_ width: CGFloat, to range: ClosedRange<CGFloat>) -> CGFloat {
@@ -180,6 +197,8 @@ struct MainView: View {
     @ViewBuilder
     private var detail: some View {
         switch selection {
+        case .home: FeedView(kind: .home)
+        case .subscriptions: FeedView(kind: .subscriptions)
         case .inbox: InboxView()
         case .channels: ChannelsTab()
         case .alarm: AlarmTab()

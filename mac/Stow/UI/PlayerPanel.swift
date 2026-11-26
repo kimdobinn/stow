@@ -15,27 +15,38 @@ struct PlayerPanel: View {
     /// The spot (0–1) on the timeline under the pointer, for the preview above it.
     @State private var scrub: Double?
     @Environment(\.appTheme) private var theme
+    @AppStorage(CommentsPlacement.storageKey) private var commentsPlacement: CommentsPlacement = .below
+    /// The comments column's width when it's beside the video.
+    static let besideCommentsWidth: CGFloat = 380
     @AppStorage(PlaybackScreen.seekStepKey) private var storedSeekStep = PlaybackScreen.defaultSeekStep
     private var seekStep: Int { PlaybackScreen.seekStep(stored: storedSeekStep) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            video
-                .aspectRatio(16 / 9, contentMode: .fit)
-                .frame(maxWidth: .infinity, maxHeight: dock.isExpanded ? .infinity : nil)
-                .background(.black)
-                .layoutPriority(1)
-            if !dock.isExpanded, let nowPlaying = screen.nowPlaying {
-                details(nowPlaying)
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { onDetailsHeight($0) }
+        let beside = commentsPlacement == .beside && !dock.isExpanded
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                video
+                    .aspectRatio(16 / 9, contentMode: .fit)
+                    .frame(maxWidth: .infinity, maxHeight: dock.isExpanded ? .infinity : nil)
+                    .background(.black)
                     .layoutPriority(1)
+                if !dock.isExpanded, let nowPlaying = screen.nowPlaying {
+                    details(nowPlaying)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { onDetailsHeight($0) }
+                        .layoutPriority(1)
+                    if !beside {
+                        Divider()
+                        comments(nowPlaying).frame(minHeight: 0, maxHeight: .infinity)
+                    }
+                }
+            }
+            // The video gets the height the details leave (it shrinks rather than pushing them off).
+            .frame(maxHeight: .infinity, alignment: .top)
+            if beside, let nowPlaying = screen.nowPlaying {
                 Divider()
-                CommentsView(videoId: nowPlaying.video.id)
-                    .frame(minHeight: 0, maxHeight: .infinity)
+                comments(nowPlaying).frame(width: Self.besideCommentsWidth)
             }
         }
-        // The video gets the height the details leave (it shrinks rather than pushing them off).
-        .frame(maxHeight: .infinity, alignment: .top)
         .background(dock.isExpanded ? Color.black : theme == .paper ? Paper.background : Color(nsColor: .windowBackgroundColor),
                     ignoresSafeAreaEdges: [])
         .task(id: screen.nowPlaying?.video.id) {
@@ -161,6 +172,11 @@ struct PlayerPanel: View {
     }
 
     // MARK: Details
+
+    /// Timestamps in comments seek the video.
+    private func comments(_ nowPlaying: NowPlaying) -> some View {
+        CommentsView(videoId: nowPlaying.video.id) { screen.perform(.seekTo($0)) }
+    }
 
     private func details(_ nowPlaying: NowPlaying) -> some View {
         let video = nowPlaying.video

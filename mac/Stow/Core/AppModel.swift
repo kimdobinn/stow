@@ -84,6 +84,11 @@ final class AppModel {
     @ObservationIgnored private var groupChannelsTried: Set<String> = []
     /// The running pass that checks members-only videos' access (tests await it).
     @ObservationIgnored private(set) var memberAccessChecks: Task<Void, Never>?
+    /// YouTube's Home and Subscriptions feeds, once read (see `loadAccountFeeds`).
+    private(set) var accountFeeds: AccountFeeds?
+    private(set) var accountFeedsLoadedAt: Date?
+    private(set) var isLoadingAccountFeeds = false
+    @ObservationIgnored private var accountFeedsTask: Task<AccountFeeds?, Never>?
     /// New members-only videos not announced yet: they wait for their access check.
     @ObservationIgnored private var unannounced: Set<String> = []
     /// At most this many lookups (a few seconds each) per pass; the rest wait for the next check.
@@ -863,9 +868,10 @@ extension AppModel: PhoneSyncHost {
         !isMembersOnly || state.memberAccess[videoId]?.canWatch == true
     }
 
+    /// A video Stow knows: from a followed channel, or in YouTube's Home or Subscriptions feed.
     func phoneVideo(id: String) -> Video? {
-        state.inbox.first { $0.id == id }?.video
-            ?? state.recentVideos.values.lazy.compactMap { $0.first { $0.id == id } }.first
+        knownVideo(id: id)
+            ?? (accountFeeds.map { $0.recommended + $0.subscriptions } ?? []).first { $0.id == id }?.video()
     }
 
     func applyPhoneWatched(_ watched: Bool, videoId: String) {
@@ -877,7 +883,30 @@ extension AppModel: PhoneSyncHost {
 
     var phoneCookiesFile: URL? { signInState == .signedIn ? playbackCookiesFile : nil }
 
-    func phoneAccountFeeds() async -> AccountFeeds? {
+    func phoneAccountFeeds() async -> AccountFeeds? { await loadAccountFeeds() }
+
+    // MARK: YouTube's Home and Subscriptions
+
+    /// How long a read of YouTube's feeds is reused (the Home and Subscriptions sections, the phone).
+    static let accountFeedsFreshFor: TimeInterval = 15 * 60
+
+    /// YouTube's Home and Subscriptions feeds for the signed-in account: read again when older than
+    /// `accountFeedsFreshFor`, or when `force`d. Nil when not signed in or the read failed.
+    @discardableResult
+    func loadAccountFeeds(force: Bool = false) async -> AccountFeeds? {
+        if !force, let feeds = accountFeeds, let at = accountFeedsLoadedAt,
+           Date.now.timeIntervalSince(at) < Self.accountFeedsFreshFor { return feeds }
+        if let running = accountFeedsTask { return await running.value }
+        let task = Task { await self.readAccountFeeds() }
+        accountFeedsTask = task
+        isLoadingAccountFeeds = true
+        let feeds = await task.value
+        accountFeedsTask = nil
+        isLoadingAccountFeeds = false
+        return feeds ?? accountFeeds
+    }
+
+    private func readAccountFeeds() async -> AccountFeeds? {
         guard let cookiesFile = phoneCookiesFile else { return nil }
         do {
             let feeds = try await youtube.fetchAccountFeeds(cookiesFile: cookiesFile, limit: PhoneSync.accountFeedLimit)
@@ -885,12 +914,33 @@ extension AppModel: PhoneSyncHost {
             feedMembersVideos = (feeds.recommended + feeds.subscriptions)
                 .filter { $0.isMembersOnly && seen.insert($0.id).inserted }
                 .map { (id: $0.id, label: "\($0.channelTitle): “\($0.title)”") }
+            accountFeeds = feeds
+            accountFeedsLoadedAt = .now
             checkMemberAccess()
             return feeds
         } catch {
-            record(.warning, "Couldn't read YouTube's Home and Subscriptions for the phone: \(error.logDescription)")
+            record(.warning, "Couldn't read YouTube's Home and Subscriptions: \(error.logDescription)")
             return nil
         }
+    }
+
+    /// The account's Home recommendations, members-only ones only when the account can watch them.
+    var homeVideos: [Video] {
+        (accountFeeds?.recommended ?? []).map { $0.video(knownDate: knownVideo(id: $0.id)?.publishedAt) }
+            .filter { !isHidden($0) && $0.liveStatus != .live }
+    }
+
+    /// YouTube's Subscriptions feed merged with every followed channel's videos, newest first.
+    var subscriptionVideos: [Video] {
+        let feed = (accountFeeds?.subscriptions ?? []).map { $0.video(knownDate: knownVideo(id: $0.id)?.publishedAt) }
+        let channelVideos = state.inbox.map(\.video) + state.recentVideos.values.flatMap { $0 }
+        return Feeds.subscriptions(feed: feed, channelVideos: channelVideos)
+            .filter { !isHidden($0) && $0.liveStatus != .live }
+    }
+
+    private func knownVideo(id: String) -> Video? {
+        state.inbox.first { $0.id == id }?.video
+            ?? state.recentVideos.values.lazy.compactMap { $0.first { $0.id == id } }.first
     }
 
     func phoneGroupChannels(_ grouped: [GroupChannel]) {

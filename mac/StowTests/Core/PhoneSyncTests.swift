@@ -294,6 +294,33 @@ struct PhoneSyncTests {
         #expect(!sent.isMembersOnly)
     }
 
+    @Test func homeAndSubscriptionsShowOnTheMacWithoutLockedVideos() async throws {
+        youtube.lockedVideos.withLock { $0 = ["r2": "Gold"] }
+        func entry(_ id: String, members: Bool = false, live: Bool = false) -> FeedVideo {
+            FeedVideo(id: id, channelId: "UCother", channelTitle: "Other", title: id, duration: 600, thumbnailURL: nil,
+                      isMembersOnly: members, isLive: live)
+        }
+        youtube.accountFeeds.withLock {
+            $0 = .success(AccountFeeds(recommended: [entry("r1"), entry("r2", members: true), entry("r3", live: true)],
+                                       subscriptions: [entry("s1")]))
+        }
+        let model = try await makeModel()
+        await model.loadAccountFeeds()
+        await model.memberAccessChecks?.value
+        #expect(model.homeVideos.map(\.id) == ["r1"])
+        let subscriptions = model.subscriptionVideos.map(\.id)
+        #expect(subscriptions.contains("s1") && subscriptions.contains("v1"))
+        // Read once and reused (the phone sync too) until it's stale or refreshed.
+        let reads = youtube.accountFeedFetches.withLock { $0 }
+        await model.loadAccountFeeds()
+        _ = await model.phoneAccountFeeds()
+        #expect(youtube.accountFeedFetches.withLock { $0 } == reads)
+        await model.loadAccountFeeds(force: true)
+        #expect(youtube.accountFeedFetches.withLock { $0 } == reads + 1)
+        // A feed video can go to the phone.
+        #expect(model.phoneVideo(id: "s1")?.title == "s1")
+    }
+
     @Test func pastStreamsReachThePhoneWithTheirLength() async throws {
         var stream = video("s1", channel: channelId, minutesAgo: 0.5, live: .wasLive)
         stream.duration = 7200
