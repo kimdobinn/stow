@@ -6,6 +6,21 @@ import dev.stow.android.data.VideoItem
 
 object Format {
     /** "1 video", "3 videos". */
+    /** 950, 1.2K, 34K, 1.5M: YouTube's short counts. */
+    fun shortCount(n: Long): String {
+        fun trimmed(v: Double): String {
+            val r = kotlin.math.floor(v * 10) / 10
+            return if (r == kotlin.math.floor(r)) r.toLong().toString() else "%.1f".format(java.util.Locale.US, r)
+        }
+        return when {
+            n < 1_000 -> "$n"
+            n < 10_000 -> trimmed(n / 1_000.0) + "K"
+            n < 1_000_000 -> "${n / 1_000}K"
+            n < 10_000_000 -> trimmed(n / 1_000_000.0) + "M"
+            else -> "${n / 1_000_000}M"
+        }
+    }
+
     fun count(n: Int, noun: String): String = "$n ${if (n == 1) noun else noun + "s"}"
 
     /** "Channel · 3 days ago" (· "Members only"). */

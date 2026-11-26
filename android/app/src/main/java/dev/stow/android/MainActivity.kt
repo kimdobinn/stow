@@ -396,6 +396,7 @@ class MainActivity : ComponentActivity() {
                     openChannel = { id -> sheet.collapse(); nav.navigate("channel/$id") },
                 ),
                 sheet = sheet, bottomInset = bottomBarHeight,
+                loadComments = { video, fresh -> repository.comments(video, fresh) },
             )
         }
         }

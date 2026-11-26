@@ -87,6 +87,13 @@ struct MainView: View {
             .onChange(of: theme) { if let window = dock.hostWindow { paintWindow(window) } }
             .animation(.snappy(duration: 0.3), value: dock.screen == nil)
             .animation(.snappy(duration: 0.3), value: dock.isExpanded)
+            .inspector(isPresented: commentsShown) {
+                if let videoId = dock.screen?.nowPlaying?.video.id {
+                    CommentsView(videoId: videoId)
+                        .inspectorColumnWidth(min: 280, ideal: 340, max: 480)
+                        .themedBackground()
+                }
+            }
             .navigationTitle(selection.title)
             .toolbar { toolbar }
         }
@@ -96,6 +103,12 @@ struct MainView: View {
     }
 
     private var dock: PlayerDock { PlayerDock.shared }
+
+    /// The comments column, while a video is in the panel.
+    private var commentsShown: Binding<Bool> {
+        Binding(get: { dock.showsComments && dock.screen?.nowPlaying != nil },
+                set: { if !$0 { dock.showsComments = false } })
+    }
 
     /// The title bar and toolbar take the theme's background too.
     private func paintWindow(_ window: NSWindow) {

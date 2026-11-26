@@ -179,6 +179,8 @@ struct PlayerPanel: View {
                     model.setWatched(!isWatched, videoId: video.id)
                 }
                 PhoneButton(videoId: video.id, isMembersOnly: video.isMembersOnly)
+                Button("Comments", systemImage: "text.bubble") { dock.showsComments.toggle() }
+                    .help(dock.showsComments ? "Hide the comments" : "Show the comments beside the video")
                 Button("Open on YouTube", systemImage: "safari") {
                     dock.stop()
                     openURL(video.watchURL)

@@ -285,6 +285,36 @@ class Repository(private val context: Context) {
         return File(context.cacheDir, "cookies-${java.util.UUID.randomUUID()}.txt").apply { writeBytes(data) }
     }
 
+    // Comments
+
+    private val commentsDir get() = File(context.filesDir, "comments")
+
+    /**
+     * The video's top comments: the saved copy unless `fresh` (downloaded videos keep theirs, to
+     * read offline), else fetched with yt-dlp and saved.
+     */
+    suspend fun comments(video: Video, fresh: Boolean = false): CommentsPage = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val file = File(commentsDir, "${video.id}.json")
+        if (!fresh) runCatching { Comments.parse(file.readText()) }.getOrNull()?.let { return@withContext it }
+        val cookies = if (video.isMembersOnly) cookiesFile() else null
+        try {
+            val json = YtDlp.comments(context, video.id, cookies)
+            commentsDir.mkdirs()
+            file.writeText(json)
+            pruneComments()
+            Comments.parse(json)
+        } finally {
+            cookies?.delete()
+        }
+    }
+
+    /** Saved comments of videos that aren't downloaded go after a week. */
+    private fun pruneComments() {
+        val keep = downloadIds().toSet()
+        val cutoff = System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L
+        commentsDir.listFiles()?.filter { it.nameWithoutExtension !in keep && it.lastModified() < cutoff }?.forEach { it.delete() }
+    }
+
     // Pull to refresh
 
     enum class RefreshResult { DONE, NO_ANSWER, FAILED }

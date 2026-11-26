@@ -136,6 +136,26 @@ object YtDlp {
         } else size(info)
     }
 
+    /** yt-dlp's max_comments: in all, top-level, replies in all, replies per thread. */
+    const val COMMENT_LIMITS = "80,40,60,6"
+
+    /** The video's top comments as yt-dlp's JSON answer, trimmed to the comments (about 5-10 s). */
+    suspend fun comments(context: Context, videoId: String, cookies: File?): String = withContext(Dispatchers.IO) {
+        ensureReady(context)
+        val request = YoutubeDLRequest("https://www.youtube.com/watch?v=$videoId").apply {
+            addOption("-j")
+            addOption("--skip-download")
+            addOption("--write-comments")
+            addOption("--no-playlist")
+            addOption("--ignore-no-formats-error")
+            addOption("--extractor-args", "youtube:max_comments=$COMMENT_LIMITS;comment_sort=top")
+            if (cookies != null) addOption("--cookies", cookies.absolutePath)
+        }
+        val response = YoutubeDL.getInstance().execute(request, "comments-$videoId")
+        if (response.exitCode != 0) throw java.io.IOException(summary(response.err))
+        dev.stow.android.data.Comments.trim(response.out.lineSequence().first { it.trimStart().startsWith("{") })
+    }
+
     fun cancel(id: String) {
         runCatching { YoutubeDL.getInstance().destroyProcessById(id) }
     }

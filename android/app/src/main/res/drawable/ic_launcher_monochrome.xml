@@ -1,0 +1,6 @@
+<!-- The themed (Material You) icon: the screen with the play button cut out. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd"
+        android:pathData="M39.6,37.44H68.4A10.8,10.8 0,0 1,79.2 48.24V59.76A10.8,10.8 0,0 1,68.4 70.56H39.6A10.8,10.8 0,0 1,28.8 59.76V48.24A10.8,10.8 0,0 1,39.6 37.44ZM49.68,46.08L49.68,61.92L61.92,54Z" />
+</vector>

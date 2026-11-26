@@ -56,6 +56,8 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
                     sizeBytes = file.length(), durationMs = durationMs(file), downloadedAt = System.currentTimeMillis())
             }
             runCatching { repository.remote.reportDownload(id, "downloaded") }
+            // Its comments too, to read offline (best effort).
+            runCatching { repository.comments(video, fresh = true) }
             return Result.success()
         } catch (e: com.yausername.youtubedl_android.YoutubeDL.CanceledException) {
             // Stopped (deleted, network rule changed, app shut down): not a failure.

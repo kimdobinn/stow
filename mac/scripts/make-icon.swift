@@ -11,17 +11,22 @@ let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { _
     shadow.shadowColor = NSColor.black.withAlphaComponent(0.3); shadow.set()
     NSColor.black.setFill(); path.fill()
     NSGraphicsContext.current?.restoreGraphicsState()
-    let gradient = NSGradient(colors: [NSColor(srgbRed: 1.0, green: 0.62, blue: 0.25, alpha: 1),
-                                       NSColor(srgbRed: 0.93, green: 0.27, blue: 0.42, alpha: 1),
-                                       NSColor(srgbRed: 0.45, green: 0.22, blue: 0.62, alpha: 1)])!
-    gradient.draw(in: path, angle: -90)
-    let config = NSImage.SymbolConfiguration(pointSize: 430, weight: .semibold)
-        .applying(.init(paletteColors: [.white]))
-    if let symbol = NSImage(systemSymbolName: "tray.and.arrow.down.fill", accessibilityDescription: nil)?
-        .withSymbolConfiguration(config) {
-        let s = symbol.size
-        symbol.draw(in: NSRect(x: (size - s.width) / 2, y: (size - s.height) / 2 - 10, width: s.width, height: s.height))
-    }
+    // Paper: a terracotta screen with a cream play button on cream (the phone's icon is the same).
+    let cream = NSColor(srgbRed: 0xFA / 255, green: 0xF9 / 255, blue: 0xF5 / 255, alpha: 1)
+    let terracotta = NSColor(srgbRed: 0xC9 / 255, green: 0x64 / 255, blue: 0x42 / 255, alpha: 1)
+    cream.setFill(); path.fill()
+    NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.08).setStroke()
+    path.lineWidth = 3; path.stroke()
+    // Laid out on a 100-unit grid over the body (y up).
+    let unit = rect.width / 100
+    func point(_ x: CGFloat, _ y: CGFloat) -> NSPoint { NSPoint(x: rect.minX + x * unit, y: rect.maxY - y * unit) }
+    let screen = NSBezierPath(roundedRect: NSRect(x: rect.minX + 15 * unit, y: rect.maxY - 73 * unit, width: 70 * unit, height: 46 * unit),
+                              xRadius: 15 * unit, yRadius: 15 * unit)
+    terracotta.setFill(); screen.fill()
+    let play = NSBezierPath()
+    play.move(to: point(44, 39)); play.line(to: point(44, 61)); play.line(to: point(61, 50)); play.close()
+    play.lineJoinStyle = .round; play.lineWidth = 4 * unit
+    cream.setFill(); cream.setStroke(); play.fill(); play.stroke()
     return true
 }
 let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 1024, pixelsHigh: 1024, bitsPerSample: 8, samplesPerPixel: 4,

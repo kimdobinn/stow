@@ -19,8 +19,8 @@ final class AppModel {
 
     /// In settings.json order.
     var channels: [Channel] { settings.channels }
-    /// Newest first.
-    var inbox: [InboxItem] { state.inbox }
+    /// Newest first. Members-only videos for a higher membership level than the account's never show.
+    var inbox: [InboxItem] { state.inbox.filter { !isLocked(videoId: $0.id) } }
     /// Every channel's recent videos that aren't in the Inbox, newest first.
     var recentVideos: [Video] {
         channels.flatMap { recentVideos(channelId: $0.id) }
@@ -32,7 +32,7 @@ final class AppModel {
     func recentVideos(channelId: String) -> [Video] {
         let inboxIds = Set(state.inbox.map(\.id))
         return (state.recentVideos[channelId] ?? [])
-            .filter { !inboxIds.contains($0.id) }
+            .filter { !inboxIds.contains($0.id) && !isLocked(videoId: $0.id) }
             .sorted { ($0.publishedAt ?? .distantPast) > ($1.publishedAt ?? .distantPast) }
     }
     var lastCheck: CheckResult? { state.lastCheck }
@@ -84,6 +84,8 @@ final class AppModel {
     @ObservationIgnored private var groupChannelsTried: Set<String> = []
     /// The running pass that checks members-only videos' access (tests await it).
     @ObservationIgnored private(set) var memberAccessChecks: Task<Void, Never>?
+    /// New members-only videos not announced yet: they wait for their access check.
+    @ObservationIgnored private var unannounced: Set<String> = []
     /// At most this many lookups (a few seconds each) per pass; the rest wait for the next check.
     static let accessChecksPerPass = 15
 
@@ -200,7 +202,10 @@ final class AppModel {
         saveState()
         logCheck(result, found: found)
 
-        notifier.notifyNewVideos(found)
+        // A members-only video is announced once the account's level is known to watch it.
+        let unchecked = found.filter { $0.isMembersOnly && state.memberAccess[$0.id] == nil }
+        unannounced.formUnion(unchecked.map(\.id))
+        notifier.notifyNewVideos(found.filter { !$0.isMembersOnly || state.memberAccess[$0.id] == .watchable })
         if let failure = fetches.first(where: \.membersFailed)?.errors.last {
             notifier.notifyProblem(title: "Members-only check is failing", body: failure)
         }
@@ -233,6 +238,7 @@ final class AppModel {
 
     private func checkMemberAccess(_ videos: [(id: String, label: String)]) async {
         var changed = false
+        var watchable: [String] = []
         for video in videos {
             guard signInState == .signedIn else { break }
             do {
@@ -240,8 +246,11 @@ final class AppModel {
                 state.memberAccess[video.id] = access
                 changed = true
                 if case .locked(let level) = access {
-                    record(.info, "\(video.label) needs \(level.map { "the “\($0)” membership level" } ?? "a higher membership level"); it stays off the phone and out of the alarm.")
+                    record(.info, "\(video.label) needs \(level.map { "the “\($0)” membership level" } ?? "a higher membership level"); it's hidden on the Mac and the phone.")
+                } else if access == .watchable, unannounced.contains(video.id) {
+                    watchable.append(video.id)
                 }
+                unannounced.remove(video.id)
             } catch StowError.authExpired {
                 markExpired("YouTube rejected the saved sign-in; members-only videos can't be checked reliably.")
                 break
@@ -250,6 +259,8 @@ final class AppModel {
             }
         }
         guard changed else { return }
+        let announce = state.inbox.map(\.video).filter { watchable.contains($0.id) }
+        if !announce.isEmpty { notifier.notifyNewVideos(announce) }
         // Forget videos that are gone everywhere.
         let known = Set(state.inbox.map(\.id) + state.recentVideos.values.flatMap { $0.map(\.id) } + feedMembersVideos.map(\.id))
         state.memberAccess = state.memberAccess.filter { known.contains($0.key) }

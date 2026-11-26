@@ -124,6 +124,8 @@ struct PhoneSyncTests {
     let phone = PhoneMember(id: "uid1", name: "Galaxy S24+", fcmToken: "token1", pairedAt: nil)
 
     /// A model with Firebase set up and one channel (v1, v2 in New; v3…v5 in Recent).
+    let notifier = FakeNotifier()
+
     func makeModel(paired: Bool = true) async throws -> AppModel {
         try FileManager.default.createDirectory(at: store.directory, withIntermediateDirectories: true)
         try Data("{}".utf8).write(to: store.directory.appending(path: "firebase-key.json"))
@@ -133,7 +135,7 @@ struct PhoneSyncTests {
         youtube.publicFeeds.withLock { $0[channelId] = (1...5).map { video("v\($0)", channel: channelId, minutesAgo: Double($0)) } }
         account.state = .signedIn
         let backend = backend
-        let model = AppModel(youtube: youtube, account: account, store: store, notifier: FakeNotifier(),
+        let model = AppModel(youtube: youtube, account: account, store: store, notifier: notifier,
                              cookiesFile: store.directory.appending(path: "cookies.txt"), alarmServices: .inert,
                              phoneBackend: { _ in backend })
         model.phone.debounce = .milliseconds(1)
@@ -223,6 +225,10 @@ struct PhoneSyncTests {
         #expect(model.memberAccess(videoId: "m1") == .watchable)
         #expect(model.memberAccess(videoId: "m2") == .locked(level: "Gold"))
         #expect(Set(youtube.accessChecks.withLock { $0 }) == ["m1", "m2"])
+        // The Mac doesn't show it either.
+        let shown = model.inbox.map(\.id) + model.recentVideos.map(\.id)
+        #expect(shown.contains("m1"))
+        #expect(!shown.contains("m2"))
         await model.phone.sync()
         let recent = try #require(backend.feeds.withLock { $0[channelId] }).recent.map(\.id)
         #expect(recent.contains("m1"))
@@ -234,6 +240,24 @@ struct PhoneSyncTests {
         await model.check(.manual)
         await model.memberAccessChecks?.value
         #expect(youtube.accessChecks.withLock { $0.count } == 2)
+    }
+
+    @Test func newMembersVideosAreAnnouncedOnceTheLevelCanWatchThem() async throws {
+        youtube.lockedVideos.withLock { $0 = ["m4": "Gold"] }
+        youtube.membersFeeds.withLock { $0[channelId] = .success(MembersFeed(videos: [])) }
+        let model = try await makeModel()
+        await model.check(.manual)
+        await model.memberAccessChecks?.value
+        youtube.membersFeeds.withLock {
+            $0[channelId] = .success(MembersFeed(videos: [video("m3", channel: channelId, minutesAgo: 0, members: true),
+                                                          video("m4", channel: channelId, minutesAgo: 0.2, members: true)]))
+        }
+        notifier.newVideoBatches = []
+        await model.check(.manual)
+        await model.memberAccessChecks?.value
+        #expect(notifier.newVideoBatches.map { $0.map(\.id) } == [["m3"]])
+        #expect(model.inbox.map(\.id).contains("m3"))
+        #expect(!model.inbox.map(\.id).contains("m4"))
     }
 
     @Test func pastStreamsReachThePhoneWithTheirLength() async throws {

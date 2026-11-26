@@ -12,6 +12,8 @@ final class PlayerDock {
     @ObservationIgnored private(set) var videoLayer: MPVVideoLayer?
     /// The panel fills the main window (and the window may be full screen).
     var isExpanded = false
+    /// The comments column is open beside the player (it stays open for the next video).
+    var showsComments = false
     /// The main window, once the panel is on screen (for full screen and keys).
     @ObservationIgnored weak var hostWindow: NSWindow?
     @ObservationIgnored private var keyMonitor: Any?

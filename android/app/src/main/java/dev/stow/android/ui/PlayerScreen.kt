@@ -180,6 +180,8 @@ fun PlayerScreen(
     sheet: PlayerSheetState,
     /** The height of the tabs (and the navigation bar) under the mini player. */
     bottomInset: Dp,
+    /** The video's comments: saved ones unless `fresh`, else fetched. */
+    loadComments: suspend (dev.stow.android.data.Video, Boolean) -> dev.stow.android.data.CommentsPage,
 ) {
     val context = LocalContext.current
     val activity = context as? Activity
@@ -335,6 +337,7 @@ fun PlayerScreen(
                 PillButton("Speed", Icons.Outlined.Speed, onClick = { speedDialog = true })
                 if (current.isPlayable) PillButton("Delete", Icons.Outlined.Delete, onClick = { confirmDelete = true })
             }
+            CommentsCard(current.video, loadComments)
         }
                     if (upNext.isNotEmpty()) {
                         item { SectionHeader("Up next") }

@@ -17,7 +17,8 @@ struct YTDLP: Sendable {
     /// Has yt-dlp read YouTube's TV player script: with yt-dlp 2026.10.26 the challenge solver
     /// fails on the default script whenever you're signed in (no playable formats, so members-only
     /// videos wouldn't play), and works on this one. Drop it once a newer yt-dlp is installed.
-    static let youTubeWorkaround = ["--extractor-args", "youtube:player_js_variant=tv"]
+    static let youTubeWorkaround = ["--extractor-args", youTubeExtractorArgs]
+    static let youTubeExtractorArgs = "youtube:player_js_variant=tv"
 
     struct Output {
         var stdout: Data

@@ -41,6 +41,11 @@ enum Snapshot {
                 for screen in screens {
                     model.previewAlarmPhase(screen.phase)
                     PlayerDock.shared.showPreview(screen.player)
+                    PlayerDock.shared.showsComments = screen.comments != nil
+                    if let videoId = screen.comments {
+                        CommentsLoader.shared.load(videoId: videoId, cookiesFile: nil)
+                        await CommentsLoader.shared.settle()
+                    }
                     let url = output.appending(path: "\(screen.name)-\(suffix).png")
                     if let size = screen.windowSize {
                         try await renderWindow(screen.view.environment(model).environment(\.appTheme, theme), size: size, appearance: appearance, to: url)
@@ -79,6 +84,8 @@ enum Snapshot {
         var phase: AlarmPhase = .idle
         /// Shown in the player panel beside the section.
         var player: PlaybackScreen?
+        /// Opens the comments column on this video (fetched for real).
+        var comments: String? = nil
         /// Rendered in a real window of this size (with its toolbar) instead of on its own.
         var windowSize: CGSize?
     }
@@ -93,7 +100,8 @@ enum Snapshot {
         return [CGSize(width: 1280, height: 800), CGSize(width: 1900, height: 900)].map { size in
             Screen(name: "inbox-player-\(Int(size.width))", view: AnyView(MainView(selection: .inbox)),
                    player: player, windowSize: size)
-        }
+        } + [Screen(name: "comments", view: AnyView(CommentsView(videoId: video.id).frame(width: 360, height: 820)),
+                    comments: video.id)]
     }
 
     /// A finished test run of two recent videos, so "Last Alarm" shows up (temporary store only).
