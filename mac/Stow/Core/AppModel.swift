@@ -909,7 +909,10 @@ extension AppModel: PhoneSyncHost {
     private func readAccountFeeds() async -> AccountFeeds? {
         guard let cookiesFile = phoneCookiesFile else { return nil }
         do {
-            let feeds = try await youtube.fetchAccountFeeds(cookiesFile: cookiesFile, limit: PhoneSync.accountFeedLimit)
+            var feeds = try await youtube.fetchAccountFeeds(cookiesFile: cookiesFile, limit: PhoneSync.accountFeedLimit)
+            await lookUpChannelAvatars(in: feeds)
+            let avatars = channelAvatars(in: feeds)
+            feeds.channelAvatars = avatars.isEmpty ? nil : avatars
             var seen = Set<String>()
             feedMembersVideos = (feeds.recommended + feeds.subscriptions)
                 .filter { $0.isMembersOnly && seen.insert($0.id).inserted }
@@ -922,6 +925,52 @@ extension AppModel: PhoneSyncHost {
             record(.warning, "Couldn't read YouTube's Home and Subscriptions: \(error.logDescription)")
             return nil
         }
+    }
+
+    /// How many unknown channel pictures one read of the feeds looks up (the rest wait for the next).
+    static let avatarLookupsPerRead = 40
+
+    /// The channel's picture: a followed channel's own, else one looked up for YouTube's feeds.
+    func channelAvatar(id: String) -> URL? {
+        channels.first { $0.id == id }?.avatarURL ?? state.channelAvatars[id]
+    }
+
+    private func channelAvatars(in feeds: AccountFeeds) -> [String: URL] {
+        var avatars: [String: URL] = [:]
+        for video in feeds.recommended + feeds.subscriptions where avatars[video.channelId] == nil {
+            avatars[video.channelId] = channelAvatar(id: video.channelId)
+        }
+        return avatars
+    }
+
+    /// yt-dlp's feed listings name each video's channel but not its picture: looks up the ones
+    /// Stow doesn't know from the channel pages (a few at a time) and keeps them.
+    private func lookUpChannelAvatars(in feeds: AccountFeeds) async {
+        var missing: [String] = []
+        for video in feeds.recommended + feeds.subscriptions
+        where !video.channelId.isEmpty && channelAvatar(id: video.channelId) == nil && !missing.contains(video.channelId) {
+            missing.append(video.channelId)
+        }
+        missing = Array(missing.prefix(Self.avatarLookupsPerRead))
+        guard !missing.isEmpty else { return }
+        let youtube = self.youtube
+        let found = await withTaskGroup(of: (String, URL?).self) { group in
+            var found: [String: URL] = [:]
+            for (index, id) in missing.enumerated() {
+                if index >= 6, let (id, url) = await group.next() { found[id] = url }
+                group.addTask { (id, try? await youtube.resolveChannel(input: id).avatarURL) }
+            }
+            for await (id, url) in group { found[id] = url }
+            return found
+        }
+        guard !found.isEmpty else { return }
+        // Recommendations keep bringing new channels: past 1,000, keep only the ones in the feeds.
+        if state.channelAvatars.count + found.count > 1000 {
+            let current = Set((feeds.recommended + feeds.subscriptions).map(\.channelId))
+            state.channelAvatars = state.channelAvatars.filter { current.contains($0.key) }
+        }
+        state.channelAvatars.merge(found) { _, new in new }
+        saveState()
     }
 
     /// The account's Home recommendations, members-only ones only when the account can watch them.

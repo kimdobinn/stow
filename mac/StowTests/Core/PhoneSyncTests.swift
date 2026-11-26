@@ -321,6 +321,22 @@ struct PhoneSyncTests {
         #expect(model.phoneVideo(id: "s1")?.title == "s1")
     }
 
+    @Test func feedChannelsGetTheirPicturesLookedUpOnce() async throws {
+        let avatar = URL(string: "https://yt3.googleusercontent.com/other=s176")!
+        youtube.channels.withLock { $0["UCother"] = ChannelInfo(id: "UCother", title: "Other", handle: nil, avatarURL: avatar) }
+        let entry = FeedVideo(id: "r1", channelId: "UCother", channelTitle: "Other", title: "r1", duration: 600,
+                              thumbnailURL: nil, isMembersOnly: false, isLive: false)
+        youtube.accountFeeds.withLock { $0 = .success(AccountFeeds(recommended: [entry], subscriptions: [])) }
+        let model = try await makeModel()
+        let feeds = await model.phoneAccountFeeds()
+        #expect(feeds?.channelAvatars?["UCother"] == avatar)
+        // Kept: the next read doesn't look it up again.
+        youtube.channels.withLock { $0["UCother"] = nil }
+        let again = await model.loadAccountFeeds(force: true)
+        #expect(again?.channelAvatars?["UCother"] == avatar)
+        #expect(model.channelAvatar(id: "UCother") == avatar)
+    }
+
     @Test func pastStreamsReachThePhoneWithTheirLength() async throws {
         var stream = video("s1", channel: channelId, minutesAgo: 0.5, live: .wasLive)
         stream.duration = 7200

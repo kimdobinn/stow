@@ -325,7 +325,7 @@ fun ChannelScreen(
         LazyColumn(Modifier.fillMaxSize()) {
             item {
                 Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    ChannelAvatar(channel?.avatarUrl, 72.dp, name = title)
+                    ChannelAvatar(channel?.avatarUrl ?: LocalChannelAvatars.current[videos.firstOrNull()?.video?.channelId], 72.dp, name = title)
                     Spacer(Modifier.width(16.dp))
                     Column(Modifier.weight(1f)) {
                         Text(title, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Stow.colors.text, maxLines = 2, overflow = TextOverflow.Ellipsis)

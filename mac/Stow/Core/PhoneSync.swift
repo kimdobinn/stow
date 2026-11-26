@@ -468,7 +468,8 @@ final class PhoneSync {
                 return video
             }
         }
-        let feeds = AccountFeeds(recommended: prepared(read.recommended), subscriptions: prepared(read.subscriptions))
+        let feeds = AccountFeeds(recommended: prepared(read.recommended), subscriptions: prepared(read.subscriptions),
+                                 channelAvatars: read.channelAvatars)
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
         let data = try encoder.encode(feeds)

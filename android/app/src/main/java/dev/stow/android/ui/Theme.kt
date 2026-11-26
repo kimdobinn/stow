@@ -135,3 +135,6 @@ fun StowTheme(theme: AppTheme = AppTheme.SYSTEM, content: @Composable () -> Unit
         MaterialTheme(colorScheme = scheme, typography = type, content = content)
     }
 }
+
+/** Channel pictures by channel id: the Mac's channels', and the ones it looked up for YouTube's feeds. */
+val LocalChannelAvatars = androidx.compose.runtime.compositionLocalOf<Map<String, String>> { emptyMap() }

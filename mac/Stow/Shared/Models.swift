@@ -241,6 +241,9 @@ struct AppState: Codable, Equatable, Sendable {
     var nonMemberChannels: [String: Date] = [:]
     /// Videos found watchable before `nowPublic` existed were checked again (once).
     var accessRechecked = false
+    /// Pictures of channels in YouTube's feeds that Stow doesn't follow (the feeds list none),
+    /// looked up from each channel's page once.
+    var channelAvatars: [String: URL] = [:]
 
     static let empty = AppState(seenVideoIds: [:], inbox: [], lastCheck: nil)
 
@@ -270,7 +273,7 @@ struct AppState: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case seenVideoIds, checkedFeeds, inbox, recentVideos, lastCheck, failedCheckStreak, alarmPlayedIds, watchedIds,
              pendingYouTubeWatched, youTubeHistory, lastWatchSync, phone, memberAccess, lastAlarmRun, lastScheduledAlarm,
-             nonMemberChannels, accessRechecked
+             nonMemberChannels, accessRechecked, channelAvatars
     }
 
     init(from decoder: Decoder) throws {
@@ -294,6 +297,7 @@ struct AppState: Codable, Equatable, Sendable {
             ?? lastAlarmRun.flatMap { $0.trigger == .scheduled ? $0.scheduledFor : nil }
         nonMemberChannels = (try? c.decodeIfPresent([String: Date].self, forKey: .nonMemberChannels)) ?? [:]
         accessRechecked = (try? c.decodeIfPresent(Bool.self, forKey: .accessRechecked)) ?? false
+        channelAvatars = (try? c.decodeIfPresent([String: URL].self, forKey: .channelAvatars)) ?? [:]
     }
 }
 

@@ -94,8 +94,10 @@ class PlayerConnection(private val context: Context, private val repository: Rep
         _error.value = null
         if (!start.isPlayable) return stream(start)
         _resolving.value = null
-        val playable = items.filter { it.isPlayable }.ifEmpty { listOf(start) }
-        val index = playable.indexOfFirst { it.id == start.id }.coerceAtLeast(0)
+        // The list may not hold the tapped video (one only in YouTube's feeds): it plays first then.
+        val listed = items.filter { it.isPlayable }
+        val playable = if (listed.any { it.id == start.id }) listed else listOf(start) + listed
+        val index = playable.indexOfFirst { it.id == start.id }
         if (_current.value == start.id && _queue.value == playable.map { it.id }) {
             controller.play()
             return

@@ -110,7 +110,12 @@ enum class WatchFilter(val label: String) { ALL("All"), UNWATCHED("Unwatched"), 
  * What YouTube itself would show the account, as the Mac last read it (its Home
  * recommendations and the Subscriptions feed), in YouTube's order.
  */
-data class YouTubeFeeds(val recommended: List<Video> = emptyList(), val subscriptions: List<Video> = emptyList()) {
+data class YouTubeFeeds(
+    val recommended: List<Video> = emptyList(),
+    val subscriptions: List<Video> = emptyList(),
+    /** Pictures of the channels in them, by channel id (the Mac looks them up; the feeds have none). */
+    val channelAvatars: Map<String, String> = emptyMap(),
+) {
     val isEmpty: Boolean get() = recommended.isEmpty() && subscriptions.isEmpty()
 
     companion object {
@@ -139,7 +144,10 @@ data class YouTubeFeeds(val recommended: List<Video> = emptyList(), val subscrip
                     ).takeUnless { it.isShort || it.liveStatus == "is_live" }
                 }
             }
-            return YouTubeFeeds(list("recommended"), list("subscriptions"))
+            val avatars = root.optJSONObject("channelAvatars")?.let { o ->
+                o.keys().asSequence().mapNotNull { id -> o.optString(id).takeIf { it.isNotEmpty() }?.let { id to it } }.toMap()
+            }.orEmpty()
+            return YouTubeFeeds(list("recommended"), list("subscriptions"), avatars)
         }
     }
 }

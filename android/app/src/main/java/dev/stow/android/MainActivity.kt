@@ -206,9 +206,10 @@ class MainActivity : ComponentActivity() {
         // The Mac's channels first (with their pictures), then the rest YouTube's feeds mention.
         val knownChannels = (channels.map { dev.stow.android.ui.SubscriptionChannel(it.id, it.title, it.avatarUrl) } +
             (youtubeFeeds.subscriptions + youtubeFeeds.recommended).filter { it.channelId.isNotEmpty() }
-                .map { dev.stow.android.ui.SubscriptionChannel(it.channelId, it.channelTitle, null) }).distinctBy { it.id }
+                .map { dev.stow.android.ui.SubscriptionChannel(it.channelId, it.channelTitle, youtubeFeeds.channelAvatars[it.channelId]) }).distinctBy { it.id }
         val subscribedChannels = knownChannels.filter { c -> channels.any { it.id == c.id } || youtubeFeeds.subscriptions.any { it.channelId == c.id } }
-        val avatars = channels.associate { it.id to it.avatarUrl }
+        // The Mac's channels' pictures, then the ones it looked up for channels only in YouTube's feeds.
+        val avatars = youtubeFeeds.channelAvatars + channels.mapNotNull { c -> c.avatarUrl?.let { c.id to it } }
         var grouping by remember { mutableStateOf<dev.stow.android.data.GroupChannel?>(null) }
         var newGroup by remember { mutableStateOf(false) }
         var sizing by remember { mutableStateOf<VideoItem?>(null) }
@@ -284,7 +285,7 @@ class MainActivity : ComponentActivity() {
                 android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix().apply { setSaturation(0f) })
             ).asComposeRenderEffect()
         } else Modifier
-        androidx.compose.runtime.CompositionLocalProvider(dev.stow.android.ui.LocalCalm provides calm) {
+        androidx.compose.runtime.CompositionLocalProvider(dev.stow.android.ui.LocalCalm provides calm, dev.stow.android.ui.LocalChannelAvatars provides avatars) {
         Box(Modifier.fillMaxSize().then(gray)) {
         Column(Modifier.fillMaxSize()) {
             Box(Modifier.weight(1f)) {
@@ -322,6 +323,11 @@ class MainActivity : ComponentActivity() {
                             onOpenPlaylist = { nav.navigate("playlist/$it") },
                             onNewPlaylist = { repository.createPlaylist(it); notify("Created “$it”") },
                             onSearch = { nav.navigate("search") }, onSettings = { nav.navigate("settings") },
+                            onDeleteMany = { items ->
+                                if (items.any { it.id == current }) player.stop()
+                                items.forEach { repository.deleteDownload(it.id) }
+                                notify(if (items.size == 1) "Deleted from downloads" else "Deleted ${items.size} videos from downloads")
+                            },
                         )
                     }
                     composable("channels") {

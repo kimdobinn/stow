@@ -78,7 +78,7 @@ fun ReportScreen(
             items(byChannel, key = { it.key }) { (channelId, seconds) ->
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        ChannelAvatar(channels.firstOrNull { it.id == channelId }?.avatarUrl, 28.dp, name = titles[channelId].orEmpty())
+                        ChannelAvatar(LocalChannelAvatars.current[channelId], 28.dp, name = titles[channelId].orEmpty())
                         Spacer(Modifier.width(10.dp))
                         Text(titles[channelId] ?: "Other", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Stow.colors.text, modifier = Modifier.weight(1f))
                         Text(listOfNotNull(Format.minutes(seconds), finished[channelId]?.let { Format.count(it, "video") }).joinToString(" · "),

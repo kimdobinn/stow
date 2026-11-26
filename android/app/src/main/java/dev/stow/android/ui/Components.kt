@@ -348,19 +348,28 @@ fun VideoCard(item: VideoItem, avatarUrl: String?, actions: VideoActions) {
 /** Downloads, channel pages, playlists: thumbnail on the left, text on the right. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun VideoRow(item: VideoItem, actions: VideoActions, showChannel: Boolean = true, trailing: (@Composable () -> Unit)? = null) {
+fun VideoRow(item: VideoItem, actions: VideoActions, showChannel: Boolean = true, trailing: (@Composable () -> Unit)? = null,
+             selection: RowSelection? = null) {
     var menu by remember { mutableStateOf(false) }
     val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val selecting = selection?.active == true
     Row(
-        Modifier.fillMaxWidth().combinedClickable(onClick = { actions.open(item) }, onLongClick = {
-            haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-            menu = true
-        })
+        Modifier.fillMaxWidth()
+            .background(if (selection?.selected == true) Stow.colors.accent.copy(alpha = 0.10f) else Color.Transparent)
+            .combinedClickable(onClick = { if (selecting) selection!!.onToggle() else actions.open(item) }, onLongClick = {
+                haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                if (selection != null) selection.onToggle() else menu = true
+            })
             .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
     ) {
         val calm = LocalCalm.current
+        if (calm && selecting) {
+            SelectionMark(selection!!.selected, Modifier.padding(top = 2.dp, end = 12.dp))
+        }
         if (!calm) {
-            Thumbnail(item, Modifier.width(156.dp), rounded = 10.dp)
+            Thumbnail(item, Modifier.width(156.dp), rounded = 10.dp) {
+                if (selecting) SelectionMark(selection!!.selected, Modifier.align(Alignment.TopStart).padding(6.dp), onImage = true)
+            }
             Spacer(Modifier.width(12.dp))
         }
         Column(Modifier.weight(1f).padding(top = 1.dp)) {
@@ -374,12 +383,33 @@ fun VideoRow(item: VideoItem, actions: VideoActions, showChannel: Boolean = true
             DownloadStatus(item)
             if (calm && item.progress > 0.01f) WatchedLine(item.progress)
         }
+        if (selecting) return@Row
         if (trailing != null) trailing()
         if (!item.isPlayable) DownloadDisc(item, actions, onMedia = false, size = 34.dp)
         Box {
             MoreButton { menu = true }
             VideoMenu(item, actions, menu) { menu = false }
         }
+    }
+}
+
+/**
+ * A row in a list you can pick several from, like the Gallery: a long press starts picking with
+ * that row, then taps pick and unpick.
+ */
+data class RowSelection(val active: Boolean, val selected: Boolean, val onToggle: () -> Unit)
+
+/** The round check on a picked (filled) or pickable (outlined) row; white over a thumbnail. */
+@Composable
+fun SelectionMark(selected: Boolean, modifier: Modifier = Modifier, onImage: Boolean = false) {
+    val outline = if (onImage) Color.White else Stow.colors.secondaryText
+    Box(
+        modifier.size(24.dp).clip(CircleShape)
+            .background(if (selected) Stow.colors.accent else if (onImage) Color.Black.copy(alpha = 0.25f) else Color.Transparent)
+            .border(2.dp, if (selected) Stow.colors.accent else outline, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (selected) Icon(Icons.Rounded.Check, contentDescription = "Selected", tint = Color.White, modifier = Modifier.size(16.dp))
     }
 }
 

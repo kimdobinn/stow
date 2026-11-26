@@ -50,6 +50,9 @@ protocol YouTubeService: Sendable {
 struct AccountFeeds: Codable, Equatable, Sendable {
     var recommended: [FeedVideo]
     var subscriptions: [FeedVideo]
+    /// The pictures of the channels in them, by channel id, as far as Stow knows them (yt-dlp's
+    /// feed listings have none).
+    var channelAvatars: [String: URL]? = nil
 }
 
 /// A video in a YouTube feed (yt-dlp --flat-playlist lists no upload dates).

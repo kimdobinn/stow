@@ -34,6 +34,13 @@ class YouTubeFeedsTest {
         assertTrue(stream.isMembersOnly)
         assertEquals(1_800_000_000_000L, stream.publishedAt?.time)
         assertTrue(feeds.subscriptions.isEmpty())
+        assertTrue(feeds.channelAvatars.isEmpty())
+    }
+
+    @Test fun readsTheChannelPictures() {
+        val json = """{"recommended":[],"subscriptions":[],
+            "channelAvatars":{"UCa":"https:\/\/yt3.googleusercontent.com\/a=s176","UCb":""}}"""
+        assertEquals(mapOf("UCa" to "https://yt3.googleusercontent.com/a=s176"), YouTubeFeeds.parse(json).channelAvatars)
     }
 
     @Test fun durationFallsBackToTheFeed() {

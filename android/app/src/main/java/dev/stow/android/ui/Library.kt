@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -25,6 +26,8 @@ import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
@@ -79,11 +82,16 @@ fun DownloadsScreen(
     sort: DownloadSort, groupByChannel: Boolean, storageText: String,
     actions: VideoActions, onSort: (DownloadSort) -> Unit, onGroup: (Boolean) -> Unit,
     onOpenPlaylist: (String) -> Unit, onNewPlaylist: (String) -> Unit, onSearch: () -> Unit, onSettings: () -> Unit,
+    onDeleteMany: (List<VideoItem>) -> Unit,
 ) {
     var filter by rememberSaveable { mutableStateOf(WatchFilter.ALL) }
+    // Picking downloads to delete: a long press on one starts it.
+    var selecting by rememberSaveable { mutableStateOf(false) }
+    var picked by rememberSaveable { mutableStateOf(listOf<String>()) }
+    var confirmDelete by remember { mutableStateOf(false) }
     var sortMenu by remember { mutableStateOf(false) }
     var newPlaylist by remember { mutableStateOf(false) }
-    val avatars = channels.associate { it.id to it.avatarUrl }
+    val avatars = LocalChannelAvatars.current
     val downloading = all.filter { it.isDownloading || it.state == dev.stow.android.data.DownloadState.FAILED }
         .sortedByDescending { it.local?.updatedAt ?: 0 }
     val downloaded = all.filter { it.isPlayable }.filter {
@@ -93,12 +101,30 @@ fun DownloadsScreen(
             WatchFilter.WATCHED -> it.watched
         }
     }.sortedFor(sort)
+    val pickedItems = all.filter { it.isPlayable && it.id in picked }
+    fun toggle(ids: List<String>, on: Boolean) {
+        selecting = true
+        picked = if (on) (picked + ids).distinct() else picked - ids.toSet()
+    }
+    fun selection(item: VideoItem) = RowSelection(selecting, item.id in picked) { toggle(listOf(item.id), item.id !in picked) }
+    fun stopSelecting() { selecting = false; picked = emptyList() }
+    androidx.activity.compose.BackHandler(enabled = selecting) { stopSelecting() }
 
     Column(Modifier.fillMaxSize()) {
-        LargeTitleBar("Downloads", onSearch, onSettings)
+        if (selecting) {
+            SelectionBar(
+                count = pickedItems.size,
+                allPicked = downloaded.isNotEmpty() && downloaded.all { it.id in picked },
+                onAll = { all -> toggle(downloaded.map { it.id }, all) },
+                onDelete = { confirmDelete = true },
+                onClose = ::stopSelecting,
+            )
+        } else {
+            LargeTitleBar("Downloads", onSearch, onSettings)
+        }
         LazyColumn(Modifier.fillMaxSize()) {
-            item { SectionHeader("Playlists") }
-            item {
+            if (!selecting) item { SectionHeader("Playlists") }
+            if (!selecting) item {
                 LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     item { NewPlaylistCard { newPlaylist = true } }
                     items(playlists, key = { it.id }) { playlist ->
@@ -106,7 +132,7 @@ fun DownloadsScreen(
                     }
                 }
             }
-            if (downloading.isNotEmpty()) {
+            if (downloading.isNotEmpty() && !selecting) {
                 item { SectionHeader("Downloading · ${downloading.size}") }
                 items(downloading, key = { "d-" + it.id }) { VideoRow(it, actions) }
             }
@@ -146,8 +172,15 @@ fun DownloadsScreen(
                     .sortedBy { (_, list) -> list.first().video.channelTitle.lowercase() }
                     .forEach { (channelId, list) ->
                         item(key = "g-$channelId") {
-                            Row(Modifier.fillMaxWidth().clickable { actions.openChannel(channelId) }.padding(horizontal = 12.dp, vertical = 10.dp),
+                            val allInGroup = list.all { it.id in picked }
+                            Row(Modifier.fillMaxWidth()
+                                    .clickable { if (selecting) toggle(list.map { it.id }, !allInGroup) else actions.openChannel(channelId) }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically) {
+                                if (selecting) {
+                                    SelectionMark(allInGroup)
+                                    Spacer(Modifier.width(10.dp))
+                                }
                                 ChannelAvatar(avatars[channelId], 28.dp, name = list.first().video.channelTitle)
                                 Spacer(Modifier.width(10.dp))
                                 Text(list.first().video.channelTitle, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Stow.colors.text,
@@ -155,10 +188,10 @@ fun DownloadsScreen(
                                 Text("${list.size}", fontSize = 13.sp, color = Stow.colors.secondaryText)
                             }
                         }
-                        items(list, key = { "v-" + it.id }) { VideoRow(it, actions, showChannel = false) }
+                        items(list, key = { "v-" + it.id }) { VideoRow(it, actions, showChannel = false, selection = selection(it)) }
                     }
             } else {
-                items(downloaded, key = { "v-" + it.id }) { VideoRow(it, actions) }
+                items(downloaded, key = { "v-" + it.id }) { VideoRow(it, actions, selection = selection(it)) }
             }
             item {
                 Text(storageText, fontSize = 12.sp, color = Stow.colors.secondaryText,
@@ -168,6 +201,40 @@ fun DownloadsScreen(
     }
 
     if (newPlaylist) NameDialog("New playlist", "", onDismiss = { newPlaylist = false }) { onNewPlaylist(it); newPlaylist = false }
+    if (confirmDelete) {
+        val bytes = pickedItems.sumOf { it.local?.sizeBytes ?: 0 }
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Delete ${Format.count(pickedItems.size, "video")}?") },
+            text = { Text(if (bytes > 0) "Frees ${Format.bytes(bytes)} on this phone." else "They're removed from this phone.") },
+            confirmButton = {
+                TextButton(onClick = { confirmDelete = false; onDeleteMany(pickedItems); stopSelecting() }) {
+                    Text("Delete", color = Stow.colors.accent)
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
+        )
+    }
+}
+
+/** Replaces the title while picking downloads: close, how many, all, and delete. */
+@Composable
+private fun SelectionBar(count: Int, allPicked: Boolean, onAll: (Boolean) -> Unit, onDelete: () -> Unit, onClose: () -> Unit) {
+    Row(Modifier.fillMaxWidth().statusBarsPadding().padding(start = 4.dp, end = 8.dp, top = 6.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        IconButton(onClick = onClose) { Icon(Icons.Filled.Close, contentDescription = "Done", tint = Stow.colors.text) }
+        Column(Modifier.clip(RoundedCornerShape(8.dp)).clickable { onAll(!allPicked) }.padding(horizontal = 8.dp, vertical = 2.dp),
+               horizontalAlignment = Alignment.CenterHorizontally) {
+            SelectionMark(allPicked)
+            Text("All", fontSize = 11.sp, color = Stow.colors.secondaryText)
+        }
+        Text(if (count == 0) "Select videos" else "$count selected", style = StowType.title3, fontWeight = FontWeight.Bold,
+             color = Stow.colors.text, modifier = Modifier.weight(1f).padding(start = 8.dp))
+        IconButton(onClick = onDelete, enabled = count > 0) {
+            Icon(Icons.Filled.Delete, contentDescription = "Delete",
+                 tint = if (count > 0) Stow.colors.accent else Stow.colors.secondaryText.copy(alpha = 0.5f))
+        }
+    }
 }
 
 @Composable

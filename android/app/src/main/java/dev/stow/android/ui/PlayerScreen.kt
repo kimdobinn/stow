@@ -24,7 +24,11 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.BoxWithConstraintsScope
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.ui.graphics.asImageBitmap
+import kotlinx.coroutines.flow.conflate
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -315,7 +319,7 @@ fun PlayerScreen(
             }
             Row(Modifier.fillMaxWidth().clickable { actions.openChannel(current.video.channelId) }
                     .padding(horizontal = 16.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                ChannelAvatar(channel?.avatarUrl, 40.dp, name = current.video.channelTitle)
+                ChannelAvatar(channel?.avatarUrl ?: LocalChannelAvatars.current[current.video.channelId], 40.dp, name = current.video.channelTitle)
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(current.video.channelTitle, style = StowType.headline, fontSize = 16.sp, color = Stow.colors.text, maxLines = 1)
@@ -405,6 +409,7 @@ fun PlayerScreen(
                         onFullscreen = { setFullscreen(!fullscreen) },
                         onCollapse = { if (fullscreen) setFullscreen(false) else sheet.collapse() },
                         onSettings = { speedDialog = true },
+                        filePath = current?.local?.filePath,
                     )
                 }
                 when {
@@ -475,6 +480,8 @@ private fun PlayerControls(
     onFullscreen: () -> Unit,
     onCollapse: () -> Unit,
     onSettings: () -> Unit,
+    /** The downloaded file, for the frames shown while scrubbing (none while streaming). */
+    filePath: String? = null,
 ) {
     var visible by remember { mutableStateOf(true) }
     var position by remember { mutableLongStateOf(0L) }
@@ -585,7 +592,7 @@ private fun PlayerControls(
                     Spacer(Modifier.weight(1f))
                     IconButton(onClick = onSettings) { Icon(Icons.Outlined.Settings, contentDescription = "Settings", tint = Color.White) }
                 }
-                Row(Modifier.align(Alignment.Center), verticalAlignment = Alignment.CenterVertically,
+                if (scrubbing == null) Row(Modifier.align(Alignment.Center), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(36.dp)) {
                     RoundControl(Icons.Filled.SkipPrevious, "Previous", 44.dp, enabled = hasPrevious) { player.seekToPreviousMediaItem(); lastTouch = System.currentTimeMillis() }
                     RoundControl(when { ended -> Icons.Filled.Replay; playing -> Icons.Filled.Pause; else -> Icons.Filled.PlayArrow },
@@ -598,7 +605,7 @@ private fun PlayerControls(
                     }
                     RoundControl(Icons.Filled.SkipNext, "Next", 44.dp, enabled = hasNext) { player.seekToNextMediaItem(); lastTouch = System.currentTimeMillis() }
                 }
-                Row(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = 14.dp, end = 4.dp, bottom = if (fullscreen) 34.dp else 14.dp),
+                if (scrubbing == null) Row(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = 14.dp, end = 4.dp, bottom = if (fullscreen) 34.dp else 14.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     val shown = scrubbing?.let { (it * duration).toLong() } ?: position
                     Text("${Format.duration(shown)} / ${Format.duration(duration)}", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
@@ -618,14 +625,25 @@ private fun PlayerControls(
         }
         // The seek bar: thin at the bottom edge, with a red scrubber while the controls show.
         val fraction = scrubbing ?: if (duration > 0) position.toFloat() / duration else 0f
+        scrubbing?.let { at ->
+            ScrubPreview(filePath, (at * duration).toLong(), at, fullscreen)
+        }
         val bufferedFraction = if (duration > 0) buffered.toFloat() / duration else 0f
         Box(
             Modifier.align(Alignment.BottomStart).fillMaxWidth().height(24.dp)
                 .offset { IntOffset(0, if (fullscreen) -(16.dp.roundToPx()) else 11.dp.roundToPx()) }
                 .pointerInput(player, duration) {
+                    // Like YouTube: a drag moves from where the video is, not from where the finger lands.
                     detectHorizontalDragGestures(
-                        onDragStart = { scrubbing = (it.x / width).coerceIn(0f, 1f); visible = true },
-                        onHorizontalDrag = { change, _ -> scrubbing = (change.position.x / width).coerceIn(0f, 1f); lastTouch = System.currentTimeMillis() },
+                        onDragStart = {
+                            scrubbing = if (duration > 0) (player.currentPosition.toFloat() / duration).coerceIn(0f, 1f) else 0f
+                            visible = true
+                        },
+                        onHorizontalDrag = { change, dragAmount ->
+                            change.consume()
+                            scrubbing = ((scrubbing ?: 0f) + dragAmount / width).coerceIn(0f, 1f)
+                            lastTouch = System.currentTimeMillis()
+                        },
                         onDragEnd = { scrubbing?.let { player.seekTo((it * duration).toLong()) }; scrubbing = null },
                         onDragCancel = { scrubbing = null },
                     )
@@ -694,3 +712,62 @@ private fun RoundControl(icon: androidx.compose.ui.graphics.vector.ImageVector, 
 
 @Composable
 private fun <T> kotlinx.coroutines.flow.StateFlow<T>.collectAsStateCompat() = collectAsStateWithLifecycle()
+
+/** While scrubbing: the frame at that point (from the downloaded file) and its time, above the bar. */
+@Composable
+private fun BoxWithConstraintsScope.ScrubPreview(filePath: String?, timeMs: Long, fraction: Float, fullscreen: Boolean) {
+    val frame = rememberScrubFrame(filePath, timeMs)
+    val boxWidth = if (fullscreen) 200.dp else 150.dp
+    val x = (maxWidth * fraction - boxWidth / 2).coerceIn(8.dp, (maxWidth - boxWidth - 8.dp).coerceAtLeast(8.dp))
+    Column(Modifier.align(Alignment.BottomStart).offset(x = x).padding(bottom = if (fullscreen) 52.dp else 20.dp),
+           horizontalAlignment = Alignment.CenterHorizontally) {
+        if (filePath != null) {
+            Box(Modifier.width(boxWidth).aspectRatio(16f / 9f).clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                    .background(Color.Black).border(1.5.dp, Color.White, androidx.compose.foundation.shape.RoundedCornerShape(8.dp))) {
+                frame?.let {
+                    androidx.compose.foundation.Image(it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+        }
+        Text(Format.duration(timeMs), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+             modifier = Modifier.width(boxWidth), textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+             style = androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = 0.7f), blurRadius = 6f)))
+    }
+}
+
+/**
+ * The frame nearest `timeMs` in the file (its closest keyframe, which is quick), read one at a
+ * time on a background thread; while the finger moves, only the latest position is read next.
+ */
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+@Composable
+private fun rememberScrubFrame(filePath: String?, timeMs: Long): androidx.compose.ui.graphics.ImageBitmap? {
+    var frame by remember(filePath) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    val target by androidx.compose.runtime.rememberUpdatedState(timeMs)
+    LaunchedEffect(filePath) {
+        if (filePath == null) return@LaunchedEffect
+        val reader = kotlinx.coroutines.Dispatchers.IO.limitedParallelism(1)
+        val retriever = android.media.MediaMetadataRetriever()
+        try {
+            kotlinx.coroutines.withContext(reader) { retriever.setDataSource(filePath) }
+            androidx.compose.runtime.snapshotFlow { target }
+                .conflate()
+                .collect { at ->
+                    val bitmap = kotlinx.coroutines.withContext(reader) {
+                        runCatching {
+                            retriever.getScaledFrameAtTime(at * 1000, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 384, 216)
+                        }.getOrNull()
+                    }
+                    if (bitmap != null) frame = bitmap.asImageBitmap()
+                }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+        } finally {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable + reader) { runCatching { retriever.release() } }
+        }
+    }
+    return frame
+}
+
+
