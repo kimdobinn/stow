@@ -108,6 +108,28 @@ cd android
 Release builds also need your own signing key in `android/keystore/`. Install the APK, then pair it from **Phone › Pair a Phone** on the Mac. More in
 [android/README.md](android/README.md).
 
+### Installing and updating the phone app with Obtainium
+
+Stow isn't on Google Play: Play doesn't allow apps that download from YouTube. Instead,
+`android/release.sh` builds the signed APK and publishes it as a
+[GitHub release](https://github.com/kimdobinn/stow/releases), and
+[Obtainium](https://github.com/ImranR98/Obtainium) on the phone installs it and updates it from
+there.
+
+1. Install Obtainium (from its GitHub releases or F-Droid).
+2. In Obtainium, tap **Add App**, paste `https://github.com/kimdobinn/stow` (or your fork) and tap
+   **Add**, then **Install**.
+3. Obtainium checks for new releases in the background and offers each update.
+
+To publish an update: bump `versionCode` and `versionName` in
+[android/app/build.gradle.kts](android/app/build.gradle.kts), commit and push, then run
+`android/release.sh`. Every release must be signed with the same key, or phones can't update over
+the installed app.
+
+The APKs here are built against my own Firebase project, so they only pair with my Mac. To use
+Stow with yours, fork the repository, build with your `google-services.json` and signing key, and
+point Obtainium at your fork.
+
 ## Notes
 
 Stow is a personal project and isn't affiliated with YouTube or Google. It uses your own account and
