@@ -9,8 +9,9 @@
 # is tagged v<versionName> on the pushed commit.
 set -euo pipefail
 
-cd "${0:A:h}"
-repo_root=${0:A:h:h}
+script_dir=${0:A:h}
+repo_root=${script_dir:h}
+cd "$script_dir"
 
 [[ -f keystore/keystore.properties ]] || { echo "No signing key in android/keystore/." >&2; exit 1; }
 
