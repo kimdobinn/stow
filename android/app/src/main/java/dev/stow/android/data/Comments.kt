@@ -21,12 +21,12 @@ data class Comment(
 )
 
 /** A video's top comments in YouTube's "Top" order, and YouTube's count of all of them. */
-data class CommentsPage(val threads: List<Comment>, val totalCount: Long?) {
+data class CommentsPage(val threads: List<Comment>, val totalCount: Long?, val fetchedCount: Int = 0) {
     /**
      * YouTube's count of all comments, when yt-dlp gave it. With a limit on how many to fetch it
      * reports just the number fetched, which would read as the total.
      */
-    val shownCount: Long? get() = totalCount?.takeIf { it > threads.size + threads.sumOf { t -> t.replies.size } }
+    val shownCount: Long? get() = totalCount?.takeIf { it > maxOf(fetchedCount, threads.size + threads.sumOf { t -> t.replies.size }) }
 }
 
 object Comments {
@@ -55,7 +55,7 @@ object Comments {
             if (parent == "root") threads += comment else replies.getOrPut(parent) { mutableListOf() } += comment
         }
         val total = if (root.has("comment_count") && !root.isNull("comment_count")) root.optLong("comment_count") else null
-        return CommentsPage(threads.map { it.copy(replies = replies[it.id].orEmpty()) }, total)
+        return CommentsPage(threads.map { it.copy(replies = replies[it.id].orEmpty()) }, total, raw.length())
     }
 
     /** Just the comments and their count from yt-dlp's answer (which also lists every format), to keep. */

@@ -21,11 +21,13 @@ struct CommentsPage: Equatable, Sendable {
     var threads: [Comment]
     /// YouTube's count of all comments, when it gives one.
     var totalCount: Int?
+    /// How many yt-dlp listed (replies whose thread it didn't list included).
+    var fetchedCount = 0
 
     /// The total worth showing: with a limit on how many to fetch, yt-dlp reports just the number
     /// fetched, which would read as the total.
     var shownCount: Int? {
-        totalCount.flatMap { $0 > threads.count + threads.reduce(0) { $0 + $1.replies.count } ? $0 : nil }
+        totalCount.flatMap { $0 > max(fetchedCount, threads.count + threads.reduce(0) { $0 + $1.replies.count }) ? $0 : nil }
     }
 }
 
@@ -36,7 +38,8 @@ enum CommentsParser {
         var threads: [Comment] = []
         var threadIndex: [String: Int] = [:]
         var replies: [(parent: String, comment: Comment)] = []
-        for entry in object["comments"] as? [[String: Any]] ?? [] {
+        let entries = object["comments"] as? [[String: Any]] ?? []
+        for entry in entries {
             guard let id = entry["id"] as? String, let text = entry["text"] as? String else { continue }
             let comment = Comment(
                 id: id, author: entry["author"] as? String ?? "",
@@ -56,6 +59,6 @@ enum CommentsParser {
         for reply in replies {
             if let index = threadIndex[reply.parent] { threads[index].replies.append(reply.comment) }
         }
-        return CommentsPage(threads: threads, totalCount: (object["comment_count"] as? NSNumber)?.intValue)
+        return CommentsPage(threads: threads, totalCount: (object["comment_count"] as? NSNumber)?.intValue, fetchedCount: entries.count)
     }
 }

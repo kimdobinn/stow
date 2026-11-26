@@ -20,7 +20,7 @@ struct CommentsTests {
         let page = try #require(CommentsParser.parse(json: Data(json.utf8)))
         #expect(page.totalCount == 1234 && page.shownCount == 1234)
         // yt-dlp's count when it's only the number fetched.
-        #expect(CommentsParser.parse(json: Data(json.replacingOccurrences(of: "1234", with: "4").utf8))?.shownCount == nil)
+        #expect(CommentsParser.parse(json: Data(json.replacingOccurrences(of: "1234", with: "6").utf8))?.shownCount == nil)
         #expect(page.threads.map(\.id) == ["a", "b"])
         let first = page.threads[0]
         #expect(first.replies.map(\.id) == ["a.1", "a.2"])

@@ -25,7 +25,7 @@ class CommentsTest {
         assertEquals(1234L, page.totalCount)
         assertEquals(1234L, page.shownCount)
         // yt-dlp's count when it's only the number fetched.
-        assertNull(Comments.parse(json.replace("1234", "4")).shownCount)
+        assertNull(Comments.parse(json.replace("1234", "6")).shownCount)
         assertEquals(listOf("a", "b"), page.threads.map { it.id })
         val first = page.threads[0]
         assertEquals(listOf("a.1", "a.2"), first.replies.map { it.id })

@@ -65,9 +65,13 @@ enum Snapshot {
 
     private static func makeModel(in directory: URL) throws -> AppModel {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        for file in [AppPaths.settingsFile, AppPaths.stateFile, AppPaths.logFile]
-        where FileManager.default.fileExists(atPath: file.path) {
-            try FileManager.default.copyItem(at: file, to: directory.appending(path: file.lastPathComponent))
+        if CommandLine.arguments.contains(SnapshotDemo.argument) {
+            try SnapshotDemo.write(to: Store(directory: directory))
+        } else {
+            for file in [AppPaths.settingsFile, AppPaths.stateFile, AppPaths.logFile]
+            where FileManager.default.fileExists(atPath: file.path) {
+                try FileManager.default.copyItem(at: file, to: directory.appending(path: file.lastPathComponent))
+            }
         }
         let model = AppModel(youtube: YouTubeClient(), account: SnapshotAccount(),
                              store: Store(directory: directory), notifier: SilentNotifier(),
