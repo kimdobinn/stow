@@ -74,6 +74,8 @@ data class VideoItem(
     val video: Video, val sent: SentVideo?, val local: LocalVideo?, val watchedOnMac: Boolean,
     /** Only in YouTube's Home or Subscriptions feed: not from a Stow channel, never sent. */
     val onlyInYouTubeFeeds: Boolean = false,
+    /** Only known from a YouTube search on the phone (kept out of Home and the other lists). */
+    val fromSearch: Boolean = false,
 ) {
     val id: String get() = video.id
     val watched: Boolean get() = sent?.watched ?: watchedOnMac
@@ -148,6 +150,37 @@ data class YouTubeFeeds(
                 o.keys().asSequence().mapNotNull { id -> o.optString(id).takeIf { it.isNotEmpty() }?.let { id to it } }.toMap()
             }.orEmpty()
             return YouTubeFeeds(list("recommended"), list("subscriptions"), avatars)
+        }
+    }
+}
+
+/** YouTube search results, from yt-dlp's `ytsearchN:` answer with `--flat-playlist -J`. */
+object YouTubeSearch {
+    /** Videos only, in YouTube's order: no Shorts, and no live or upcoming streams (only finished ones). */
+    fun parse(json: String): List<Video> {
+        val entries = JSONObject(json).optJSONArray("entries") ?: return emptyList()
+        return (0 until entries.length()).mapNotNull { i ->
+            val o = entries.optJSONObject(i) ?: return@mapNotNull null
+            val id = o.optString("id").takeIf { it.length == 11 } ?: return@mapNotNull null
+            if ("/shorts/" in o.optString("url")) return@mapNotNull null
+            val live = o.optString("live_status").takeIf { it.isNotEmpty() && it != "null" }
+            if (live == "is_live" || live == "is_upcoming" || live == "post_live") return@mapNotNull null
+            val thumbnails = o.optJSONArray("thumbnails")
+            val thumbnail = thumbnails?.let { t ->
+                (0 until t.length()).mapNotNull { t.optJSONObject(it) }.maxByOrNull { it.optInt("width") }?.optString("url")
+            }?.takeIf { it.isNotEmpty() } ?: "https://i.ytimg.com/vi/$id/hqdefault.jpg"
+            Video(
+                id = id,
+                channelId = o.optString("channel_id").takeIf { it != "null" }.orEmpty(),
+                channelTitle = (o.optString("channel").takeIf { it.isNotEmpty() && it != "null" }
+                    ?: o.optString("uploader").takeIf { it != "null" }).orEmpty(),
+                title = o.optString("title").takeIf { it.isNotEmpty() && it != "null" } ?: id,
+                publishedAt = if (o.has("timestamp") && !o.isNull("timestamp")) java.util.Date((o.optDouble("timestamp") * 1000).toLong()) else null,
+                thumbnailUrl = thumbnail,
+                isMembersOnly = o.optString("availability") == "subscriber_only",
+                liveStatus = live,
+                durationSeconds = if (o.has("duration") && !o.isNull("duration")) o.optDouble("duration").toLong() else null,
+            ).takeUnless { it.isShort }
         }
     }
 }

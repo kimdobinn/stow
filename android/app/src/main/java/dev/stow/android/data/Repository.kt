@@ -58,12 +58,23 @@ class Repository(private val context: Context) {
     /** Your channel groups, shared with the Mac. */
     val groups: StateFlow<List<ChannelGroup>> = _shared.map { it.groups }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
-    /** Every known video (sent to the phone, recent on a channel, or in YouTube's feeds), by id. No Shorts. */
-    val items: StateFlow<Map<String, VideoItem>> = combine(sent, _channels, local.videos, prefs.watchedHere, _youtubeFeeds) { sent, channels, local, watchedHere, feeds ->
+    /** Videos found by searching YouTube on the phone, newest search last (this run of the app only). */
+    private val searched = MutableStateFlow<Map<String, Video>>(emptyMap())
+    private val youtubeVideos = combine(_youtubeFeeds, searched) { feeds, searched -> feeds to searched }
+
+    /**
+     * Every known video (sent to the phone, recent on a channel, in YouTube's feeds or found by a
+     * search), by id. No Shorts.
+     */
+    val items: StateFlow<Map<String, VideoItem>> = combine(sent, _channels, local.videos, prefs.watchedHere, youtubeVideos) { sent, channels, local, watchedHere, (feeds, searched) ->
         val result = LinkedHashMap<String, VideoItem>()
         for (video in feeds.recommended + feeds.subscriptions) {
             if (video.id in result) continue
             result[video.id] = VideoItem(video, null, local[video.id], video.id in watchedHere, onlyInYouTubeFeeds = true)
+        }
+        for (video in searched.values) {
+            if (video.id in result) continue
+            result[video.id] = VideoItem(video, null, local[video.id], video.id in watchedHere, onlyInYouTubeFeeds = true, fromSearch = true)
         }
         // YouTube's feeds know the length of videos the Mac's channel list doesn't.
         fun Video.withFeedDuration() = if (durationSeconds == null) copy(durationSeconds = result[id]?.video?.durationSeconds) else this
@@ -206,6 +217,18 @@ class Repository(private val context: Context) {
                     queue(id, sentAt)
             }
         }
+    }
+
+    /** Searches all of YouTube; the results join [items] (so they play and download like any video). Returns their ids. */
+    suspend fun searchYouTube(query: String): List<String> {
+        val videos = YouTubeSearch.parse(YtDlp.search(context, query, SEARCH_RESULTS))
+        prefs.addRecentSearch(query)
+        searched.value = LinkedHashMap(searched.value).apply {
+            videos.forEach { remove(it.id); put(it.id, it) }
+            // Keep the latest few searches' videos, not every one since the app started.
+            while (size > SEARCH_KEEP) remove(keys.first())
+        }
+        return videos.map { it.id }
     }
 
     /** The video to download, from what's loaded or (in a background job) from the server. */
@@ -401,5 +424,7 @@ class Repository(private val context: Context) {
     companion object {
         const val TAG = "Stow"
         const val REFRESH_TIMEOUT_MS = 120_000L
+        const val SEARCH_RESULTS = 40
+        const val SEARCH_KEEP = 400
     }
 }

@@ -77,6 +77,21 @@ class Prefs(context: Context) {
         _theme.value = theme
     }
 
+    private val _recentSearches = MutableStateFlow(
+        prefs.getString(KEY_RECENT_SEARCHES, null)?.split("\n")?.filter { it.isNotBlank() }.orEmpty())
+    /** What you searched YouTube for, latest first. */
+    val recentSearches: StateFlow<List<String>> = _recentSearches.asStateFlow()
+    fun addRecentSearch(query: String) {
+        val q = query.trim().replace("\n", " ")
+        if (q.isEmpty()) return
+        saveRecentSearches((listOf(q) + _recentSearches.value.filterNot { it.equals(q, ignoreCase = true) }).take(20))
+    }
+    fun removeRecentSearch(query: String) = saveRecentSearches(_recentSearches.value - query)
+    private fun saveRecentSearches(list: List<String>) {
+        prefs.edit().putString(KEY_RECENT_SEARCHES, list.joinToString("\n")).apply()
+        _recentSearches.value = list
+    }
+
     /** Videos marked watched on the phone that were never sent to it (streamed). */
     private val _watchedHere = MutableStateFlow(prefs.getStringSet(KEY_WATCHED_HERE, emptySet()).orEmpty().toSet())
     val watchedHere: StateFlow<Set<String>> = _watchedHere.asStateFlow()
@@ -147,6 +162,7 @@ class Prefs(context: Context) {
         const val KEY_GROUP = "groupByChannel"
         const val KEY_THEME = "theme"
         const val KEY_QUALITY = "downloadQuality"
+        const val KEY_RECENT_SEARCHES = "recentSearches"
         const val KEY_ALARM_HOSTS = "alarmHosts"
         const val KEY_ALARM_PORT = "alarmPort"
         const val KEY_ALARM_MAC = "alarmMac"

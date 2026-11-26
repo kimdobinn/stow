@@ -200,7 +200,7 @@ class MainActivity : ComponentActivity() {
         val youtubeFeeds by repository.youtubeFeeds.collectAsStateWithLifecycle()
         val groups by repository.groups.collectAsStateWithLifecycle()
         val feed = all.sortedByDescending { it.video.publishedAt?.time ?: it.sent?.sentAt?.time ?: 0 }
-        val everything = itemsById.values.sortedByDescending { it.video.publishedAt?.time ?: it.sent?.sentAt?.time ?: 0 }
+        val everything = itemsById.values.filterNot { it.fromSearch }.sortedByDescending { it.video.publishedAt?.time ?: it.sent?.sentAt?.time ?: 0 }
         val recommended = youtubeFeeds.recommended.mapNotNull { itemsById[it.id] }
         val subscriptionsFeed = dev.stow.android.data.Feeds.subscriptions(youtubeFeeds.subscriptions.mapNotNull { itemsById[it.id] }, feed)
         // The Mac's channels first (with their pictures), then the rest YouTube's feeds mention.
@@ -337,7 +337,9 @@ class MainActivity : ComponentActivity() {
                     composable("channel/{id}") { entry ->
                         val id = entry.arguments?.getString("id")
                         val channel = channels.firstOrNull { it.id == id }
-                        val videos = everything.filter { it.video.channelId == id }
+                        // Its videos you found by searching too, after the rest.
+                        val videos = everything.filter { it.video.channelId == id } +
+                            itemsById.values.filter { it.fromSearch && it.video.channelId == id }
                         val title = channel?.title ?: knownChannels.firstOrNull { it.id == id }?.title ?: videos.firstOrNull()?.video?.channelTitle.orEmpty()
                         ChannelScreen(channel, title, videos, actions,
                                       groupNames = groups.filter { g -> g.channels.any { it.id == id } }.map { it.name },
@@ -368,7 +370,14 @@ class MainActivity : ComponentActivity() {
                             onBack = { nav.popBackStack() },
                         )
                     }
-                    composable("search") { SearchScreen(feed, actions, onBack = { nav.popBackStack() }) }
+                    composable("search") {
+                        val recentSearches by repository.prefs.recentSearches.collectAsStateWithLifecycle()
+                        SearchScreen(everything, itemsById, recentSearches, actions,
+                                     onSearch = { withContext(Dispatchers.IO) { repository.searchYouTube(it) } },
+                                     onRemoveRecent = repository.prefs::removeRecentSearch,
+                                     onPlay = { list, item -> play(list, item) },
+                                     onBack = { nav.popBackStack() })
+                    }
                     composable("settings") {
                         SettingsScreen(repository, wifiOnly, onReport = { nav.navigate("report") },
                                        onRemote = { nav.navigate("remote") }, onGroups = { nav.navigate("groups") },

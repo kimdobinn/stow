@@ -21,6 +21,10 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.material.icons.automirrored.rounded.ArrowBackIos
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.History
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.layout.width
@@ -337,7 +341,7 @@ fun ChannelScreen(
                     }
                 }
                 if (channel == null) {
-                    Text("Not followed on the Mac yet: these are its videos in your YouTube feeds. Add it to a group and the Mac follows it.",
+                    Text("Not followed on the Mac yet: these are its videos from your YouTube feeds and searches. Add it to a group and the Mac follows it.",
                          fontSize = 13.sp, color = Stow.colors.secondaryText, modifier = Modifier.padding(horizontal = 16.dp))
                 }
                 ChipRow {
@@ -354,36 +358,162 @@ fun ChannelScreen(
     }
 }
 
-/** Searches every video's title and channel. */
+/**
+ * Search, as in the YouTube app: as you type it suggests your recent searches and matching videos
+ * you already have; search (the keyboard's button) looks through all of YouTube.
+ */
 @Composable
-fun SearchScreen(all: List<VideoItem>, actions: VideoActions, onBack: () -> Unit) {
-    var query by rememberSaveable { mutableStateOf("") }
-    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
-    LaunchedEffect(Unit) { focus.requestFocus() }
-    val words = query.trim().lowercase().split(" ").filter { it.isNotEmpty() }
-    val results = if (words.isEmpty()) emptyList() else all.filter { item ->
-        val text = (item.video.title + " " + item.video.channelTitle).lowercase()
-        words.all { it in text }
+fun SearchScreen(
+    yourVideos: List<VideoItem>, itemsById: Map<String, VideoItem>, recent: List<String>, actions: VideoActions,
+    onSearch: suspend (String) -> List<String>, onRemoveRecent: (String) -> Unit,
+    onPlay: (List<VideoItem>, VideoItem) -> Unit, onBack: () -> Unit,
+) {
+    var field by rememberSaveable(stateSaver = androidx.compose.ui.text.input.TextFieldValue.Saver) {
+        mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(""))
     }
+    var submitted by rememberSaveable { mutableStateOf<String?>(null) }
+    var resultIds by rememberSaveable { mutableStateOf<List<String>>(emptyList()) }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    var job by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+
+    fun search(text: String) {
+        val q = text.trim()
+        if (q.isEmpty()) return
+        field = androidx.compose.ui.text.input.TextFieldValue(q, androidx.compose.ui.text.TextRange(q.length))
+        submitted = q
+        resultIds = emptyList()
+        error = null
+        loading = true
+        keyboard?.hide()
+        focusManager.clearFocus()
+        job?.cancel()
+        job = scope.launch {
+            try {
+                resultIds = onSearch(q)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (!isActive) return@launch
+                error = e.message?.lineSequence()?.firstOrNull()?.removePrefix("ERROR: ")?.takeIf { it.isNotBlank() } ?: "Check the connection and try again."
+            } finally {
+                // A newer search replaced this one: it's still loading.
+                if (isActive) loading = false
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        val last = submitted
+        when {
+            last == null -> focus.requestFocus()
+            // Back after the app was closed: the results are gone, so search again.
+            resultIds.none { it in itemsById } && !loading -> search(last)
+        }
+    }
+
+    val query = field.text.trim()
+    val showingResults = submitted != null && query == submitted
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().height(56.dp).padding(end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Stow.colors.text) }
-            androidx.compose.foundation.text.BasicTextField(
-                value = query, onValueChange = { query = it }, singleLine = true,
-                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 16.sp, color = Stow.colors.text),
-                cursorBrush = androidx.compose.ui.graphics.SolidColor(Stow.colors.text),
-                modifier = Modifier.weight(1f).focusRequester(focus).clip(androidx.compose.foundation.shape.RoundedCornerShape(50))
-                    .background(Stow.colors.chip).padding(horizontal = 16.dp, vertical = 10.dp),
-                decorationBox = { inner ->
-                    if (query.isEmpty()) Text("Search your videos", color = Stow.colors.secondaryText, fontSize = 16.sp)
-                    inner()
-                },
-            )
+            Row(Modifier.weight(1f).clip(androidx.compose.foundation.shape.RoundedCornerShape(50)).background(Stow.colors.chip)
+                    .padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                androidx.compose.foundation.text.BasicTextField(
+                    value = field, onValueChange = { field = it }, singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 16.sp, color = Stow.colors.text),
+                    cursorBrush = androidx.compose.ui.graphics.SolidColor(Stow.colors.text),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { search(field.text) }),
+                    modifier = Modifier.weight(1f).focusRequester(focus).padding(vertical = 10.dp),
+                    decorationBox = { inner ->
+                        if (field.text.isEmpty()) Text("Search YouTube", color = Stow.colors.secondaryText, fontSize = 16.sp)
+                        inner()
+                    },
+                )
+                if (field.text.isNotEmpty()) {
+                    IconButton(onClick = { field = androidx.compose.ui.text.input.TextFieldValue(""); focus.requestFocus(); keyboard?.show() },
+                               modifier = Modifier.size(36.dp)) {
+                        Icon(Icons.Rounded.Close, contentDescription = "Clear", tint = Stow.colors.secondaryText, modifier = Modifier.size(20.dp))
+                    }
+                } else {
+                    Spacer(Modifier.height(36.dp))
+                }
+            }
         }
         LazyColumn(Modifier.fillMaxSize()) {
             topAnchor()
-            if (words.isNotEmpty() && results.isEmpty()) item { EmptyState("No videos match “${query.trim()}”.") }
-            items(results, key = { it.id }) { VideoRow(it, actions) }
+            when {
+                showingResults -> {
+                    val results = resultIds.mapNotNull { itemsById[it] }
+                    when {
+                        loading -> item("loading") {
+                            Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
+                                androidx.compose.material3.CircularProgressIndicator(color = Stow.colors.accent, strokeWidth = 3.dp,
+                                                                                    modifier = Modifier.size(32.dp))
+                            }
+                        }
+                        error != null -> item("error") {
+                            Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("Couldn't search YouTube.", style = StowType.subheadline, color = Stow.colors.text)
+                                Text(error.orEmpty(), style = StowType.footnote, color = Stow.colors.secondaryText, textAlign = TextAlign.Center,
+                                     maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+                                TextButton(onClick = { submitted?.let(::search) }) { Text("Try Again", color = Stow.colors.accent) }
+                            }
+                        }
+                        results.isEmpty() -> item("none") { EmptyState("No videos found for “$submitted”.") }
+                        else -> {
+                            val resultActions = actions.copy(play = { onPlay(results, it) })
+                            items(results, key = { "r-" + it.id }) { VideoCard(it, LocalChannelAvatars.current[it.video.channelId], resultActions) }
+                            item("note") { EmptyState("Shorts and live streams are left out.", PaddingValues(24.dp)) }
+                        }
+                    }
+                }
+                query.isEmpty() -> {
+                    if (recent.isEmpty()) {
+                        item("hint") { EmptyState("Search all of YouTube. Shorts and live streams are left out.") }
+                    }
+                    items(recent, key = { "h-$it" }) { text -> SuggestionRow(text, history = true, onClick = { search(text) }, onRemove = { onRemoveRecent(text) }) }
+                }
+                else -> {
+                    item("search-for") { SuggestionRow(query, history = false, onClick = { search(query) }) }
+                    val words = query.lowercase().split(" ").filter { it.isNotEmpty() }
+                    val pastMatches = recent.filter { r -> !r.equals(query, ignoreCase = true) && words.all { it in r.lowercase() } }.take(5)
+                    items(pastMatches, key = { "h-$it" }) { text -> SuggestionRow(text, history = true, onClick = { search(text) }, onRemove = { onRemoveRecent(text) }) }
+                    val yours = yourVideos.filter { item ->
+                        val text = (item.video.title + " " + item.video.channelTitle).lowercase()
+                        words.all { it in text }
+                    }
+                    if (yours.isNotEmpty()) {
+                        item("yours") {
+                            Text("Your videos", style = StowType.footnote, fontWeight = FontWeight.SemiBold, color = Stow.colors.secondaryText,
+                                 modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 6.dp))
+                        }
+                        items(yours, key = { "y-" + it.id }) { VideoRow(it, actions) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** A search suggestion: a past search (with a clock, removable) or "search for what you typed". */
+@Composable
+private fun SuggestionRow(text: String, history: Boolean, onClick: () -> Unit, onRemove: (() -> Unit)? = null) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = 16.dp, end = 4.dp).height(52.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Icon(if (history) Icons.Rounded.History else Icons.Rounded.Search, contentDescription = null,
+             tint = Stow.colors.secondaryText, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(16.dp))
+        Text(text, fontSize = 16.sp, color = Stow.colors.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        if (onRemove != null) {
+            IconButton(onClick = onRemove) {
+                Icon(Icons.Rounded.Close, contentDescription = "Remove “$text”", tint = Stow.colors.secondaryText, modifier = Modifier.size(18.dp))
+            }
         }
     }
 }

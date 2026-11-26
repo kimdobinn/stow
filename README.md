@@ -38,6 +38,7 @@
 **On the phone (Android)**
 - **Home** with all of YouTube's recommendations, **Subscriptions** like YouTube's, and **channel
   groups** to see only the channels you pick.
+- **Search all of YouTube**, with your recent searches; play or download any result.
 - **No Shorts anywhere.** Live streams show only once they're over (labelled "Streamed").
 - **Download** any video to watch offline (up to 1080p, or the quality you pick, up to 4K), in the background or on the lock screen. Long videos show
   their size first.

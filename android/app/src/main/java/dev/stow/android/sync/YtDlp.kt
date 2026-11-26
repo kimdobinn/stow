@@ -139,6 +139,29 @@ object YtDlp {
         } else size(info)
     }
 
+    /** YouTube's search results for `query` as yt-dlp's JSON (a second or two; no cookies, so not personalized). */
+    suspend fun search(context: Context, query: String, count: Int): String = withContext(Dispatchers.IO) {
+        ensureReady(context)
+        // One search at a time: a new one stops the last. Each has its own id, since the stopped
+        // one's cleanup would otherwise clear the new one's.
+        val id = "search-${searches.incrementAndGet()}"
+        lastSearch.getAndSet(id)?.let(::cancel)
+        val request = YoutubeDLRequest("ytsearch$count:$query").apply {
+            addOption("--flat-playlist")
+            addOption("-J")
+        }
+        val response = try {
+            YoutubeDL.getInstance().execute(request, id)
+        } finally {
+            lastSearch.compareAndSet(id, null)
+        }
+        if (response.exitCode != 0) throw java.io.IOException(summary(response.err))
+        response.out.lineSequence().first { it.trimStart().startsWith("{") }
+    }
+
+    private val searches = java.util.concurrent.atomic.AtomicLong()
+    private val lastSearch = java.util.concurrent.atomic.AtomicReference<String?>(null)
+
     /** yt-dlp's max_comments: in all, top-level, replies in all, replies per thread. */
     const val COMMENT_LIMITS = "80,40,60,6"
 
