@@ -154,11 +154,34 @@ data class YouTubeFeeds(
     }
 }
 
-/** YouTube search results, from yt-dlp's `ytsearchN:` answer with `--flat-playlist -J`. */
-object YouTubeSearch {
-    /** Videos only, in YouTube's order: no Shorts, and no live or upcoming streams (only finished ones). */
+/** A channel's latest uploads and past streams, loaded on the phone for channels the Mac doesn't follow. */
+data class ChannelPage(val title: String, val avatarUrl: String?, val videoIds: List<String>, val streamIds: List<String>, val loadedAt: Long)
+
+/**
+ * YouTube lists from yt-dlp's `--flat-playlist -J` answer: search results (`ytsearchN:`) or a
+ * channel's tab (…/videos, …/streams).
+ */
+object YouTubeListing {
+    /** The channel's picture, on a channel tab. */
+    fun channelAvatar(json: String): String? {
+        val thumbnails = JSONObject(json).optJSONArray("thumbnails") ?: return null
+        val all = (0 until thumbnails.length()).mapNotNull { thumbnails.optJSONObject(it) }
+        return all.firstOrNull { it.optString("id") == "avatar_uncropped" }?.optString("url")?.takeIf { it.isNotEmpty() }
+    }
+
+    /** The channel's name, on a channel tab. */
+    fun channelTitle(json: String): String? =
+        JSONObject(json).let { o -> (o.optString("channel").takeIf { it.isNotEmpty() && it != "null" } ?: o.optString("uploader").takeIf { it.isNotEmpty() && it != "null" }) }
+
+    /**
+     * Videos only, in YouTube's order: no Shorts, and no live or upcoming streams (only finished
+     * ones). A channel tab's videos don't name their channel; they get the tab's.
+     */
     fun parse(json: String): List<Video> {
-        val entries = JSONObject(json).optJSONArray("entries") ?: return emptyList()
+        val root = JSONObject(json)
+        val entries = root.optJSONArray("entries") ?: return emptyList()
+        val pageChannelId = root.optString("channel_id").takeIf { it.startsWith("UC") }.orEmpty()
+        val pageChannel = channelTitle(json).orEmpty().takeIf { pageChannelId.isNotEmpty() }.orEmpty()
         return (0 until entries.length()).mapNotNull { i ->
             val o = entries.optJSONObject(i) ?: return@mapNotNull null
             val id = o.optString("id").takeIf { it.length == 11 } ?: return@mapNotNull null
@@ -171,9 +194,9 @@ object YouTubeSearch {
             }?.takeIf { it.isNotEmpty() } ?: "https://i.ytimg.com/vi/$id/hqdefault.jpg"
             Video(
                 id = id,
-                channelId = o.optString("channel_id").takeIf { it != "null" }.orEmpty(),
-                channelTitle = (o.optString("channel").takeIf { it.isNotEmpty() && it != "null" }
-                    ?: o.optString("uploader").takeIf { it != "null" }).orEmpty(),
+                channelId = o.optString("channel_id").takeIf { it.isNotEmpty() && it != "null" } ?: pageChannelId,
+                channelTitle = o.optString("channel").takeIf { it.isNotEmpty() && it != "null" }
+                    ?: o.optString("uploader").takeIf { it.isNotEmpty() && it != "null" } ?: pageChannel,
                 title = o.optString("title").takeIf { it.isNotEmpty() && it != "null" } ?: id,
                 publishedAt = if (o.has("timestamp") && !o.isNull("timestamp")) java.util.Date((o.optDouble("timestamp") * 1000).toLong()) else null,
                 thumbnailUrl = thumbnail,

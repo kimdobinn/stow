@@ -377,7 +377,8 @@ fun VideoRow(item: VideoItem, actions: VideoActions, showChannel: Boolean = true
                  overflow = TextOverflow.Ellipsis, color = Stow.colors.text)
             Spacer(Modifier.height(3.dp))
             Text(if (showChannel) Format.meta(item, withDuration = calm)
-                 else listOfNotNull(Format.whenText(item).ifEmpty { null }, item.durationMs.takeIf { calm && it > 0 }?.let(Format::duration)).joinToString(" · "),
+                 else listOfNotNull(Format.whenText(item).ifEmpty { null }, item.durationMs.takeIf { calm && it > 0 }?.let(Format::duration),
+                                    "Members only".takeIf { item.video.isMembersOnly }).joinToString(" · "),
                  style = StowType.footnote, color = Stow.colors.secondaryText, maxLines = 2)
             Spacer(Modifier.height(3.dp))
             DownloadStatus(item)

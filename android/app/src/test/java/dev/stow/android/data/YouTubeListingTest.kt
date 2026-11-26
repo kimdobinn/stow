@@ -4,7 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-class YouTubeSearchTest {
+class YouTubeListingTest {
     /** Trimmed from yt-dlp's `ytsearch:` answer with `--flat-playlist -J`. */
     private val json = """
         {"_type":"playlist","entries":[
@@ -23,7 +23,7 @@ class YouTubeSearchTest {
     """.trimIndent()
 
     @Test fun keepsVideosAndFinishedStreamsOnly() {
-        val videos = YouTubeSearch.parse(json)
+        val videos = YouTubeListing.parse(json)
         assertEquals(listOf("n61ULEU7CO0", "WasLive1234"), videos.map { it.id })
         val first = videos[0]
         assertEquals("Best of lofi hip hop 2021", first.title)
@@ -39,6 +39,21 @@ class YouTubeSearchTest {
     }
 
     @Test fun emptyAnswer() {
-        assertEquals(emptyList<Video>(), YouTubeSearch.parse("""{"entries":[]}"""))
+        assertEquals(emptyList<Video>(), YouTubeListing.parse("""{"entries":[]}"""))
+    }
+
+    /** Trimmed from yt-dlp's answer for a channel's /videos tab: the videos don't name their channel. */
+    @Test fun channelTabVideosGetTheChannel() {
+        val json = """
+            {"_type":"playlist","channel":"Chillhop Music","channel_id":"UCOxqgCwgOqC2lMqC5PYz_Dg","uploader":"Chillhop Music",
+             "thumbnails":[{"url":"https://yt3.example/banner","id":"banner_uncropped"},{"url":"https://yt3.example/avatar","id":"avatar_uncropped"}],
+             "entries":[{"_type":"url","ie_key":"Youtube","id":"AodSJJ-ZvuI","url":"https://www.youtube.com/watch?v=AodSJJ-ZvuI",
+                         "title":"Chillhop Sanctuary","duration":7249,"live_status":null,"channel_url":"https://www.youtube.com/channel/UCOxqgCwgOqC2lMqC5PYz_Dg"}]}
+        """.trimIndent()
+        val video = YouTubeListing.parse(json).single()
+        assertEquals("UCOxqgCwgOqC2lMqC5PYz_Dg", video.channelId)
+        assertEquals("Chillhop Music", video.channelTitle)
+        assertEquals("https://yt3.example/avatar", YouTubeListing.channelAvatar(json))
+        assertEquals("Chillhop Music", YouTubeListing.channelTitle(json))
     }
 }

@@ -23,8 +23,8 @@ android {
         applicationId = "dev.stow.android"
         minSdk = 31
         targetSdk = 36
-        versionCode = 12
-        versionName = "0.8.0"
+        versionCode = 13
+        versionName = "0.8.1"
         // The Galaxy S24+ (and the Apple-silicon emulator) are 64-bit ARM; skipping the other
         // ABIs keeps yt-dlp's bundled Python and ffmpeg out of the APK four times over.
         ndk { abiFilters += "arm64-v8a" }

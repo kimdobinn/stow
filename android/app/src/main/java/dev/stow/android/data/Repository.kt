@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import dev.stow.android.sync.SyncWorker
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -221,14 +222,43 @@ class Repository(private val context: Context) {
 
     /** Searches all of YouTube; the results join [items] (so they play and download like any video). Returns their ids. */
     suspend fun searchYouTube(query: String): List<String> {
-        val videos = YouTubeSearch.parse(YtDlp.search(context, query, SEARCH_RESULTS))
+        val videos = YouTubeListing.parse(YtDlp.search(context, query, SEARCH_RESULTS))
         prefs.addRecentSearch(query)
+        addFound(videos)
+        return videos.map { it.id }
+    }
+
+    /** Videos from searches and channel pages, for [items]. */
+    private fun addFound(videos: List<Video>) {
         searched.value = LinkedHashMap(searched.value).apply {
             videos.forEach { remove(it.id); put(it.id, it) }
-            // Keep the latest few searches' videos, not every one since the app started.
+            // Keep the latest few lists' videos, not every one since the app started.
             while (size > SEARCH_KEEP) remove(keys.first())
         }
-        return videos.map { it.id }
+    }
+
+    private val _channelPages = MutableStateFlow<Map<String, ChannelPage>>(emptyMap())
+    /** Channel pages loaded on the phone (this run of the app), by channel id. */
+    val channelPages: StateFlow<Map<String, ChannelPage>> = _channelPages.asStateFlow()
+
+    /**
+     * Loads a channel's latest uploads and past streams from YouTube; they join [items] like
+     * search results. Skipped when loaded in the last half hour.
+     */
+    suspend fun loadChannelPage(channelId: String) {
+        val known = _channelPages.value[channelId]
+        if (known != null && System.currentTimeMillis() - known.loadedAt < CHANNEL_PAGE_FRESH_MS) return
+        val (uploadsJson, streamsJson) = kotlinx.coroutines.coroutineScope {
+            val uploads = async { YtDlp.channelTab(context, channelId, "videos", CHANNEL_PAGE_VIDEOS) }
+            val streams = async { runCatching { YtDlp.channelTab(context, channelId, "streams", CHANNEL_PAGE_STREAMS) }.getOrNull() }
+            uploads.await() to streams.await()
+        }
+        val uploads = YouTubeListing.parse(uploadsJson)
+        val streams = streamsJson?.let(YouTubeListing::parse).orEmpty().filter { it.isPastStream }
+        addFound(uploads + streams)
+        val page = ChannelPage(YouTubeListing.channelTitle(uploadsJson).orEmpty(), YouTubeListing.channelAvatar(uploadsJson),
+                               uploads.map { it.id }, streams.map { it.id }, System.currentTimeMillis())
+        _channelPages.value = _channelPages.value + (channelId to page)
     }
 
     /** The video to download, from what's loaded or (in a background job) from the server. */
@@ -426,5 +456,8 @@ class Repository(private val context: Context) {
         const val REFRESH_TIMEOUT_MS = 120_000L
         const val SEARCH_RESULTS = 40
         const val SEARCH_KEEP = 400
+        const val CHANNEL_PAGE_VIDEOS = 30
+        const val CHANNEL_PAGE_STREAMS = 15
+        const val CHANNEL_PAGE_FRESH_MS = 30 * 60 * 1000L
     }
 }

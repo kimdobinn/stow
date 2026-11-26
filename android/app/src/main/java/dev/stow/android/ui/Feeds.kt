@@ -64,6 +64,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.stow.android.data.Channel
 import dev.stow.android.data.ChannelGroup
+import dev.stow.android.data.ChannelPage
 import dev.stow.android.data.Feeds
 import androidx.compose.material.icons.filled.Add
 import dev.stow.android.data.VideoItem
@@ -315,6 +316,8 @@ private enum class ChannelTab(val label: String) { VIDEOS("Videos"), LIVE("Live"
 fun ChannelScreen(
     channel: Channel?, title: String, videos: List<VideoItem>, actions: VideoActions,
     groupNames: List<String>, onGroups: () -> Unit, onBack: () -> Unit,
+    /** For a channel the Mac doesn't follow: its latest videos, loaded from YouTube on the phone. */
+    page: ChannelPage? = null, loading: Boolean = false, loadError: String? = null, onRetry: () -> Unit = {},
 ) {
     var oldestFirst by rememberSaveable { mutableStateOf(false) }
     var tab by rememberSaveable { mutableStateOf(ChannelTab.VIDEOS) }
@@ -323,13 +326,19 @@ fun ChannelScreen(
     Column(Modifier.fillMaxSize()) {
         BackTopBar(title, onBack)
         if (channel == null && videos.isEmpty()) {
-            EmptyState("This channel isn't on the Mac anymore.")
+            when {
+                loading -> Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
+                    androidx.compose.material3.CircularProgressIndicator(color = Stow.colors.accent, strokeWidth = 3.dp, modifier = Modifier.size(32.dp))
+                }
+                loadError != null -> LoadError(loadError, onRetry)
+                else -> EmptyState("No videos from this channel.")
+            }
             return
         }
         LazyColumn(Modifier.fillMaxSize()) {
             item {
                 Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    ChannelAvatar(channel?.avatarUrl ?: LocalChannelAvatars.current[videos.firstOrNull()?.video?.channelId], 72.dp, name = title)
+                    ChannelAvatar(channel?.avatarUrl ?: page?.avatarUrl ?: LocalChannelAvatars.current[videos.firstOrNull()?.video?.channelId], 72.dp, name = title)
                     Spacer(Modifier.width(16.dp))
                     Column(Modifier.weight(1f)) {
                         Text(title, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Stow.colors.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -341,7 +350,8 @@ fun ChannelScreen(
                     }
                 }
                 if (channel == null) {
-                    Text("Not followed on the Mac yet: these are its videos from your YouTube feeds and searches. Add it to a group and the Mac follows it.",
+                    Text(if (page != null) "Not followed on the Mac yet. Add it to a group and the Mac follows it."
+                         else "Not followed on the Mac yet: these are its videos from your YouTube feeds and searches. Add it to a group and the Mac follows it.",
                          fontSize = 13.sp, color = Stow.colors.secondaryText, modifier = Modifier.padding(horizontal = 16.dp))
                 }
                 ChipRow {
@@ -352,9 +362,27 @@ fun ChannelScreen(
                 }
             }
             val sorted = if (oldestFirst) listed.reversed() else listed
-            if (sorted.isEmpty()) item { EmptyState(if (tab == ChannelTab.LIVE) "No past live streams." else "No recent videos.") }
+            if (loading) item("loading") {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.CircularProgressIndicator(color = Stow.colors.accent, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Text("Getting the latest videos from YouTube…", fontSize = 13.sp, color = Stow.colors.secondaryText)
+                }
+            } else if (loadError != null) item("error") { LoadError(loadError, onRetry) }
+            if (sorted.isEmpty() && !loading) item { EmptyState(if (tab == ChannelTab.LIVE) "No past live streams." else "No recent videos.") }
             items(sorted, key = { it.id }) { item -> VideoRow(item, actions, showChannel = false) }
         }
+    }
+}
+
+/** Couldn't reach YouTube: the reason and a way to try again. */
+@Composable
+private fun LoadError(message: String, onRetry: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("Couldn't get this channel's videos from YouTube.", style = StowType.subheadline, color = Stow.colors.text, textAlign = TextAlign.Center)
+        Text(message, style = StowType.footnote, color = Stow.colors.secondaryText, textAlign = TextAlign.Center,
+             maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+        TextButton(onClick = onRetry) { Text("Try Again", color = Stow.colors.accent) }
     }
 }
 

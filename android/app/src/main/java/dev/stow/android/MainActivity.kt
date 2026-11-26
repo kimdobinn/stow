@@ -209,7 +209,9 @@ class MainActivity : ComponentActivity() {
                 .map { dev.stow.android.ui.SubscriptionChannel(it.channelId, it.channelTitle, youtubeFeeds.channelAvatars[it.channelId]) }).distinctBy { it.id }
         val subscribedChannels = knownChannels.filter { c -> channels.any { it.id == c.id } || youtubeFeeds.subscriptions.any { it.channelId == c.id } }
         // The Mac's channels' pictures, then the ones it looked up for channels only in YouTube's feeds.
-        val avatars = youtubeFeeds.channelAvatars + channels.mapNotNull { c -> c.avatarUrl?.let { c.id to it } }
+        val channelPages by repository.channelPages.collectAsStateWithLifecycle()
+        val avatars = channelPages.mapNotNull { (id, page) -> page.avatarUrl?.let { id to it } }.toMap() +
+            youtubeFeeds.channelAvatars + channels.mapNotNull { c -> c.avatarUrl?.let { c.id to it } }
         var grouping by remember { mutableStateOf<dev.stow.android.data.GroupChannel?>(null) }
         var newGroup by remember { mutableStateOf(false) }
         var sizing by remember { mutableStateOf<VideoItem?>(null) }
@@ -337,14 +339,38 @@ class MainActivity : ComponentActivity() {
                     composable("channel/{id}") { entry ->
                         val id = entry.arguments?.getString("id")
                         val channel = channels.firstOrNull { it.id == id }
-                        // Its videos you found by searching too, after the rest.
-                        val videos = everything.filter { it.video.channelId == id } +
+                        val page = id?.let { channelPages[it] }
+                        var loading by remember(id) { mutableStateOf(false) }
+                        var loadError by remember(id) { mutableStateOf<String?>(null) }
+                        var attempt by remember(id) { mutableStateOf(0) }
+                        // Not followed on the Mac: get its latest videos from YouTube here.
+                        LaunchedEffect(id, attempt) {
+                            if (id == null || channel != null) return@LaunchedEffect
+                            loading = true
+                            loadError = null
+                            try {
+                                withContext(Dispatchers.IO) { repository.loadChannelPage(id) }
+                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                loadError = e.message?.lineSequence()?.firstOrNull()?.removePrefix("ERROR: ")?.takeIf { it.isNotBlank() }
+                                    ?: "Check the connection and try again."
+                            } finally {
+                                loading = false
+                            }
+                        }
+                        // Its latest videos from YouTube first (in YouTube's order), then the rest you know of.
+                        val known = everything.filter { it.video.channelId == id } +
                             itemsById.values.filter { it.fromSearch && it.video.channelId == id }
-                        val title = channel?.title ?: knownChannels.firstOrNull { it.id == id }?.title ?: videos.firstOrNull()?.video?.channelTitle.orEmpty()
-                        ChannelScreen(channel, title, videos, actions,
+                        val loaded = page?.let { (it.videoIds + it.streamIds).mapNotNull { v -> itemsById[v] } }.orEmpty()
+                        val videos = loaded + known.filterNot { k -> loaded.any { it.id == k.id } }
+                        val title = channel?.title ?: knownChannels.firstOrNull { it.id == id }?.title ?: page?.title?.takeIf { it.isNotEmpty() }
+                            ?: videos.firstOrNull()?.video?.channelTitle.orEmpty()
+                        ChannelScreen(channel, title, videos, actions.copy(play = { item -> play(videos, item) }),
                                       groupNames = groups.filter { g -> g.channels.any { it.id == id } }.map { it.name },
                                       onGroups = { if (id != null) grouping = dev.stow.android.data.GroupChannel(id, title) },
-                                      onBack = { nav.popBackStack() })
+                                      onBack = { nav.popBackStack() },
+                                      page = page, loading = loading, loadError = loadError, onRetry = { attempt++ })
                     }
                     composable("playlist/{id}") { entry ->
                         val playlist = playlists.firstOrNull { it.id == entry.arguments?.getString("id") }

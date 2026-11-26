@@ -159,6 +159,20 @@ object YtDlp {
         response.out.lineSequence().first { it.trimStart().startsWith("{") }
     }
 
+    /** A channel's latest `count` videos (`tab` "videos") or past streams ("streams") as yt-dlp's JSON (a second or two). */
+    suspend fun channelTab(context: Context, channelId: String, tab: String, count: Int): String = withContext(Dispatchers.IO) {
+        ensureReady(context)
+        val request = YoutubeDLRequest("https://www.youtube.com/channel/$channelId/$tab").apply {
+            addOption("--flat-playlist")
+            addOption("-J")
+            addOption("--playlist-end", count.toString())
+        }
+        val response = YoutubeDL.getInstance().execute(request, "channel-${searches.incrementAndGet()}")
+        // A channel without live streams has no Live tab: yt-dlp says so as an error.
+        if (response.exitCode != 0) throw java.io.IOException(summary(response.err))
+        response.out.lineSequence().first { it.trimStart().startsWith("{") }
+    }
+
     private val searches = java.util.concurrent.atomic.AtomicLong()
     private val lastSearch = java.util.concurrent.atomic.AtomicReference<String?>(null)
 
