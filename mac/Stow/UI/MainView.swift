@@ -87,13 +87,6 @@ struct MainView: View {
             .onChange(of: theme) { if let window = dock.hostWindow { paintWindow(window) } }
             .animation(.snappy(duration: 0.3), value: dock.screen == nil)
             .animation(.snappy(duration: 0.3), value: dock.isExpanded)
-            .inspector(isPresented: commentsShown) {
-                if let videoId = dock.screen?.nowPlaying?.video.id {
-                    CommentsView(videoId: videoId)
-                        .inspectorColumnWidth(min: 280, ideal: 340, max: 480)
-                        .themedBackground()
-                }
-            }
             .navigationTitle(selection.title)
             .toolbar { toolbar }
         }
@@ -104,11 +97,6 @@ struct MainView: View {
 
     private var dock: PlayerDock { PlayerDock.shared }
 
-    /// The comments column, while a video is in the panel.
-    private var commentsShown: Binding<Bool> {
-        Binding(get: { dock.showsComments && dock.screen?.nowPlaying != nil },
-                set: { if !$0 { dock.showsComments = false } })
-    }
 
     /// The title bar and toolbar take the theme's background too.
     private func paintWindow(_ window: NSWindow) {
@@ -116,19 +104,21 @@ struct MainView: View {
     }
 
     private static let minPanelWidth: CGFloat = 420
+    /// The space under the details the panel keeps for the comments, at least.
+    private static let commentsHeight: CGFloat = 240
     /// What the panel always leaves of the section beside it.
     private static let minSectionWidth: CGFloat = 320
 
     /// The panel's widths: at most as wide as lets the video and the details under it fill the
     /// height (wider would only push them off the bottom), and leaving room for the section.
     private func panelWidthRange(in size: CGSize) -> ClosedRange<CGFloat> {
-        let fillsHeight = (size.height - panelDetailsHeight) * 16 / 9
+        let fillsHeight = (size.height - panelDetailsHeight - Self.commentsHeight) * 16 / 9
         let upper = min(size.width - Self.minSectionWidth, fillsHeight)
         return Self.minPanelWidth...max(Self.minPanelWidth, upper)
     }
 
     /// The video and the details under it fill the height at this width.
-    private var fillsHeightWidth: CGFloat { (detailSize.height - panelDetailsHeight) * 16 / 9 }
+    private var fillsHeightWidth: CGFloat { (detailSize.height - panelDetailsHeight - Self.commentsHeight) * 16 / 9 }
 
     /// How wide the panel is when it opens (the window grows by this much).
     private var plannedPanelWidth: CGFloat {

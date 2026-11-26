@@ -14,8 +14,9 @@ struct ChannelFetch: Sendable {
     /// The members feed was read with accepted cookies.
     var membersSucceeded = false
 
-    /// Fetches the public feed, plus the members feed when `cookiesFile` is given.
-    static func fetch(_ channel: Channel, youtube: any YouTubeService, cookiesFile: URL?) async -> ChannelFetch {
+    /// Fetches the public feed, plus the members feed when `cookiesFile` is given and the account
+    /// isn't known to be a non-member (`skipMembers`).
+    static func fetch(_ channel: Channel, youtube: any YouTubeService, cookiesFile: URL?, skipMembers: Bool = false) async -> ChannelFetch {
         var result = ChannelFetch(channel: channel)
         do {
             result.sources[.uploads] = try await youtube.fetchPublicVideos(channelId: channel.id)
@@ -27,7 +28,7 @@ struct ChannelFetch: Sendable {
         } catch {
             result.errors.append("\(channel.title): past streams failed: \(error.logDescription)")
         }
-        guard let cookiesFile else { return result }
+        guard let cookiesFile, !skipMembers else { return result }
         do {
             let feed = try await youtube.fetchMembersVideos(channelId: channel.id, cookiesFile: cookiesFile)
             // A playlist listed despite rejected cookies is still worth diffing.
@@ -56,13 +57,15 @@ struct ChannelFetch: Sendable {
 
     /// Fetches every channel, at most `maxConcurrent` at a time. Results are in `channels` order.
     static func fetchAll(
-        _ channels: [Channel], youtube: any YouTubeService, cookiesFile: URL?, maxConcurrent: Int = 3
+        _ channels: [Channel], youtube: any YouTubeService, cookiesFile: URL?, skipMembers: Set<String> = [],
+        maxConcurrent: Int = 3
     ) async -> [ChannelFetch] {
         await withTaskGroup(of: (Int, ChannelFetch).self) { group in
             var pending = channels.enumerated().makeIterator()
             func addNext() {
                 guard let (index, channel) = pending.next() else { return }
-                group.addTask { (index, await fetch(channel, youtube: youtube, cookiesFile: cookiesFile)) }
+                let skip = skipMembers.contains(channel.id)
+                group.addTask { (index, await fetch(channel, youtube: youtube, cookiesFile: cookiesFile, skipMembers: skip)) }
             }
             for _ in 0..<maxConcurrent { addNext() }
             var results: [(Int, ChannelFetch)] = []

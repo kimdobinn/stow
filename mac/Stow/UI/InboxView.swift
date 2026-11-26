@@ -364,9 +364,12 @@ private struct VideoCard: View {
             .animation(.easeOut(duration: 0.15), value: isHovered)
     }
 
+    /// "Channel · 2 days ago", or "Channel · Streamed 2 days ago" for a past live broadcast.
     private var subtitle: String {
-        guard let date = video.publishedAt else { return video.channelTitle }
-        return "\(video.channelTitle) · \(date.formatted(.relative(presentation: .named)))"
+        let when = video.publishedAt?.formatted(.relative(presentation: .named))
+        let streamed = video.liveStatus == .wasLive
+        let detail = streamed ? ["Streamed", when].compactMap(\.self).joined(separator: " ") : when
+        return [video.channelTitle, detail].compactMap(\.self).joined(separator: " · ")
     }
 }
 
@@ -449,7 +452,9 @@ struct MembersBadge: View {
     var access: MemberAccess?
 
     var body: some View {
-        if case .locked(let level) = access {
+        if access == .nowPublic {
+            EmptyView()
+        } else if case .locked(let level) = access {
             Label("Higher tier", systemImage: "lock.fill")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.white)

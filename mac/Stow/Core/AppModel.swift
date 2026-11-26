@@ -19,8 +19,8 @@ final class AppModel {
 
     /// In settings.json order.
     var channels: [Channel] { settings.channels }
-    /// Newest first. Members-only videos for a higher membership level than the account's never show.
-    var inbox: [InboxItem] { state.inbox.filter { !isLocked(videoId: $0.id) } }
+    /// Newest first. Members-only videos show only once the account is known to be able to watch them.
+    var inbox: [InboxItem] { state.inbox.filter { !isHidden($0.video) } }
     /// Every channel's recent videos that aren't in the Inbox, newest first.
     var recentVideos: [Video] {
         channels.flatMap { recentVideos(channelId: $0.id) }
@@ -32,7 +32,7 @@ final class AppModel {
     func recentVideos(channelId: String) -> [Video] {
         let inboxIds = Set(state.inbox.map(\.id))
         return (state.recentVideos[channelId] ?? [])
-            .filter { !inboxIds.contains($0.id) && !isLocked(videoId: $0.id) }
+            .filter { !inboxIds.contains($0.id) && !isHidden($0) }
             .sorted { ($0.publishedAt ?? .distantPast) > ($1.publishedAt ?? .distantPast) }
     }
     var lastCheck: CheckResult? { state.lastCheck }
@@ -188,6 +188,7 @@ final class AppModel {
         let fetches = await ChannelFetch.fetchAll(
             checked, youtube: youtube,
             cookiesFile: refreshed == .signedIn ? cookiesFile : nil,
+            skipMembers: skippedMembersChannels(),
             maxConcurrent: Self.maxConcurrentChannels)
         let found = apply(fetches)
         handleAuth(fetches, generation: generation)
@@ -205,7 +206,7 @@ final class AppModel {
         // A members-only video is announced once the account's level is known to watch it.
         let unchecked = found.filter { $0.isMembersOnly && state.memberAccess[$0.id] == nil }
         unannounced.formUnion(unchecked.map(\.id))
-        notifier.notifyNewVideos(found.filter { !$0.isMembersOnly || state.memberAccess[$0.id] == .watchable })
+        notifier.notifyNewVideos(found.filter { !isHidden($0) })
         if let failure = fetches.first(where: \.membersFailed)?.errors.last {
             notifier.notifyProblem(title: "Members-only check is failing", body: failure)
         }
@@ -220,6 +221,17 @@ final class AppModel {
     /// A members-only video for a higher membership level than the account's.
     func isLocked(videoId: String) -> Bool { state.memberAccess[videoId]?.isLocked == true }
 
+    /// Members-only and not (yet) known to be watchable: kept off the Mac, the phone and the alarm.
+    func isHidden(_ video: Video) -> Bool { video.isMembersOnly && state.memberAccess[video.id]?.canWatch != true }
+
+    /// How long a channel whose members videos the account can't watch goes without its members feed.
+    static let nonMemberRecheck: TimeInterval = 7 * 86_400
+
+    /// Channels whose members feeds aren't fetched: the account isn't a member (checked weekly).
+    func skippedMembersChannels(now: Date = .now) -> Set<String> {
+        Set(state.nonMemberChannels.filter { now.timeIntervalSince($0.value) < Self.nonMemberRecheck }.keys)
+    }
+
     /// Checks, in the background, which new members-only videos the account's level can watch.
     func checkMemberAccess() {
         guard memberAccessChecks == nil, signInState == .signedIn else { return }
@@ -227,8 +239,12 @@ final class AppModel {
         let videos = (state.inbox.map(\.video) + state.recentVideos.values.flatMap { $0 })
             .filter { $0.isMembersOnly }
             .map { (id: $0.id, label: "\($0.channelTitle): “\($0.title)”") }
-        let pending = (videos + feedMembersVideos)
+        var pending = (videos + feedMembersVideos)
             .filter { state.memberAccess[$0.id] == nil && seen.insert($0.id).inserted }
+        // Ones found watchable before "public now" was told apart are asked again, once.
+        let recheck = state.accessRechecked ? [] : videos.filter { state.memberAccess[$0.id] == .watchable && seen.insert($0.id).inserted }
+        if !state.accessRechecked, pending.count + recheck.count <= Self.accessChecksPerPass { state.accessRechecked = true }
+        pending += recheck
         guard !pending.isEmpty else { return }
         memberAccessChecks = Task { [weak self] in
             await self?.checkMemberAccess(Array(pending.prefix(Self.accessChecksPerPass)))
@@ -247,7 +263,7 @@ final class AppModel {
                 changed = true
                 if case .locked(let level) = access {
                     record(.info, "\(video.label) needs \(level.map { "the “\($0)” membership level" } ?? "a higher membership level"); it's hidden on the Mac and the phone.")
-                } else if access == .watchable, unannounced.contains(video.id) {
+                } else if access.canWatch, unannounced.contains(video.id) {
                     watchable.append(video.id)
                 }
                 unannounced.remove(video.id)
@@ -259,6 +275,7 @@ final class AppModel {
             }
         }
         guard changed else { return }
+        updateMembership()
         let announce = state.inbox.map(\.video).filter { watchable.contains($0.id) }
         if !announce.isEmpty { notifier.notifyNewVideos(announce) }
         // Forget videos that are gone everywhere.
@@ -266,6 +283,23 @@ final class AppModel {
         state.memberAccess = state.memberAccess.filter { known.contains($0.key) }
         saveState()
         phone.localChange()
+    }
+
+    /// A channel whose members videos are all "join this channel" (none watchable) isn't one the
+    /// account is a member of: its members feed is skipped until the weekly look. One watchable
+    /// video makes it a member's channel again.
+    private func updateMembership(now: Date = .now) {
+        let videos = state.inbox.map(\.video) + state.recentVideos.values.flatMap { $0 }
+        for (channelId, members) in Dictionary(grouping: videos.filter(\.isMembersOnly), by: \.channelId) {
+            let access = members.compactMap { state.memberAccess[$0.id] }
+            if access.contains(.watchable) {
+                state.nonMemberChannels[channelId] = nil
+            } else if access.contains(.locked(level: nil)), !skippedMembersChannels(now: now).contains(channelId) {
+                state.nonMemberChannels[channelId] = now
+                let title = channels.first { $0.id == channelId }?.title ?? channelId
+                record(.info, "\(title): the account isn't a member, so its members-only videos are hidden and its members feed is checked weekly.")
+            }
+        }
     }
 
     /// Notifies once checks have failed `failureNotifyStreak` times in a row (e.g. the RSS feeds
@@ -816,12 +850,17 @@ extension AppModel: PhoneSyncHost {
     /// Members-only videos go only once their access is checked and the account's level can watch them.
     func phoneRecentVideos(channelId: String) -> [Video] {
         (state.recentVideos[channelId] ?? [])
-            .filter { !$0.isMembersOnly || state.memberAccess[$0.id] == .watchable }
+            .filter { !isHidden($0) }
+            .map { video in
+                var video = video
+                if state.memberAccess[video.id] == .nowPublic { video.isMembersOnly = false }
+                return video
+            }
             .sorted { ($0.publishedAt ?? .distantPast) > ($1.publishedAt ?? .distantPast) }
     }
 
     func canSendToPhone(videoId: String, isMembersOnly: Bool) -> Bool {
-        !isMembersOnly || state.memberAccess[videoId] == .watchable
+        !isMembersOnly || state.memberAccess[videoId]?.canWatch == true
     }
 
     func phoneVideo(id: String) -> Video? {

@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import Stow
 
@@ -12,5 +13,15 @@ struct MemberAccessClientTests {
     @Test func aStreamProblemAfterGettingInIsWatchable() {
         #expect(MemberAccessClient.access(fromError: "ERROR: [youtube] x: Requested format is not available. Use --list-formats") == .watchable)
         #expect(MemberAccessClient.access(fromError: "ERROR: [youtube] x: Unable to download webpage: timed out") == nil)
+    }
+
+    @Test func aMembersFirstVideoThatOpenedUpIsPublicNow() {
+        #expect(MemberAccessClient.access(fromLookup: Data(#"{"id":"x","availability":"public"}"#.utf8)) == .nowPublic)
+        #expect(MemberAccessClient.access(fromLookup: Data(#"{"id":"x","availability":"subscriber_only"}"#.utf8)) == .watchable)
+        #expect(MemberAccessClient.access(fromLookup: Data("not json".utf8)) == .watchable)
+    }
+
+    @Test func aVideoTheAccountCantSeeAtAllIsLocked() {
+        #expect(MemberAccessClient.access(fromError: "ERROR: [youtube] pLw9Fe6FXwY: This video is not available.") == .locked(level: nil))
     }
 }

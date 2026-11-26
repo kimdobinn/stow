@@ -2,7 +2,8 @@ import AppKit
 import SwiftUI
 
 /// The player panel beside the current section (or filling the window): the video with
-/// YouTube-style controls over it, and the title and actions underneath.
+/// YouTube-style controls over it, the title and actions underneath, then the comments, which
+/// scroll in the space left.
 struct PlayerPanel: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
@@ -23,9 +24,14 @@ struct PlayerPanel: View {
                 .aspectRatio(16 / 9, contentMode: .fit)
                 .frame(maxWidth: .infinity, maxHeight: dock.isExpanded ? .infinity : nil)
                 .background(.black)
+                .layoutPriority(1)
             if !dock.isExpanded, let nowPlaying = screen.nowPlaying {
                 details(nowPlaying)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { onDetailsHeight($0) }
+                    .layoutPriority(1)
+                Divider()
+                CommentsView(videoId: nowPlaying.video.id)
+                    .frame(minHeight: 0, maxHeight: .infinity)
             }
         }
         // The video gets the height the details leave (it shrinks rather than pushing them off).
@@ -179,8 +185,6 @@ struct PlayerPanel: View {
                     model.setWatched(!isWatched, videoId: video.id)
                 }
                 PhoneButton(videoId: video.id, isMembersOnly: video.isMembersOnly)
-                Button("Comments", systemImage: "text.bubble") { dock.showsComments.toggle() }
-                    .help(dock.showsComments ? "Hide the comments" : "Show the comments beside the video")
                 Button("Open on YouTube", systemImage: "safari") {
                     dock.stop()
                     openURL(video.watchURL)

@@ -27,8 +27,11 @@ final class FakeYouTube: YouTubeService {
         return videos
     }
 
+    let membersFetches = Mutex<[String]>([])
+
     func fetchMembersVideos(channelId: String, cookiesFile: URL) async throws -> MembersFeed {
-        try (membersFeeds.withLock { $0[channelId] } ?? .success(MembersFeed(videos: []))).get()
+        membersFetches.withLock { $0.append(channelId) }
+        return try (membersFeeds.withLock { $0[channelId] } ?? .success(MembersFeed(videos: []))).get()
     }
 
     let streamFeeds = Mutex<[String: [Video]]>([:])
@@ -60,13 +63,16 @@ final class FakeYouTube: YouTubeService {
         return try accountFeeds.withLock { $0 }.get()
     }
 
-    /// Members-only videos the account's level can't watch; anything else is watchable.
+    /// Members-only videos the account's level can't watch ("" for "join this channel"); anything
+    /// else is watchable, or public now when listed in `publicNow`.
     let lockedVideos = Mutex<[String: String]>([:])
+    let publicNow = Mutex<Set<String>>([])
     let accessChecks = Mutex<[String]>([])
 
     func memberAccess(videoId: String, cookiesFile: URL) async throws -> MemberAccess {
         accessChecks.withLock { $0.append(videoId) }
-        return lockedVideos.withLock { $0[videoId] }.map { .locked(level: $0) } ?? .watchable
+        if publicNow.withLock({ $0.contains(videoId) }) { return .nowPublic }
+        return lockedVideos.withLock { $0[videoId] }.map { .locked(level: $0.isEmpty ? nil : $0) } ?? .watchable
     }
 
     func markWatched(videoId: String, cookiesFile: URL) async throws {

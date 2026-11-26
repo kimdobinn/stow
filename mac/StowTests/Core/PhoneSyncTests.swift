@@ -260,6 +260,40 @@ struct PhoneSyncTests {
         #expect(!model.inbox.map(\.id).contains("m4"))
     }
 
+    @Test func aChannelYouArentAMemberOfLosesItsMembersVideosAndFeed() async throws {
+        youtube.lockedVideos.withLock { $0 = ["j1": "", "j2": ""] }
+        youtube.membersFeeds.withLock {
+            $0[channelId] = .success(MembersFeed(videos: [video("j1", channel: channelId, minutesAgo: 0, members: true),
+                                                          video("j2", channel: channelId, minutesAgo: 0.2, members: true)]))
+        }
+        let model = try await makeModel()
+        await model.check(.manual)
+        await model.memberAccessChecks?.value
+        let shown = model.inbox.map(\.id) + model.recentVideos.map(\.id)
+        #expect(!shown.contains("j1") && !shown.contains("j2"))
+        #expect(model.skippedMembersChannels() == [channelId])
+        // The members feed isn't fetched again until the weekly look.
+        let fetches = youtube.membersFetches.withLock { $0.count }
+        await model.check(.manual)
+        #expect(youtube.membersFetches.withLock { $0.count } == fetches)
+        #expect(model.skippedMembersChannels(now: .now.addingTimeInterval(8 * 86_400)).isEmpty)
+    }
+
+    @Test func membersFirstVideosThatWentPublicLoseTheirBadge() async throws {
+        youtube.publicNow.withLock { $0 = ["p1"] }
+        youtube.membersFeeds.withLock {
+            $0[channelId] = .success(MembersFeed(videos: [video("p1", channel: channelId, minutesAgo: 0, members: true)]))
+        }
+        let model = try await makeModel()
+        await model.check(.manual)
+        await model.memberAccessChecks?.value
+        #expect(model.memberAccess(videoId: "p1") == .nowPublic)
+        #expect((model.inbox.map(\.id) + model.recentVideos.map(\.id)).contains("p1"))
+        #expect(model.skippedMembersChannels().isEmpty)
+        let sent = try #require(model.phoneRecentVideos(channelId: channelId).first { $0.id == "p1" })
+        #expect(!sent.isMembersOnly)
+    }
+
     @Test func pastStreamsReachThePhoneWithTheirLength() async throws {
         var stream = video("s1", channel: channelId, minutesAgo: 0.5, live: .wasLive)
         stream.duration = 7200

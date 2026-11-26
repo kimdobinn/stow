@@ -49,10 +49,14 @@ struct Channel: Codable, Hashable, Identifiable, Sendable {
 /// and a video for a higher level is locked even to members.
 enum MemberAccess: Codable, Equatable, Sendable {
     case watchable
-    /// Needs a higher membership level (YouTube's name for it, when it gives one).
+    /// Needs a higher membership level (YouTube's name for it, when it gives one). Without a
+    /// level, the account isn't a member of the channel at all.
     case locked(level: String?)
+    /// Was for members first and is public now.
+    case nowPublic
 
     var isLocked: Bool { if case .locked = self { true } else { false } }
+    var canWatch: Bool { self == .watchable || self == .nowPublic }
 }
 
 enum LiveStatus: String, Codable, Sendable {
@@ -232,6 +236,11 @@ struct AppState: Codable, Equatable, Sendable {
     /// The alarm time of the newest scheduled run (played or skipped), so a test run that
     /// replaces `lastAlarmRun` can't make that alarm fire again after a relaunch.
     var lastScheduledAlarm: Date?
+    /// Channels whose members-only videos the account can't watch at all (it isn't a member), and
+    /// when that was found: their members feeds aren't fetched for a week at a time.
+    var nonMemberChannels: [String: Date] = [:]
+    /// Videos found watchable before `nowPublic` existed were checked again (once).
+    var accessRechecked = false
 
     static let empty = AppState(seenVideoIds: [:], inbox: [], lastCheck: nil)
 
@@ -260,7 +269,8 @@ struct AppState: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case seenVideoIds, checkedFeeds, inbox, recentVideos, lastCheck, failedCheckStreak, alarmPlayedIds, watchedIds,
-             pendingYouTubeWatched, youTubeHistory, lastWatchSync, phone, memberAccess, lastAlarmRun, lastScheduledAlarm
+             pendingYouTubeWatched, youTubeHistory, lastWatchSync, phone, memberAccess, lastAlarmRun, lastScheduledAlarm,
+             nonMemberChannels, accessRechecked
     }
 
     init(from decoder: Decoder) throws {
@@ -282,6 +292,8 @@ struct AppState: Codable, Equatable, Sendable {
         lastAlarmRun = try? c.decodeIfPresent(AlarmRunRecord.self, forKey: .lastAlarmRun)
         lastScheduledAlarm = (try? c.decodeIfPresent(Date.self, forKey: .lastScheduledAlarm))
             ?? lastAlarmRun.flatMap { $0.trigger == .scheduled ? $0.scheduledFor : nil }
+        nonMemberChannels = (try? c.decodeIfPresent([String: Date].self, forKey: .nonMemberChannels)) ?? [:]
+        accessRechecked = (try? c.decodeIfPresent(Bool.self, forKey: .accessRechecked)) ?? false
     }
 }
 

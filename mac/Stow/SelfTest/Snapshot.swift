@@ -41,7 +41,6 @@ enum Snapshot {
                 for screen in screens {
                     model.previewAlarmPhase(screen.phase)
                     PlayerDock.shared.showPreview(screen.player)
-                    PlayerDock.shared.showsComments = screen.comments != nil
                     if let videoId = screen.comments {
                         CommentsLoader.shared.load(videoId: videoId, cookiesFile: nil)
                         await CommentsLoader.shared.settle()

@@ -34,7 +34,8 @@ struct AlarmPlannerTests {
     @Test func undatedVideosCountAsPublishedWhenFound() {
         let found = now.addingTimeInterval(-120 * 60)
         let state = AppState(seenVideoIds: [:], inbox: [item(video("members", members: true), found: found),
-                                                        item(video("dated", minutesAgo: 60))], lastCheck: nil)
+                                                        item(video("dated", minutesAgo: 60))], lastCheck: nil,
+                             memberAccess: ["members": .watchable])
         #expect(AlarmPlanner.inboxCandidates(settings: .default, channels: [alarmChannel()], state: state).map(\.id)
                 == ["members", "dated"])
     }

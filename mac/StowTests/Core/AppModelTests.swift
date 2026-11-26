@@ -113,6 +113,7 @@ struct AppModelTests {
         youtube.membersFeeds.withLock { $0[info.id] = .success(MembersFeed(videos: [video("m1", channel: info.id, members: true)])) }
         await model.checkNow()
         #expect(model.signInState == .signedIn)
+        await model.memberAccessChecks?.value
         #expect(model.inbox.first?.id == "m1")
     }
 
@@ -128,6 +129,11 @@ struct AppModelTests {
         await model.checkNow()
         #expect(model.signInState == .expired)
         #expect(notifier.problems == ["YouTube sign-in expired"])
+        // Kept, but hidden until a working sign-in shows the account can watch it.
+        #expect(!model.inbox.contains { $0.id == "m1" })
+        youtube.membersFeeds.withLock { $0[info.id] = .success(MembersFeed(videos: [video("m1", channel: info.id, members: true)])) }
+        await model.checkNow()
+        await model.memberAccessChecks?.value
         #expect(model.inbox.first?.id == "m1")
     }
 
