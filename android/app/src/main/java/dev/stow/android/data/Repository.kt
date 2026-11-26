@@ -16,6 +16,9 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import dev.stow.android.sync.SyncWorker
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
@@ -51,7 +54,11 @@ class Repository(private val context: Context) {
     /** YouTube's own Home and Subscriptions, shared by the Mac. */
     val youtubeFeeds: StateFlow<YouTubeFeeds> = _youtubeFeeds.asStateFlow()
 
-    /** Every known video (sent to the phone, recent on a channel, or in YouTube's feeds), by id. */
+    private val _shared = MutableStateFlow(Remote.Shared(emptyList(), null, null))
+    /** Your channel groups, shared with the Mac. */
+    val groups: StateFlow<List<ChannelGroup>> = _shared.map { it.groups }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    /** Every known video (sent to the phone, recent on a channel, or in YouTube's feeds), by id. No Shorts. */
     val items: StateFlow<Map<String, VideoItem>> = combine(sent, _channels, local.videos, prefs.watchedHere, _youtubeFeeds) { sent, channels, local, watchedHere, feeds ->
         val result = LinkedHashMap<String, VideoItem>()
         for (video in feeds.recommended + feeds.subscriptions) {
@@ -69,6 +76,7 @@ class Repository(private val context: Context) {
             val watchedOnMac = result[video.video.id]?.watchedOnMac ?: false
             result[video.video.id] = VideoItem(video.video.withFeedDuration(), video, local[video.video.id], watchedOnMac)
         }
+        result.values.removeAll { it.video.isShort && it.local?.state != DownloadState.DOWNLOADED }
         result
     }.stateIn(scope, SharingStarted.Eagerly, emptyMap())
 
@@ -124,6 +132,7 @@ class Repository(private val context: Context) {
         sent.value = emptyList()
         _channels.value = emptyList()
         _youtubeFeeds.value = YouTubeFeeds()
+        _shared.value = Remote.Shared(emptyList(), null, null)
         _pairState.value = PairState.Unpaired(message)
     }
 
@@ -145,6 +154,7 @@ class Repository(private val context: Context) {
             launch { runCatching { remote.refreshPushToken() }.onFailure { Log.w(TAG, "Token refresh failed", it) } }
             launch { listen { remote.channels().collect { _channels.value = it } } }
             launch { listen { remote.accountFeeds().collect { _youtubeFeeds.value = openFeeds(it) } } }
+            launch { listen { remote.shared().collect { _shared.value = it } } }
             listen { remote.videos().collect { onSentVideos(it) } }
         }
     }
@@ -275,6 +285,65 @@ class Repository(private val context: Context) {
         return File(context.cacheDir, "cookies-${java.util.UUID.randomUUID()}.txt").apply { writeBytes(data) }
     }
 
+    // Pull to refresh
+
+    enum class RefreshResult { DONE, NO_ANSWER, FAILED }
+
+    /** Asks the Mac to check every channel and YouTube's feeds now, and waits for it (up to 2 minutes). */
+    suspend fun refreshFromMac(): RefreshResult {
+        SyncWorker.runNow(context)
+        if (demo) {
+            delay(800)
+            return RefreshResult.DONE
+        }
+        val requested = try {
+            remote.requestRefresh()
+        } catch (e: Exception) {
+            Log.w(TAG, "Refresh request failed", e)
+            return RefreshResult.FAILED
+        }
+        val answered = kotlinx.coroutines.withTimeoutOrNull(REFRESH_TIMEOUT_MS) {
+            // The Mac answers with the request's time (to the millisecond).
+            _shared.first { (it.refreshHandledAt?.time ?: 0) >= requested.time - 1_000 }
+        }
+        return if (answered != null) RefreshResult.DONE else RefreshResult.NO_ANSWER
+    }
+
+    // Channel groups
+
+    private fun editGroups(change: (List<ChannelGroup>) -> List<ChannelGroup>) {
+        val shared = _shared.value
+        _shared.value = shared.copy(groups = change(shared.groups))
+        if (demo) return
+        scope.launch {
+            runCatching { remote.editGroups(change) }.onFailure { Log.w(TAG, "Saving groups failed", it) }
+        }
+    }
+
+    fun createGroup(name: String, with: GroupChannel? = null): ChannelGroup {
+        val group = ChannelGroup(java.util.UUID.randomUUID().toString(), name.trim(), listOfNotNull(with))
+        editGroups { it + group }
+        return group
+    }
+
+    fun renameGroup(id: String, name: String) = editGroups { groups -> groups.map { if (it.id == id) it.copy(name = name.trim()) else it } }
+
+    fun deleteGroup(id: String) = editGroups { groups -> groups.filterNot { it.id == id } }
+
+    fun setInGroup(groupId: String, channel: GroupChannel, included: Boolean) = editGroups { groups ->
+        groups.map { group ->
+            if (group.id != groupId) group
+            else group.copy(channels = group.channels.filterNot { it.id == channel.id } + listOfNotNull(channel.takeIf { included }))
+        }
+    }
+
+    fun moveGroup(id: String, by: Int) = editGroups { groups ->
+        val from = groups.indexOfFirst { it.id == id }
+        val to = from + by
+        if (from < 0 || to !in groups.indices) groups
+        else groups.toMutableList().apply { add(to, removeAt(from)) }
+    }
+
     // Playlists
 
     /** Adding a video that isn't downloaded yet downloads it. */
@@ -301,5 +370,6 @@ class Repository(private val context: Context) {
 
     companion object {
         const val TAG = "Stow"
+        const val REFRESH_TIMEOUT_MS = 120_000L
     }
 }

@@ -21,6 +21,14 @@ protocol YouTubeService: Sendable {
     /// `.toolNotFound`, `.processFailed`, `.timedOut`.
     func fetchMembersVideos(channelId: String, cookiesFile: URL) async throws -> MembersFeed
 
+    /// Finished public live streams (the channel's Live tab), newest first, at most 15, with
+    /// `liveStatus = .wasLive` and their length. Returns none when the channel has no Live tab.
+    func fetchPastStreams(channelId: String) async throws -> [Video]
+
+    /// Finished members-only live streams (UUMV), newest first, at most 10; throws like
+    /// `fetchMembersVideos`.
+    func fetchMembersStreams(channelId: String, cookiesFile: URL) async throws -> MembersFeed
+
     /// The signed-in account's watch history (youtube.com/feed/history via yt-dlp), most
     /// recently watched first, at most `limit` video ids. Throws like `fetchMembersVideos`.
     func fetchWatchHistory(cookiesFile: URL, limit: Int) async throws -> WatchHistory
@@ -55,6 +63,10 @@ struct FeedVideo: Codable, Equatable, Sendable {
     var thumbnailURL: URL?
     var isMembersOnly: Bool
     var isLive: Bool
+    /// A finished live stream.
+    var wasLive: Bool = false
+    /// Upload time (Unix seconds) when known: YouTube's feed sometimes says, or Stow has the video.
+    var timestamp: Double? = nil
 }
 
 struct WatchHistory: Sendable {

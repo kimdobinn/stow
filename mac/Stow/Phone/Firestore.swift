@@ -90,6 +90,7 @@ enum FirestoreValue: Equatable, Sendable {
     var bool: Bool? { if case .bool(let value) = self { value } else { nil } }
     var timestamp: String? { if case .timestamp(let value) = self { value } else { nil } }
     var map: [String: FirestoreValue]? { if case .map(let value) = self { value } else { nil } }
+    var array: [FirestoreValue]? { if case .array(let value) = self { value } else { nil } }
 
     var date: Date? {
         guard let timestamp else { return nil }

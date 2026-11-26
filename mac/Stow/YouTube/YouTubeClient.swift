@@ -23,6 +23,14 @@ struct YouTubeClient: YouTubeService {
         try await MembersFetcher(ytdlp: ytdlp).fetch(channelId: channelId, cookiesFile: cookiesFile)
     }
 
+    func fetchPastStreams(channelId: String) async throws -> [Video] {
+        try await PastStreamsFetcher(ytdlp: ytdlp).fetch(channelId: channelId)
+    }
+
+    func fetchMembersStreams(channelId: String, cookiesFile: URL) async throws -> MembersFeed {
+        try await MembersFetcher(ytdlp: ytdlp).fetchStreams(channelId: channelId, cookiesFile: cookiesFile)
+    }
+
     func fetchWatchHistory(cookiesFile: URL, limit: Int) async throws -> WatchHistory {
         try await WatchHistoryClient(ytdlp: ytdlp).fetch(cookiesFile: cookiesFile, limit: limit)
     }

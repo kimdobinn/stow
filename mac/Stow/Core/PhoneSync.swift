@@ -22,6 +22,10 @@ protocol PhoneSyncHost: AnyObject {
     var phoneCookiesFile: URL? { get }
     /// YouTube's Home and Subscriptions for the signed-in account; nil when signed out or failed.
     func phoneAccountFeeds() async -> AccountFeeds?
+    /// Channels in the phone's groups: any that aren't followed here yet get added.
+    func phoneGroupChannels(_ channels: [GroupChannel])
+    /// A pull-to-refresh on the phone: checks every channel now and returns when it's done.
+    func phoneRefresh() async
     func logPhone(_ level: LogLevel, _ message: String)
 }
 
@@ -41,7 +45,10 @@ final class PhoneSync {
     static let recentPerChannel = 30
     /// YouTube's Home and Subscriptions are read again this often (each read is two yt-dlp runs).
     static let accountFeedsInterval: TimeInterval = 20 * 60
-    static let accountFeedLimit = 40
+    static let accountFeedLimit = 150
+    /// shared/phone (groups, pull-to-refresh) is read this often, so a refresh on the phone
+    /// starts within seconds.
+    static let sharedInterval: Duration = .seconds(15)
 
     enum Connection: Equatable {
         /// No key file yet (Firebase setup not done).
@@ -82,6 +89,8 @@ final class PhoneSync {
     @ObservationIgnored private let makeBackend: (URL) throws -> any PhoneBackend
     @ObservationIgnored private var backend: (any PhoneBackend)?
     @ObservationIgnored private var loop: Task<Void, Never>?
+    @ObservationIgnored private var sharedLoop: Task<Void, Never>?
+    @ObservationIgnored private var refreshing = false
     @ObservationIgnored private var pairingTask: Task<Void, Never>?
     @ObservationIgnored private var debounced: Task<Void, Never>?
     /// The latest `pushToPhones` send; each waits for the one before, so a run's "ended" never
@@ -104,6 +113,8 @@ final class PhoneSync {
 
     var members: [PhoneMember] { host?.phoneState.members ?? [] }
     var isPaired: Bool { !members.isEmpty }
+    /// The phone's channel groups.
+    var groups: [ChannelGroup] { host?.phoneState.groups ?? [] }
 
     /// Connects (when the key is there) and syncs every minute while a phone is paired.
     func start() {
@@ -115,6 +126,101 @@ final class PhoneSync {
                 guard let self, self.backend != nil, self.isPaired else { continue }
                 await self.sync()
             }
+        }
+        sharedLoop = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: Self.sharedInterval)
+                guard let self, self.backend != nil, self.isPaired else { continue }
+                await self.readShared()
+            }
+        }
+    }
+
+    // MARK: Groups and pull-to-refresh
+
+    /// Reads shared/phone: takes the phone's groups and answers a pull-to-refresh by checking
+    /// every channel and YouTube's feeds, syncing, then marking it handled.
+    func readShared() async {
+        guard let backend, let host else { return }
+        let shared: PhoneShared?
+        do {
+            shared = try await backend.shared()
+        } catch {
+            return   // The minute sync reports Firestore trouble.
+        }
+        guard let shared else { return }
+        if shared.groups != host.phoneState.groups {
+            host.updatePhoneState { $0.groups = shared.groups }
+        }
+        host.phoneGroupChannels(shared.groups.flatMap(\.channels))
+        guard let requested = shared.refreshRequestedAt, requested > (host.phoneState.refreshHandled ?? .distantPast),
+              !refreshing else { return }
+        refreshing = true
+        defer { refreshing = false }
+        host.logPhone(.info, "Refreshing for the phone.")
+        accountFeedsReadAt = nil
+        await host.phoneRefresh()
+        await sync()   // Starts reading YouTube's feeds.
+        await accountFeedsRead?.value
+        await sync()   // Uploads them.
+        do {
+            try await backend.markRefreshHandled(requestedAt: requested)
+            host.updatePhoneState { $0.refreshHandled = requested }
+        } catch {
+            lastError = error.logDescription
+        }
+    }
+
+    /// Changes the groups here, on top of the latest from Firestore (the phone may have just
+    /// changed them), and saves them for the phones.
+    func editGroups(_ change: @escaping (inout [ChannelGroup]) -> Void) {
+        guard let host else { return }
+        var local = host.phoneState.groups
+        change(&local)
+        host.updatePhoneState { $0.groups = local }
+        guard let backend else { return }
+        Task { [weak self] in
+            do {
+                var groups = try await backend.shared()?.groups ?? local
+                change(&groups)
+                try await backend.saveGroups(groups)
+                self?.host?.updatePhoneState { $0.groups = groups }
+                self?.host?.phoneGroupChannels(groups.flatMap(\.channels))
+            } catch {
+                self?.lastError = error.logDescription
+                self?.host?.logPhone(.warning, "Couldn't save the channel groups: \(error.logDescription)")
+            }
+        }
+    }
+
+    func createGroup(name: String, channels: [GroupChannel] = []) {
+        let group = ChannelGroup(name: name, channels: channels)
+        editGroups { $0.append(group) }
+    }
+
+    func renameGroup(id: String, to name: String) {
+        editGroups { groups in
+            if let index = groups.firstIndex(where: { $0.id == id }) { groups[index].name = name }
+        }
+    }
+
+    func deleteGroup(id: String) {
+        editGroups { $0.removeAll { $0.id == id } }
+    }
+
+    func setChannel(_ channel: GroupChannel, inGroup id: String, _ included: Bool) {
+        editGroups { groups in
+            guard let index = groups.firstIndex(where: { $0.id == id }) else { return }
+            groups[index].channels.removeAll { $0.id == channel.id }
+            if included { groups[index].channels.append(channel) }
+        }
+    }
+
+    /// A channel removed here leaves every group too (it would be added back otherwise).
+    func removeFromGroups(channelId: String) {
+        guard groups.contains(where: { $0.channels.contains { $0.id == channelId } }) else { return }
+        editGroups { groups in
+            for index in groups.indices { groups[index].channels.removeAll { $0.id == channelId } }
         }
     }
 
@@ -314,7 +420,7 @@ final class PhoneSync {
         encoder.outputFormatting = .sortedKeys
         let fingerprint = feeds.map { feed in
             [String(data: (try? encoder.encode(feed.channel)) ?? Data(), encoding: .utf8) ?? ""]
-                + feed.recent.map { "\($0.id)|\($0.title)|\(feed.watched.contains($0.id))" }
+                + feed.recent.map { "\($0.id)|\($0.title)|\(feed.watched.contains($0.id))|\($0.liveStatus.rawValue)|\($0.duration ?? 0)" }
         }
         let hash = Self.fingerprint((try? encoder.encode(fingerprint)) ?? Data())
         guard hash != host.phoneState.channelsHash else { return }
@@ -352,10 +458,17 @@ final class PhoneSync {
             }
         }
         guard let read = accountFeeds else { return }
-        // Only members-only videos the account's level can watch.
-        let feeds = AccountFeeds(
-            recommended: read.recommended.filter { host.canSendToPhone(videoId: $0.id, isMembersOnly: $0.isMembersOnly) },
-            subscriptions: read.subscriptions.filter { host.canSendToPhone(videoId: $0.id, isMembersOnly: $0.isMembersOnly) })
+        // Only members-only videos the account's level can watch, with the dates Stow knows.
+        func prepared(_ videos: [FeedVideo]) -> [FeedVideo] {
+            videos.filter { host.canSendToPhone(videoId: $0.id, isMembersOnly: $0.isMembersOnly) }.map { video in
+                var video = video
+                if video.timestamp == nil, let date = host.phoneVideo(id: video.id)?.publishedAt {
+                    video.timestamp = date.timeIntervalSince1970.rounded()
+                }
+                return video
+            }
+        }
+        let feeds = AccountFeeds(recommended: prepared(read.recommended), subscriptions: prepared(read.subscriptions))
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
         let data = try encoder.encode(feeds)

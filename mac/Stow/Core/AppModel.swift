@@ -80,6 +80,8 @@ final class AppModel {
     @ObservationIgnored private var settingsStamp: Date?
     /// Members-only videos seen in YouTube's feeds for the phone, to check access like the others.
     @ObservationIgnored private var feedMembersVideos: [(id: String, label: String)] = []
+    /// Group channels already added (or tried) this launch.
+    @ObservationIgnored private var groupChannelsTried: Set<String> = []
     /// The running pass that checks members-only videos' access (tests await it).
     @ObservationIgnored private(set) var memberAccessChecks: Task<Void, Never>?
     /// At most this many lookups (a few seconds each) per pass; the rest wait for the next check.
@@ -375,7 +377,7 @@ final class AppModel {
     /// Resolves and adds a channel, then seeds it (2 newest -> Inbox, rest seen).
     /// Throws `StowError` (e.g. `.channelAlreadyAdded`, `.channelNotFound`).
     @discardableResult
-    func addChannel(input: String) async throws -> Channel {
+    func addChannel(input: String, morning: Bool = true) async throws -> Channel {
         let info: ChannelInfo
         do {
             info = try await youtube.resolveChannel(input: input.trimmingCharacters(in: .whitespacesAndNewlines))
@@ -387,7 +389,7 @@ final class AppModel {
         if let existing = channels.first(where: { $0.id == info.id }) {
             throw StowError.channelAlreadyAdded(existing.title)
         }
-        let channel = Channel(info: info)
+        let channel = Channel(info: info, morning: morning)
         updateSettings { $0.channels.append(channel) }
         record(.info, "Added channel \(channel.title) (\(channel.id)).")
         await seed([channel])
@@ -429,6 +431,8 @@ final class AppModel {
         state.recentVideos[id] = nil
         state.inbox.removeAll { $0.video.channelId == id }
         saveState()
+        groupChannelsTried.insert(id)
+        phone.removeFromGroups(channelId: id)
         record(.info, "Removed channel \(channel.title) (\(id)).")
     }
 
@@ -837,6 +841,27 @@ extension AppModel: PhoneSyncHost {
             record(.warning, "Couldn't read YouTube's Home and Subscriptions for the phone: \(error.logDescription)")
             return nil
         }
+    }
+
+    func phoneGroupChannels(_ grouped: [GroupChannel]) {
+        let followed = Set(channels.map(\.id))
+        var seen = Set<String>()
+        let missing = grouped.filter { !followed.contains($0.id) && !groupChannelsTried.contains($0.id) && seen.insert($0.id).inserted }
+        guard !missing.isEmpty else { return }
+        groupChannelsTried.formUnion(missing.map(\.id))
+        Task {
+            for channel in missing {
+                // Tried once per launch: a channel that can't be resolved isn't retried every 15 seconds.
+                if let added = try? await addChannel(input: channel.id, morning: false) {
+                    record(.info, "Added \(added.title) because it's in one of the phone's channel groups (Morning off).")
+                }
+            }
+        }
+    }
+
+    func phoneRefresh() async {
+        await check(.phone)
+        while isChecking { try? await Task.sleep(for: .milliseconds(200)) }
     }
 
     func logPhone(_ level: LogLevel, _ message: String) {

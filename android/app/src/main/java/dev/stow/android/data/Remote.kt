@@ -155,6 +155,53 @@ class Remote {
         awaitClose { registration.remove() }
     }
 
+    /** shared/phone: the channel groups and the Mac's answer to the last pull-to-refresh. */
+    data class Shared(val groups: List<ChannelGroup>, val refreshRequestedAt: java.util.Date?, val refreshHandledAt: java.util.Date?)
+
+    private val sharedDoc get() = db.collection("shared").document("phone")
+
+    fun shared(): Flow<Shared> = callbackFlow {
+        val registration = sharedDoc.addSnapshotListener { snapshot, error ->
+            if (error != null) {
+                close(if (error.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) NotPaired() else error)
+                return@addSnapshotListener
+            }
+            trySend(Shared(snapshot?.groups().orEmpty(), snapshot?.getTimestamp("refreshRequestedAt")?.toDate(),
+                           snapshot?.getTimestamp("refreshHandledAt")?.toDate()))
+        }
+        awaitClose { registration.remove() }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun com.google.firebase.firestore.DocumentSnapshot.groups(): List<ChannelGroup> =
+        (get("groups") as? List<Map<String, Any?>>).orEmpty().mapNotNull { group ->
+            val id = group["id"] as? String ?: return@mapNotNull null
+            val channels = (group["channels"] as? List<Map<String, Any?>>).orEmpty().mapNotNull { channel ->
+                val channelId = channel["id"] as? String ?: return@mapNotNull null
+                GroupChannel(channelId, channel["title"] as? String ?: channelId)
+            }
+            ChannelGroup(id, group["name"] as? String ?: "Group", channels)
+        }
+
+    /** Changes the groups on top of the latest in Firestore (the Mac may have just changed them). */
+    suspend fun editGroups(change: (List<ChannelGroup>) -> List<ChannelGroup>) {
+        db.runTransaction { transaction ->
+            val current = transaction.get(sharedDoc).groups()
+            val groups = change(current).map { group ->
+                mapOf("id" to group.id, "name" to group.name,
+                      "channels" to group.channels.map { mapOf("id" to it.id, "title" to it.title) })
+            }
+            transaction.set(sharedDoc, mapOf("groups" to groups, "groupsUpdatedBy" to "phone"),
+                            com.google.firebase.firestore.SetOptions.merge())
+        }.await()
+    }
+
+    /** Asks the Mac to check everything now; returns the request's server time. */
+    suspend fun requestRefresh(): java.util.Date {
+        sharedDoc.set(mapOf("refreshRequestedAt" to FieldValue.serverTimestamp()), com.google.firebase.firestore.SetOptions.merge()).await()
+        return sharedDoc.get(Source.SERVER).await().getTimestamp("refreshRequestedAt")?.toDate() ?: java.util.Date()
+    }
+
     private fun com.google.firebase.firestore.DocumentSnapshot.toSent(): SentVideo? {
         val title = getString("title") ?: return null
         val video = Video(
@@ -166,6 +213,7 @@ class Remote {
             thumbnailUrl = getString("thumbnailURL"),
             isMembersOnly = getBoolean("isMembersOnly") ?: false,
             liveStatus = getString("liveStatus"),
+            durationSeconds = (get("duration") as? Number)?.toLong(),
         )
         return SentVideo(video, getTimestamp("sentAt")?.toDate(), getString("sentBy"), getBoolean("watched") ?: false)
     }
@@ -185,6 +233,7 @@ class Remote {
                     thumbnailUrl = entry["thumbnailURL"] as? String,
                     isMembersOnly = entry["isMembersOnly"] as? Boolean ?: false,
                     liveStatus = entry["liveStatus"] as? String,
+                    durationSeconds = (entry["duration"] as? Number)?.toLong(),
                 ),
                 watched = entry["watched"] as? Boolean ?: false,
             )

@@ -13,6 +13,34 @@ import Foundation
 //                     phone {state, error} (written by the phone), updatedAt, updatedBy.
 //                     The phone creates one itself (sentBy "phone") to download a video.
 //   secrets/cookies   the YouTube cookies, sealed with the pairing key
+//   secrets/feeds     YouTube's Home and Subscriptions (AccountFeeds JSON), sealed likewise
+//   shared/phone      written by both: groups [{id, name, channels [{id, title}]}] (the phone's
+//                     channel groups), refreshRequestedAt (the phone pulled to refresh) and
+//                     refreshHandledAt (the Mac checked and synced after it)
+
+/// A named set of channels; the phone's Home can show just their videos.
+struct ChannelGroup: Codable, Hashable, Identifiable, Sendable {
+    var id: String
+    var name: String
+    var channels: [GroupChannel]
+
+    init(id: String = UUID().uuidString, name: String, channels: [GroupChannel] = []) {
+        self.id = id
+        self.name = name
+        self.channels = channels
+    }
+}
+
+struct GroupChannel: Codable, Hashable, Identifiable, Sendable {
+    var id: String
+    var title: String
+}
+
+/// shared/phone as read from Firestore.
+struct PhoneShared: Equatable, Sendable {
+    var groups: [ChannelGroup] = []
+    var refreshRequestedAt: Date?
+}
 
 /// A paired phone.
 struct PhoneMember: Codable, Hashable, Identifiable, Sendable {
@@ -103,6 +131,12 @@ protocol PhoneBackend: Sendable {
     func saveCookies(sealed: Data) async throws
     /// YouTube's Home and Subscriptions (`AccountFeeds` JSON) sealed with the pairing key.
     func saveAccountFeeds(sealed: Data) async throws
+    /// shared/phone; nil when it doesn't exist yet.
+    func shared() async throws -> PhoneShared?
+    /// Replaces the groups in shared/phone.
+    func saveGroups(_ groups: [ChannelGroup]) async throws
+    /// Tells the phones a pull-to-refresh asked for at `requestedAt` is done.
+    func markRefreshHandled(requestedAt: Date) async throws
     /// A high-priority data message. Returns false when the token is no longer valid.
     func push(_ data: [String: String], to token: String) async throws -> Bool
 }
@@ -139,6 +173,10 @@ struct PhoneSyncState: Codable, Equatable, Sendable {
     /// Fingerprint of the cookies last uploaded.
     var cookiesHash: String?
     var lastSync: Date?
+    /// The phone's channel groups, as last read (or written) here.
+    var groups: [ChannelGroup] = []
+    /// The newest pull-to-refresh answered.
+    var refreshHandled: Date?
 
     static let empty = PhoneSyncState()
 
@@ -146,6 +184,7 @@ struct PhoneSyncState: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case members, sent, pending, cursor, channelCursor, channelsHash, syncedChannelIds, cookiesHash, lastSync
+        case groups, refreshHandled
     }
 
     init(from decoder: Decoder) throws {
@@ -159,5 +198,7 @@ struct PhoneSyncState: Codable, Equatable, Sendable {
         syncedChannelIds = (try? c.decodeIfPresent([String].self, forKey: .syncedChannelIds)) ?? []
         cookiesHash = try? c.decodeIfPresent(String.self, forKey: .cookiesHash)
         lastSync = try? c.decodeIfPresent(Date.self, forKey: .lastSync)
+        groups = (try? c.decodeIfPresent([ChannelGroup].self, forKey: .groups)) ?? []
+        refreshHandled = try? c.decodeIfPresent(Date.self, forKey: .refreshHandled)
     }
 }

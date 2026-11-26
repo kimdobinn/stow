@@ -85,6 +85,26 @@ final class FakePhoneBackend: PhoneBackend {
         accountFeedUploads.withLock { $0 += 1 }
     }
 
+    let sharedDoc = Mutex<PhoneShared?>(nil)
+    let refreshHandled = Mutex<[Date]>([])
+    func shared() async throws -> PhoneShared? {
+        try check()
+        return sharedDoc.withLock { $0 }
+    }
+
+    func saveGroups(_ groups: [ChannelGroup]) async throws {
+        try check()
+        sharedDoc.withLock { doc in
+            var shared = doc ?? PhoneShared()
+            shared.groups = groups
+            doc = shared
+        }
+    }
+
+    func markRefreshHandled(requestedAt: Date) async throws {
+        refreshHandled.withLock { $0.append(requestedAt) }
+    }
+
     func push(_ data: [String: String], to token: String) async throws -> Bool {
         if let slow = slowPushState.withLock({ $0 }), data["state"] == slow {
             try await Task.sleep(for: .milliseconds(100))
@@ -214,6 +234,60 @@ struct PhoneSyncTests {
         await model.check(.manual)
         await model.memberAccessChecks?.value
         #expect(youtube.accessChecks.withLock { $0.count } == 2)
+    }
+
+    @Test func pastStreamsReachThePhoneWithTheirLength() async throws {
+        var stream = video("s1", channel: channelId, minutesAgo: 0.5, live: .wasLive)
+        stream.duration = 7200
+        youtube.streamFeeds.withLock { $0[channelId] = [stream] }
+        let model = try await makeModel()
+        await model.phone.sync()
+        let recent = try #require(backend.feeds.withLock { $0[channelId] }).recent
+        #expect(recent.first { $0.id == "s1" }?.duration == 7200)
+        // Not news on the Mac: a channel's streams are all seen at their first fetch.
+        #expect(!model.inbox.contains { $0.id == "s1" })
+    }
+
+    @Test func groupsFromThePhoneAddTheirChannelsAndSyncBack() async throws {
+        let model = try await makeModel()
+        youtube.channels.withLock { $0["UCnew"] = ChannelInfo(id: "UCnew", title: "New One", handle: nil, avatarURL: nil) }
+        youtube.publicFeeds.withLock { $0["UCnew"] = [] }
+        backend.sharedDoc.withLock {
+            $0 = PhoneShared(groups: [ChannelGroup(id: "g1", name: "Investing",
+                                                   channels: [GroupChannel(id: channelId, title: "P"), GroupChannel(id: "UCnew", title: "New One")])])
+        }
+        await model.phone.readShared()
+        #expect(model.phone.groups.map(\.name) == ["Investing"])
+        for _ in 0..<200 where !model.channels.contains(where: { $0.id == "UCnew" }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let added = try #require(model.channels.first { $0.id == "UCnew" })
+        #expect(!added.morning)
+
+        // Edited on the Mac: on top of the phone's latest.
+        model.phone.renameGroup(id: "g1", to: "Stocks")
+        for _ in 0..<200 where backend.sharedDoc.withLock({ $0?.groups.first?.name }) != "Stocks" {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        // Removing a channel here takes it out of its groups.
+        model.removeChannel(id: "UCnew")
+        for _ in 0..<200 where backend.sharedDoc.withLock({ $0?.groups.first?.channels.count }) != 1 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(backend.sharedDoc.withLock { $0?.groups.first?.channels.map(\.id) } == [channelId])
+    }
+
+    @Test func pullToRefreshOnThePhoneChecksAndAnswers() async throws {
+        let model = try await makeModel()
+        let requested = Date(timeIntervalSince1970: 1_900_000_000)
+        backend.sharedDoc.withLock { $0 = PhoneShared(refreshRequestedAt: requested) }
+        youtube.publicFeeds.withLock { $0[channelId] = [video("v0", channel: channelId, minutesAgo: 0)] + (1...5).map { video("v\($0)", channel: channelId, minutesAgo: Double($0)) } }
+        await model.phone.readShared()
+        #expect(model.inbox.contains { $0.id == "v0" })
+        #expect(backend.refreshHandled.withLock { $0 } == [requested])
+        // Answered once.
+        await model.phone.readShared()
+        #expect(backend.refreshHandled.withLock { $0.count } == 1)
     }
 
     @Test func sendToPhoneSendsAnyVideo() async throws {

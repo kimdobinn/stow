@@ -59,32 +59,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.stow.android.data.Channel
-import dev.stow.android.data.HomeSource
+import dev.stow.android.data.ChannelGroup
+import dev.stow.android.data.Feeds
+import androidx.compose.material.icons.filled.Add
 import dev.stow.android.data.VideoItem
-import dev.stow.android.sync.SyncWorker
 import kotlinx.coroutines.delay
-
-/** Home's two sources: an iOS segmented control, your channels or YouTube's own feeds. */
-@Composable
-private fun SourceSwitch(source: HomeSource, onSource: (HomeSource) -> Unit) {
-    val colors = Stow.colors
-    Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth().height(36.dp)
-            .clip(androidx.compose.foundation.shape.RoundedCornerShape(10.dp)).background(colors.chip).padding(2.dp),
-        verticalAlignment = Alignment.CenterVertically) {
-        listOf(HomeSource.CHANNELS to "My Channels", HomeSource.YOUTUBE to "YouTube").forEach { (value, label) ->
-            val selected = source == value
-            Box(Modifier.weight(1f).fillMaxSize()
-                    .then(if (selected) Modifier.shadow(2.dp, androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
-                              .background(colors.raised, androidx.compose.foundation.shape.RoundedCornerShape(8.dp)) else Modifier)
-                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
-                    .selectable(selected, role = androidx.compose.ui.semantics.Role.Tab) { onSource(value) },
-                contentAlignment = Alignment.Center) {
-                Text(label, style = StowType.footnote, fontSize = 14.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                     color = colors.text, maxLines = 1)
-            }
-        }
-    }
-}
 
 /** A tab's large title with its toolbar buttons (search, settings), as in iOS. */
 @Composable
@@ -125,88 +104,86 @@ fun BackTopBar(title: String, onBack: () -> Unit, actions: @Composable () -> Uni
     }
 }
 
-/** Pull down to ask Firebase for anything new. */
+/** Pull down: asks the Mac to check every channel and YouTube's feeds now, and waits for it. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun Refreshable(content: @Composable () -> Unit) {
-    val context = LocalContext.current
+fun Refreshable(onRefresh: suspend () -> Unit = {}, content: @Composable () -> Unit) {
     var refreshing by remember { mutableStateOf(false) }
     LaunchedEffect(refreshing) {
         if (refreshing) {
-            SyncWorker.runNow(context)
-            delay(1_200)
+            onRefresh()
             refreshing = false
         }
     }
     PullToRefreshBox(isRefreshing = refreshing, onRefresh = { refreshing = true }, modifier = Modifier.fillMaxSize()) { content() }
 }
 
-private enum class HomeFilter(val label: String) { ALL("All"), DOWNLOADED("Downloaded") }
-private enum class YouTubeFilter(val label: String) { RECOMMENDED("Recommended"), SUBSCRIPTIONS("Subscriptions") }
-
 /**
- * What's new from your channels, newest first, then a clear end: "You're all caught up".
- * Watched videos stay folded away below it unless you ask for them. The switch at the start of
- * the chips turns Home into YouTube's own: its recommendations, or everything you subscribe to.
+ * Like YouTube's Home: everything YouTube recommends, from any channel. Chips after "All" are your
+ * channel groups: one shows only its channels, newest first, ending in "You're all caught up".
+ * Long-press a group's chip to edit it; "+" makes one.
  */
 @Composable
 fun HomeScreen(
-    feed: List<VideoItem>, channels: List<Channel>, actions: VideoActions, todaySeconds: Long,
+    recommended: List<VideoItem>, everything: List<VideoItem>, groups: List<ChannelGroup>, avatars: Map<String, String?>,
+    actions: VideoActions, todaySeconds: Long,
     onReport: () -> Unit, onSearch: () -> Unit, onSettings: () -> Unit,
+    onRefresh: suspend () -> Unit, onNewGroup: () -> Unit, onEditGroup: (String) -> Unit,
     alarmMac: String? = null, onRemote: () -> Unit = {},
-    source: HomeSource = HomeSource.CHANNELS, onSource: (HomeSource) -> Unit = {},
-    recommended: List<VideoItem> = emptyList(), subscriptions: List<VideoItem> = emptyList(),
 ) {
-    var filter by rememberSaveable { mutableStateOf(HomeFilter.ALL) }
-    var youtubeFilter by rememberSaveable { mutableStateOf(YouTubeFilter.RECOMMENDED) }
-    var channelId by rememberSaveable { mutableStateOf<String?>(null) }
+    var groupId by rememberSaveable { mutableStateOf<String?>(null) }
     var showWatched by rememberSaveable { mutableStateOf(false) }
-    val avatars = channels.associate { it.id to it.avatarUrl }
-    val matching = feed.filter { item ->
-        (channelId == null || item.video.channelId == channelId) && (filter == HomeFilter.ALL || item.isPlayable)
-    }
-    val fresh = matching.filter { !it.watched }
-    val watched = matching.filter { it.watched }
+    val group = groups.firstOrNull { it.id == groupId }
     Column(Modifier.fillMaxSize()) {
         LargeTitleBar("Home", onSearch, onSettings)
         alarmMac?.let { AlarmBanner(it, onRemote) }
-        SourceSwitch(source, onSource)
-        if (source == HomeSource.YOUTUBE) {
-            ChipRow {
-                YouTubeFilter.entries.forEach { f -> Chip(f.label, youtubeFilter == f, onClick = { youtubeFilter = f }) }
-            }
-            val videos = if (youtubeFilter == YouTubeFilter.RECOMMENDED) recommended else subscriptions
-            Refreshable {
-                LazyColumn(Modifier.fillMaxSize()) {
-                    topAnchor()
-                    if (videos.isEmpty()) {
-                        item(key = "empty") {
-                            EmptyState(if (recommended.isEmpty() && subscriptions.isEmpty())
-                                "YouTube's recommendations come through the Mac. Keep Stow on the Mac signed in to YouTube; it reads your Home and Subscriptions every 20 minutes."
-                                else "Nothing here right now.")
-                        }
-                    }
-                    items(videos, key = { "yt-" + it.id }) { VideoCard(it, avatars[it.video.channelId], actions) }
-                }
-            }
-            return@Column
-        }
         ChipRow {
-            HomeFilter.entries.forEach { f ->
-                Chip(f.label, filter == f && channelId == null, onClick = { filter = f; channelId = null })
+            Chip("All", group == null, onClick = { groupId = null })
+            groups.forEach { g ->
+                Chip(g.name, group?.id == g.id, onClick = { groupId = if (group?.id == g.id) null else g.id },
+                     onLongClick = { onEditGroup(g.id) })
             }
-            channels.forEach { c ->
-                Chip(c.title, channelId == c.id, onClick = { channelId = if (channelId == c.id) null else c.id; filter = HomeFilter.ALL })
-            }
+            Chip(if (groups.isEmpty()) "New group" else "", false, onClick = onNewGroup,
+                 leading = { Icon(Icons.Filled.Add, contentDescription = "New group", tint = Stow.colors.text, modifier = Modifier.size(18.dp)) })
         }
-        Refreshable {
+        Refreshable(onRefresh) {
             LazyColumn(Modifier.fillMaxSize()) {
                 topAnchor()
-                items(fresh, key = { it.id }) { VideoCard(it, avatars[it.video.channelId], actions) }
-                item(key = "caught-up") {
-                    CaughtUp(todaySeconds, watched.size, showWatched, onToggle = { showWatched = !showWatched }, onReport = onReport)
+                if (group == null) {
+                    // YouTube's recommendations; your channels' newest until the Mac has shared them.
+                    val videos = recommended.ifEmpty { everything.filter { !it.watched } }
+                    if (recommended.isEmpty()) {
+                        item(key = "no-recs") {
+                            Text("YouTube's recommendations come through the Mac: keep Stow there signed in to YouTube. Until then, here's what's new from your channels.",
+                                 style = StowType.footnote, color = Stow.colors.secondaryText, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+                        }
+                    }
+                    items(videos, key = { "all-" + it.id }) { VideoCard(it, avatars[it.video.channelId], actions) }
+                    item(key = "end") {
+                        Text(if (videos.isEmpty()) "Nothing here yet. Pull down to ask the Mac for videos." else "That's everything for now. Pull down for a fresh batch.",
+                             style = StowType.footnote, color = Stow.colors.secondaryText, textAlign = TextAlign.Center,
+                             modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 28.dp))
+                    }
+                } else {
+                    val videos = Feeds.group(group, everything)
+                    val fresh = videos.filter { !it.watched }
+                    val watched = videos.filter { it.watched }
+                    if (group.channels.isEmpty()) {
+                        item(key = "empty-group") {
+                            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                                EmptyState("“${group.name}” has no channels yet.")
+                                TextButton(onClick = { onEditGroup(group.id) }) { Text("Add channels", color = Color3D()) }
+                            }
+                        }
+                    } else {
+                        items(fresh, key = { "g-" + it.id }) { VideoCard(it, avatars[it.video.channelId], actions) }
+                        item(key = "caught-up") {
+                            CaughtUp(todaySeconds, watched.size, showWatched, onToggle = { showWatched = !showWatched }, onReport = onReport,
+                                     what = "That's everything new from ${group.name}.")
+                        }
+                        if (showWatched) items(watched, key = { "gw-" + it.id }) { VideoCard(it, avatars[it.video.channelId], actions) }
+                    }
                 }
-                if (showWatched) items(watched, key = { "w-" + it.id }) { VideoCard(it, avatars[it.video.channelId], actions) }
             }
         }
     }
@@ -228,7 +205,8 @@ private fun AlarmBanner(macName: String, onOpen: () -> Unit) {
 
 /** The end of Home, instead of an endless feed. */
 @Composable
-private fun CaughtUp(todaySeconds: Long, watchedCount: Int, showingWatched: Boolean, onToggle: () -> Unit, onReport: () -> Unit) {
+private fun CaughtUp(todaySeconds: Long, watchedCount: Int, showingWatched: Boolean, onToggle: () -> Unit, onReport: () -> Unit,
+                     what: String = "That's everything new from your channels.") {
     Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.size(60.dp).clip(CircleShape).background(StowGradient), contentAlignment = Alignment.Center) {
             Icon(Icons.Rounded.Check, contentDescription = null, tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(32.dp))
@@ -236,7 +214,7 @@ private fun CaughtUp(todaySeconds: Long, watchedCount: Int, showingWatched: Bool
         Spacer(Modifier.height(14.dp))
         Text("You're All Caught Up", style = StowType.title3, color = Stow.colors.text)
         Spacer(Modifier.height(4.dp))
-        Text("That's everything new from your channels.", style = StowType.subheadline, color = Stow.colors.secondaryText, textAlign = TextAlign.Center)
+        Text(what, style = StowType.subheadline, color = Stow.colors.secondaryText, textAlign = TextAlign.Center)
         Spacer(Modifier.height(4.dp))
         Text("Watched today: ${Format.minutes(todaySeconds)}", style = StowType.footnote, color = Stow.colors.secondaryText,
              modifier = Modifier.clickable(onClick = onReport).padding(4.dp))
@@ -249,11 +227,17 @@ private fun CaughtUp(todaySeconds: Long, watchedCount: Int, showingWatched: Bool
     }
 }
 
-/** Channel avatars on top, their videos below; "All" opens the channel list. */
+/** A channel on the Subscriptions row: one of the Mac's, or one from YouTube's feed. */
+data class SubscriptionChannel(val id: String, val title: String, val avatarUrl: String?)
+
+/**
+ * Like YouTube's Subscriptions: new videos from every channel you subscribe to (YouTube's feed) and
+ * every channel on the Mac, newest first. Channel avatars on top filter it; "All" lists them.
+ */
 @Composable
 fun SubscriptionsScreen(
-    feed: List<VideoItem>, channels: List<Channel>, actions: VideoActions,
-    onAllChannels: () -> Unit, onSearch: () -> Unit, onSettings: () -> Unit,
+    feed: List<VideoItem>, channels: List<SubscriptionChannel>, actions: VideoActions,
+    onAllChannels: () -> Unit, onSearch: () -> Unit, onSettings: () -> Unit, onRefresh: suspend () -> Unit,
 ) {
     var selected by rememberSaveable { mutableStateOf<String?>(null) }
     val avatars = channels.associate { it.id to it.avatarUrl }
@@ -285,10 +269,10 @@ fun SubscriptionsScreen(
                 TextButton(onClick = { actions.openChannel(id) }) { Text("View channel", color = Color3D()) }
             }
         }
-        Refreshable {
+        Refreshable(onRefresh) {
             LazyColumn(Modifier.fillMaxSize()) {
                 topAnchor()
-                if (shown.isEmpty()) item { EmptyState("No videos yet.") }
+                if (shown.isEmpty()) item { EmptyState("No videos yet. Pull down to ask the Mac for new ones.") }
                 items(shown, key = { it.id }) { VideoCard(it, avatars[it.video.channelId], actions) }
             }
         }
@@ -299,9 +283,9 @@ fun SubscriptionsScreen(
 @Composable
 fun Color3D() = Stow.colors.accent
 
-/** Every channel the Mac follows. */
+/** Every channel: the Mac's, then the rest you subscribe to. */
 @Composable
-fun ChannelsScreen(channels: List<Channel>, onOpen: (String) -> Unit, onBack: () -> Unit) {
+fun ChannelsScreen(channels: List<SubscriptionChannel>, counts: Map<String, Int>, onOpen: (String) -> Unit, onBack: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         BackTopBar("All channels", onBack)
         LazyColumn(Modifier.fillMaxSize()) {
@@ -312,8 +296,7 @@ fun ChannelsScreen(channels: List<Channel>, onOpen: (String) -> Unit, onBack: ()
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
                         Text(channel.title, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Stow.colors.text, maxLines = 1)
-                        Text(listOfNotNull(channel.handle, Format.count(channel.recent.size, "recent video")).joinToString(" · "),
-                             fontSize = 12.sp, color = Stow.colors.secondaryText, maxLines = 1)
+                        Text(Format.count(counts[channel.id] ?: 0, "recent video"), fontSize = 12.sp, color = Stow.colors.secondaryText, maxLines = 1)
                     }
                 }
             }
@@ -321,46 +304,51 @@ fun ChannelsScreen(channels: List<Channel>, onOpen: (String) -> Unit, onBack: ()
     }
 }
 
-/** A channel's page: its header, then its recent videos. */
-@OptIn(ExperimentalFoundationApi::class)
+private enum class ChannelTab(val label: String) { VIDEOS("Videos"), LIVE("Live") }
+
+/** A channel's page: its header, then its videos, and its past live streams under Live, like YouTube. */
 @Composable
-fun ChannelScreen(channel: Channel?, videos: List<VideoItem>, actions: VideoActions, onBack: () -> Unit) {
+fun ChannelScreen(
+    channel: Channel?, title: String, videos: List<VideoItem>, actions: VideoActions,
+    groupNames: List<String>, onGroups: () -> Unit, onBack: () -> Unit,
+) {
     var oldestFirst by rememberSaveable { mutableStateOf(false) }
+    var tab by rememberSaveable { mutableStateOf(ChannelTab.VIDEOS) }
+    val (uploads, streams) = Feeds.split(videos)
+    val listed = if (tab == ChannelTab.LIVE) streams else uploads
     Column(Modifier.fillMaxSize()) {
-        BackTopBar(channel?.title ?: videos.firstOrNull()?.video?.channelTitle.orEmpty(), onBack)
-        if (channel == null && videos.isNotEmpty()) {
-            // Only seen in YouTube's feeds: what they had of it.
-            LazyColumn(Modifier.fillMaxSize()) {
-                item {
-                    Text("Not one of your channels on the Mac. These are its videos in your YouTube feeds.",
-                         fontSize = 13.sp, color = Stow.colors.secondaryText, modifier = Modifier.padding(16.dp))
-                }
-                items(videos, key = { it.id }) { item -> VideoRow(item, actions, showChannel = false) }
-            }
-            return
-        }
-        if (channel == null) {
+        BackTopBar(title, onBack)
+        if (channel == null && videos.isEmpty()) {
             EmptyState("This channel isn't on the Mac anymore.")
             return
         }
         LazyColumn(Modifier.fillMaxSize()) {
             item {
                 Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    ChannelAvatar(channel.avatarUrl, 72.dp, name = channel.title)
+                    ChannelAvatar(channel?.avatarUrl, 72.dp, name = title)
                     Spacer(Modifier.width(16.dp))
-                    Column {
-                        Text(channel.title, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Stow.colors.text)
-                        Text(listOfNotNull(channel.handle, Format.count(channel.recent.size, "recent video")).joinToString(" · "),
+                    Column(Modifier.weight(1f)) {
+                        Text(title, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Stow.colors.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(listOfNotNull(channel?.handle, Format.count(videos.size, "recent video")).joinToString(" · "),
                              fontSize = 13.sp, color = Stow.colors.secondaryText)
+                        Spacer(Modifier.height(6.dp))
+                        PillButton(if (groupNames.isEmpty()) "Add to group" else groupNames.joinToString(", "),
+                                   if (groupNames.isEmpty()) Icons.Filled.Add else Icons.Rounded.Check, onGroups)
                     }
                 }
+                if (channel == null) {
+                    Text("Not followed on the Mac yet: these are its videos in your YouTube feeds. Add it to a group and the Mac follows it.",
+                         fontSize = 13.sp, color = Stow.colors.secondaryText, modifier = Modifier.padding(horizontal = 16.dp))
+                }
                 ChipRow {
+                    ChannelTab.entries.forEach { t -> Chip(t.label, tab == t, onClick = { tab = t }) }
+                    Spacer(Modifier.width(8.dp))
                     Chip("Latest", !oldestFirst, onClick = { oldestFirst = false })
                     Chip("Oldest", oldestFirst, onClick = { oldestFirst = true })
                 }
             }
-            val sorted = if (oldestFirst) videos.reversed() else videos
-            if (sorted.isEmpty()) item { EmptyState("No recent videos.") }
+            val sorted = if (oldestFirst) listed.reversed() else listed
+            if (sorted.isEmpty()) item { EmptyState(if (tab == ChannelTab.LIVE) "No past live streams." else "No recent videos.") }
             items(sorted, key = { it.id }) { item -> VideoRow(item, actions, showChannel = false) }
         }
     }

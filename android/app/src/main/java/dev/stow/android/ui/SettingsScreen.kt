@@ -22,6 +22,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Alarm
 import androidx.compose.material.icons.rounded.BarChart
+import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Contrast
 import androidx.compose.material.icons.rounded.DeleteForever
 import androidx.compose.material.icons.rounded.DeleteSweep
@@ -61,7 +62,8 @@ import kotlinx.coroutines.withContext
 
 /** Downloads, the downloader and the pairing, in YouTube's plain settings style. */
 @Composable
-fun SettingsScreen(repository: Repository, wifiOnly: Boolean, onReport: () -> Unit, onRemote: () -> Unit, onBack: () -> Unit) {
+fun SettingsScreen(repository: Repository, wifiOnly: Boolean, onReport: () -> Unit, onRemote: () -> Unit, onGroups: () -> Unit, onBack: () -> Unit) {
+    val groups by repository.groups.collectAsStateWithLifecycle()
     val autoplay by repository.prefs.autoplay.collectAsStateWithLifecycle()
     val calm by repository.prefs.calm.collectAsStateWithLifecycle()
     val grayscale by repository.prefs.grayscale.collectAsStateWithLifecycle()
@@ -86,6 +88,9 @@ fun SettingsScreen(repository: Repository, wifiOnly: Boolean, onReport: () -> Un
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
             Section("Watching") {
                 SettingRow(Icons.Rounded.BarChart, Purple, "Your week", "Time watched per day and channel", onClick = onReport, chevron = true)
+                SettingRow(Icons.Rounded.Folder, Orange, "Channel groups",
+                           if (groups.isEmpty()) "Home can show just the channels you pick" else Format.count(groups.size, "group"),
+                           onClick = onGroups, chevron = true)
                 SettingRow(Icons.Rounded.PlayArrow, Blue, "Autoplay next video", if (autoplay) "Plays the next video in the list" else "Stops at the end of each video",
                            onClick = { repository.prefs.setAutoplay(!autoplay) }) {
                     StowSwitch(autoplay, repository.prefs::setAutoplay)

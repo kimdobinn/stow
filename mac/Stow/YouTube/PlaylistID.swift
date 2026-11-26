@@ -12,4 +12,14 @@ enum PlaylistID {
     static func membersOnly(channelId: String) -> String {
         "UUMF" + channelId.dropFirst(2)
     }
+
+    /// Public live streams (past and upcoming).
+    static func liveStreams(channelId: String) -> String {
+        "UULV" + channelId.dropFirst(2)
+    }
+
+    /// Members-only live streams.
+    static func membersStreams(channelId: String) -> String {
+        "UUMV" + channelId.dropFirst(2)
+    }
 }

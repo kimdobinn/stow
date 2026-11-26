@@ -6,6 +6,16 @@ struct VideoDifferTests {
         VideoDiffer.diff(sources: sources, seen: seen, checkedFeeds: checked)
     }
 
+    @Test func pastStreamsSeenFirstAreNotNews() {
+        let streams = [video("s1", minutesAgo: 1, live: .wasLive), video("s2", minutesAgo: 2, live: .wasLive)]
+        let first = diff([.uploads: [video("v1", minutesAgo: 5)], .streams: streams], seen: ["v1"], checked: [.uploads])
+        #expect(first.newVideos.isEmpty)
+        #expect(first.checkedFeeds == [.uploads, .streams])
+        // A stream that ends after that is new.
+        let later = diff([.streams: [video("s0", minutesAgo: 0, live: .wasLive)] + streams], seen: first.seenVideoIds, checked: first.checkedFeeds)
+        #expect(later.newVideos.map(\.id) == ["s0"])
+    }
+
     @Test func newChannelPutsTwoNewestInInboxAndMarksAllSeen() {
         let fetched = (1...5).map { video("v\($0)", minutesAgo: Double($0)) }
         let result = diff([.uploads: fetched], seen: nil)

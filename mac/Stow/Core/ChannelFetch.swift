@@ -22,6 +22,11 @@ struct ChannelFetch: Sendable {
         } catch {
             result.errors.append("\(channel.title): public feed failed: \(error.logDescription)")
         }
+        do {
+            result.sources[.streams] = try await youtube.fetchPastStreams(channelId: channel.id)
+        } catch {
+            result.errors.append("\(channel.title): past streams failed: \(error.logDescription)")
+        }
         guard let cookiesFile else { return result }
         do {
             let feed = try await youtube.fetchMembersVideos(channelId: channel.id, cookiesFile: cookiesFile)
@@ -34,6 +39,17 @@ struct ChannelFetch: Sendable {
         } catch {
             if !error.isTransient { result.membersFailed = true }
             result.errors.append("\(channel.title): members feed failed: \(error.logDescription)")
+            return result
+        }
+        // Skipped once the sign-in failed above.
+        guard !result.authExpired else { return result }
+        do {
+            let feed = try await youtube.fetchMembersStreams(channelId: channel.id, cookiesFile: cookiesFile)
+            result.sources[.memberStreams] = feed.videos
+        } catch StowError.authExpired {
+            result.authExpired = true
+        } catch {
+            result.errors.append("\(channel.title): members streams failed: \(error.logDescription)")
         }
         return result
     }

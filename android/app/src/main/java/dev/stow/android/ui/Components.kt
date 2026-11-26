@@ -264,6 +264,8 @@ data class VideoActions(
     /** Shown when the list is a playlist. */
     val removeFromPlaylist: ((VideoItem) -> Unit)? = null,
     val move: ((VideoItem, Int) -> Unit)? = null,
+    /** Puts the video's channel in your channel groups. */
+    val addToGroup: ((VideoItem) -> Unit)? = null,
 )
 
 @Composable
@@ -283,6 +285,9 @@ fun VideoMenu(item: VideoItem, actions: VideoActions, expanded: Boolean, onDismi
                              onClick = act { actions.setWatched(item, !item.watched) })
         }
         DropdownMenuItem(text = { Text("Go to channel") }, onClick = act { actions.openChannel(item.video.channelId) })
+        actions.addToGroup?.let { add ->
+            if (item.video.channelId.isNotEmpty()) DropdownMenuItem(text = { Text("Add channel to a group") }, onClick = act { add(item) })
+        }
         actions.move?.let { move ->
             DropdownMenuItem(text = { Text("Move up") }, onClick = act { move(item, -1) })
             DropdownMenuItem(text = { Text("Move down") }, onClick = act { move(item, 1) })
@@ -363,7 +368,7 @@ fun VideoRow(item: VideoItem, actions: VideoActions, showChannel: Boolean = true
                  overflow = TextOverflow.Ellipsis, color = Stow.colors.text)
             Spacer(Modifier.height(3.dp))
             Text(if (showChannel) Format.meta(item, withDuration = calm)
-                 else listOfNotNull(Format.ago(item.video.publishedAt), item.durationMs.takeIf { calm && it > 0 }?.let(Format::duration)).joinToString(" · "),
+                 else listOfNotNull(Format.whenText(item).ifEmpty { null }, item.durationMs.takeIf { calm && it > 0 }?.let(Format::duration)).joinToString(" · "),
                  style = StowType.footnote, color = Stow.colors.secondaryText, maxLines = 2)
             Spacer(Modifier.height(3.dp))
             DownloadStatus(item)
@@ -396,16 +401,20 @@ private fun WatchedLine(fraction: Float) {
 
 /** A filter token: a capsule, filled with the text color when selected (no accent, so content leads). */
 @Composable
-fun Chip(label: String, selected: Boolean, onClick: () -> Unit, leading: (@Composable () -> Unit)? = null) {
+@OptIn(ExperimentalFoundationApi::class)
+fun Chip(label: String, selected: Boolean, onClick: () -> Unit, leading: (@Composable () -> Unit)? = null,
+         onLongClick: (() -> Unit)? = null) {
     val colors = Stow.colors
     Row(
         Modifier.heightIn(min = 36.dp).clip(CircleShape).background(if (selected) colors.chipSelected else colors.chip)
-            .clickable(role = Role.Tab, onClick = onClick).padding(horizontal = 14.dp, vertical = 7.dp),
+            .combinedClickable(role = Role.Tab, onClick = onClick, onLongClick = onLongClick).padding(horizontal = 14.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        leading?.let { it(); Spacer(Modifier.width(6.dp)) }
-        Text(label, style = StowType.subheadline, fontWeight = FontWeight.SemiBold,
-             color = if (selected) colors.chipSelectedText else colors.text, maxLines = 1)
+        leading?.let { it(); if (label.isNotEmpty()) Spacer(Modifier.width(6.dp)) }
+        if (label.isNotEmpty()) {
+            Text(label, style = StowType.subheadline, fontWeight = FontWeight.SemiBold,
+                 color = if (selected) colors.chipSelectedText else colors.text, maxLines = 1)
+        }
     }
 }
 

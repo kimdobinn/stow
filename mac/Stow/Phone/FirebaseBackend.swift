@@ -65,6 +65,7 @@ struct FirebaseBackend: PhoneBackend {
                         "thumbnailURL": .optional(video.thumbnailURL?.absoluteString),
                         "isMembersOnly": .bool(video.isMembersOnly),
                         "liveStatus": .string(video.liveStatus.rawValue),
+                        "duration": video.duration.map(FirestoreValue.double) ?? .null,
                         "watched": .bool(feed.watched.contains(video.id)),
                     ])
                 }),
@@ -93,6 +94,7 @@ struct FirebaseBackend: PhoneBackend {
                 "thumbnailURL": .optional(video.thumbnailURL?.absoluteString),
                 "isMembersOnly": .bool(video.isMembersOnly),
                 "liveStatus": .string(video.liveStatus.rawValue),
+                "duration": video.duration.map(FirestoreValue.double) ?? .null,
                 "sentAt": .date(now),
                 "sentBy": .string(reason.rawValue),
                 "watched": .bool(watched.contains(video.id)),
@@ -137,6 +139,35 @@ struct FirebaseBackend: PhoneBackend {
             "sealed": .string(sealed.base64EncodedString()),
             "algorithm": .string("ChaChaPoly"),
             "updatedAt": .string(ISO8601DateFormatter().string(from: .now)),
+        ])])
+    }
+
+    func shared() async throws -> PhoneShared? {
+        guard let document = try await firestore.get("shared/phone") else { return nil }
+        let groups = (document.fields["groups"]?.array ?? []).compactMap { value -> ChannelGroup? in
+            guard let group = value.map, let id = group["id"]?.string, !id.isEmpty else { return nil }
+            let channels = (group["channels"]?.array ?? []).compactMap { value -> GroupChannel? in
+                guard let channel = value.map, let id = channel["id"]?.string, !id.isEmpty else { return nil }
+                return GroupChannel(id: id, title: channel["title"]?.string ?? id)
+            }
+            return ChannelGroup(id: id, name: group["name"]?.string ?? "Group", channels: channels)
+        }
+        return PhoneShared(groups: groups, refreshRequestedAt: document.fields["refreshRequestedAt"]?.date)
+    }
+
+    func saveGroups(_ groups: [ChannelGroup]) async throws {
+        try await firestore.commit([.merge(path: "shared/phone", fields: [
+            "groups": .array(groups.map { group in
+                .map(["id": .string(group.id), "name": .string(group.name),
+                      "channels": .array(group.channels.map { .map(["id": .string($0.id), "title": .string($0.title)]) })])
+            }),
+            "groupsUpdatedBy": .string("mac"),
+        ])])
+    }
+
+    func markRefreshHandled(requestedAt: Date) async throws {
+        try await firestore.commit([.merge(path: "shared/phone", fields: [
+            "refreshHandledAt": .date(requestedAt),
         ])])
     }
 

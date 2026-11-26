@@ -84,8 +84,9 @@ enum AlarmPlanner {
         return channels.filter(\.morning).map(\.id)
     }
 
+    /// Past streams (hours long) aren't alarm material either.
     private static func isStreamable(_ video: Video) -> Bool {
-        video.liveStatus != .live && video.liveStatus != .upcoming
+        video.liveStatus != .live && video.liveStatus != .upcoming && video.liveStatus != .wasLive
     }
 
     /// What the alarm would play now: the first round with candidates, unchecked.

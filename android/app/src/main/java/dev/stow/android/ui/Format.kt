@@ -10,7 +10,7 @@ object Format {
 
     /** "Channel · 3 days ago" (· "Members only"). */
     fun meta(item: VideoItem, withDuration: Boolean = false): String =
-        listOf(item.video.channelTitle, ago(item.video.publishedAt),
+        listOf(item.video.channelTitle, whenText(item),
                if (withDuration && item.durationMs > 0) duration(item.durationMs) else "",
                if (item.video.isMembersOnly) "Members only" else "")
             .filter { it.isNotEmpty() }.joinToString(" · ")
@@ -28,6 +28,12 @@ object Format {
         val m = (total % 3600) / 60
         val s = total % 60
         return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
+    }
+
+    /** "3 days ago", or "Streamed 3 days ago" for a past live stream. */
+    fun whenText(item: VideoItem): String {
+        val ago = ago(item.video.publishedAt)
+        return if (item.video.isPastStream) listOf("Streamed", ago.replaceFirstChar { it.lowercase() }).filter { it.isNotEmpty() }.joinToString(" ") else ago
     }
 
     fun ago(date: Date?): String =

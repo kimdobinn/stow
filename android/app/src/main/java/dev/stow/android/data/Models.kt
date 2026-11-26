@@ -17,7 +17,22 @@ data class Video(
     val durationSeconds: Long? = null,
 ) {
     val watchUrl: String get() = "https://www.youtube.com/watch?v=$id"
+    /** A finished live stream ("Streamed"). */
+    val isPastStream: Boolean get() = liveStatus == "wasLive" || liveStatus == "was_live"
+    /** YouTube Shorts are never shown: anything this short counts as one. */
+    val isShort: Boolean get() = durationSeconds != null && durationSeconds in 1..SHORTS_MAX_SECONDS
+
+    companion object {
+        const val SHORTS_MAX_SECONDS = 60L
+    }
 }
+
+/** A named set of channels (shared/phone): Home can show just their videos. */
+data class ChannelGroup(val id: String, val name: String, val channels: List<GroupChannel>) {
+    val channelIds: Set<String> get() = channels.mapTo(HashSet()) { it.id }
+}
+
+data class GroupChannel(val id: String, val title: String)
 
 /** A video sent to the phone (videos/{id}): by the Mac, or by the phone from a channel page. */
 data class SentVideo(val video: Video, val sentAt: Date?, val sentBy: String?, val watched: Boolean)
@@ -112,18 +127,19 @@ data class YouTubeFeeds(val recommended: List<Video> = emptyList(), val subscrip
                         channelId = o.optString("channelId"),
                         channelTitle = o.optString("channelTitle"),
                         title = o.optString("title").ifEmpty { id },
-                        publishedAt = null,
                         thumbnailUrl = o.optString("thumbnailURL").takeIf { it.isNotEmpty() },
                         isMembersOnly = o.optBoolean("isMembersOnly"),
-                        liveStatus = if (o.optBoolean("isLive")) "is_live" else null,
-                        durationSeconds = if (o.has("duration")) o.optDouble("duration").toLong() else null,
-                    )
+                        liveStatus = when {
+                            o.optBoolean("wasLive") -> "wasLive"
+                            o.optBoolean("isLive") -> "is_live"
+                            else -> null
+                        },
+                        durationSeconds = if (o.has("duration") && !o.isNull("duration")) o.optDouble("duration").toLong() else null,
+                        publishedAt = if (o.has("timestamp") && !o.isNull("timestamp")) java.util.Date((o.optDouble("timestamp") * 1000).toLong()) else null,
+                    ).takeUnless { it.isShort || it.liveStatus == "is_live" }
                 }
             }
             return YouTubeFeeds(list("recommended"), list("subscriptions"))
         }
     }
 }
-
-/** Where Home's videos come from. */
-enum class HomeSource { CHANNELS, YOUTUBE }

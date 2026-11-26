@@ -13,7 +13,8 @@ struct ChannelsTab: View {
         VStack(alignment: .leading, spacing: 16) {
             addBar
             channelList
-            Text("**Morning:** the alarm can play this channel's new videos. Nothing downloads to the phone by itself: send a video (Send to Phone) or download it on the phone.")
+            if model.phone.isPaired { GroupsBar() }
+            Text("**Morning:** the alarm can play this channel's new videos. **Groups:** the phone's Home can show just one group's channels. Nothing downloads to the phone by itself: send a video (Send to Phone) or download it on the phone.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
             subscriptionsBar
@@ -62,6 +63,10 @@ struct ChannelsTab: View {
             }
             .width(90)
             .alignment(.center)
+            TableColumn("Groups") { channel in
+                GroupsMenu(channel: channel)
+            }
+            .width(min: 120, ideal: 170)
         }
         .alternatingRowBackgrounds(.disabled)
         .contextMenu(forSelectionType: Channel.ID.self) { ids in
@@ -140,6 +145,82 @@ private struct ChannelCell: View {
             }
         }
         .padding(.vertical, 6)
+    }
+}
+
+/// Which of the phone's groups a channel is in, as a menu of checkmarks.
+private struct GroupsMenu: View {
+    @Environment(AppModel.self) private var model
+    let channel: Channel
+
+    var body: some View {
+        let groups = model.phone.groups
+        let names = groups.filter { $0.channels.contains { $0.id == channel.id } }.map(\.name)
+        Menu(names.isEmpty ? "None" : names.joined(separator: ", ")) {
+            ForEach(groups) { group in
+                let included = group.channels.contains { $0.id == channel.id }
+                Toggle(group.name, isOn: Binding(
+                    get: { included },
+                    set: { model.phone.setChannel(GroupChannel(id: channel.id, title: channel.title), inGroup: group.id, $0) }
+                ))
+            }
+            if groups.isEmpty { Text("No groups yet") }
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .foregroundStyle(names.isEmpty ? .secondary : .primary)
+        .disabled(!model.phone.isPaired)
+        .help(model.phone.isPaired ? "The phone's channel groups this channel is in" : "Groups are for the phone: pair one first")
+    }
+}
+
+/// The phone's channel groups: add, rename, delete.
+private struct GroupsBar: View {
+    @Environment(AppModel.self) private var model
+    @State private var naming: NamingGroup?
+    @State private var name = ""
+
+    private struct NamingGroup: Identifiable {
+        var id: String
+        var isNew: Bool
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("Groups").font(.headline)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(model.phone.groups) { group in
+                        Menu {
+                            Button("Rename…") { name = group.name; naming = NamingGroup(id: group.id, isNew: false) }
+                            Button("Delete “\(group.name)”", role: .destructive) { model.phone.deleteGroup(id: group.id) }
+                        } label: {
+                            Text("\(group.name) · \(group.channels.count)")
+                        }
+                        .menuStyle(.button)
+                        .fixedSize()
+                    }
+                    if model.phone.groups.isEmpty {
+                        Text("None yet. Make one here or on the phone.").foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .noDragScroll()
+            Button("New Group…") { name = ""; naming = NamingGroup(id: "", isNew: true) }
+        }
+        .alert(naming?.isNew == true ? "New Group" : "Rename Group", isPresented: Binding(
+            get: { naming != nil }, set: { if !$0 { naming = nil } }
+        )) {
+            TextField("Name", text: $name)
+            Button(naming?.isNew == true ? "Create" : "Rename") {
+                let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let naming, !trimmed.isEmpty {
+                    if naming.isNew { model.phone.createGroup(name: trimmed) } else { model.phone.renameGroup(id: naming.id, to: trimmed) }
+                }
+                naming = nil
+            }
+            Button("Cancel", role: .cancel) { naming = nil }
+        }
     }
 }
 

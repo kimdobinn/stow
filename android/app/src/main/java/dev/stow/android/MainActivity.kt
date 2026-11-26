@@ -190,8 +190,31 @@ class MainActivity : ComponentActivity() {
 
         val all = itemsById.values.filterNot { it.onlyInYouTubeFeeds }
         val youtubeFeeds by repository.youtubeFeeds.collectAsStateWithLifecycle()
-        val homeSource by repository.prefs.homeSource.collectAsStateWithLifecycle()
+        val groups by repository.groups.collectAsStateWithLifecycle()
         val feed = all.sortedByDescending { it.video.publishedAt?.time ?: it.sent?.sentAt?.time ?: 0 }
+        val everything = itemsById.values.sortedByDescending { it.video.publishedAt?.time ?: it.sent?.sentAt?.time ?: 0 }
+        val recommended = youtubeFeeds.recommended.mapNotNull { itemsById[it.id] }
+        val subscriptionsFeed = dev.stow.android.data.Feeds.subscriptions(youtubeFeeds.subscriptions.mapNotNull { itemsById[it.id] }, feed)
+        // The Mac's channels first (with their pictures), then the rest YouTube's feeds mention.
+        val knownChannels = (channels.map { dev.stow.android.ui.SubscriptionChannel(it.id, it.title, it.avatarUrl) } +
+            (youtubeFeeds.subscriptions + youtubeFeeds.recommended).filter { it.channelId.isNotEmpty() }
+                .map { dev.stow.android.ui.SubscriptionChannel(it.channelId, it.channelTitle, null) }).distinctBy { it.id }
+        val subscribedChannels = knownChannels.filter { c -> channels.any { it.id == c.id } || youtubeFeeds.subscriptions.any { it.channelId == c.id } }
+        val avatars = channels.associate { it.id to it.avatarUrl }
+        var grouping by remember { mutableStateOf<dev.stow.android.data.GroupChannel?>(null) }
+        var newGroup by remember { mutableStateOf(false) }
+        var sizing by remember { mutableStateOf<VideoItem?>(null) }
+        val groupActions = dev.stow.android.ui.GroupActions(
+            create = repository::createGroup, rename = repository::renameGroup, delete = repository::deleteGroup,
+            setChannel = repository::setInGroup, move = repository::moveGroup,
+        )
+        val refresh: suspend () -> Unit = {
+            when (repository.refreshFromMac()) {
+                dev.stow.android.data.Repository.RefreshResult.DONE -> notify("Up to date")
+                dev.stow.android.data.Repository.RefreshResult.NO_ANSWER -> notify("The Mac didn't answer. Is Stow running on it?")
+                dev.stow.android.data.Repository.RefreshResult.FAILED -> notify("Couldn't reach the Mac's Firebase. Check the connection.")
+            }
+        }
         LaunchedEffect(all.count { it.isPlayable }) {
             storage = withContext(Dispatchers.IO) { "${Format.bytes(repository.storageUsedBytes())} used on this phone" }
         }
@@ -218,8 +241,13 @@ class MainActivity : ComponentActivity() {
                 play(context, item)
             },
             download = { item ->
-                repository.download(item)
-                notify(if (item.state == dev.stow.android.data.DownloadState.FAILED) "Retrying download" else "Downloading")
+                // Long videos (past streams especially) can be GBs: say the size first.
+                if (item.durationMs >= LONG_VIDEO_MS && item.state != dev.stow.android.data.DownloadState.FAILED) {
+                    sizing = item
+                } else {
+                    repository.download(item)
+                    notify(if (item.state == dev.stow.android.data.DownloadState.FAILED) "Retrying download" else "Downloading")
+                }
             },
             delete = { item ->
                 if (item.id == current) player.stop()
@@ -233,6 +261,7 @@ class MainActivity : ComponentActivity() {
             saveToPlaylist = { saving = it },
             openChannel = { id -> nav.navigate("channel/$id") },
             notify = ::notify,
+            addToGroup = { item -> grouping = dev.stow.android.data.GroupChannel(item.video.channelId, item.video.channelTitle) },
         )
 
         val tabs = listOf(
@@ -257,16 +286,25 @@ class MainActivity : ComponentActivity() {
                 }
                 NavHost(nav, startDestination = "home") {
                     composable("home") {
-                        HomeScreen(feed, channels, actions, todaySeconds = todaySeconds, onReport = { nav.navigate("report") },
+                        HomeScreen(recommended, everything, groups, avatars, actions, todaySeconds = todaySeconds,
+                                   onReport = { nav.navigate("report") },
                                    onSearch = { nav.navigate("search") }, onSettings = { nav.navigate("settings") },
-                                   alarmMac = alarm?.takeIf { it.isRecent() }?.macName, onRemote = { nav.navigate("remote") },
-                                   source = homeSource, onSource = repository.prefs::setHomeSource,
-                                   recommended = youtubeFeeds.recommended.mapNotNull { itemsById[it.id] },
-                                   subscriptions = youtubeFeeds.subscriptions.mapNotNull { itemsById[it.id] })
+                                   onRefresh = refresh, onNewGroup = { newGroup = true },
+                                   onEditGroup = { nav.navigate("group/$it") },
+                                   alarmMac = alarm?.takeIf { it.isRecent() }?.macName, onRemote = { nav.navigate("remote") })
                     }
                     composable("subscriptions") {
-                        SubscriptionsScreen(feed, channels, actions, onAllChannels = { nav.navigate("channels") },
-                                            onSearch = { nav.navigate("search") }, onSettings = { nav.navigate("settings") })
+                        SubscriptionsScreen(subscriptionsFeed, subscribedChannels, actions, onAllChannels = { nav.navigate("channels") },
+                                            onSearch = { nav.navigate("search") }, onSettings = { nav.navigate("settings") },
+                                            onRefresh = refresh)
+                    }
+                    composable("groups") {
+                        dev.stow.android.ui.GroupsScreen(groups, groupActions, onOpen = { nav.navigate("group/$it") }, onBack = { nav.popBackStack() })
+                    }
+                    composable("group/{id}") { entry ->
+                        val group = groups.firstOrNull { it.id == entry.arguments?.getString("id") }
+                        dev.stow.android.ui.GroupScreen(group, knownChannels.map { dev.stow.android.data.GroupChannel(it.id, it.title) },
+                                                        avatars, groupActions, onBack = { nav.popBackStack() })
                     }
                     composable("downloads") {
                         DownloadsScreen(
@@ -279,15 +317,18 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                     composable("channels") {
-                        ChannelsScreen(channels, onOpen = { nav.navigate("channel/$it") }, onBack = { nav.popBackStack() })
+                        val counts = everything.groupingBy { it.video.channelId }.eachCount()
+                        ChannelsScreen(subscribedChannels, counts, onOpen = { nav.navigate("channel/$it") }, onBack = { nav.popBackStack() })
                     }
                     composable("channel/{id}") { entry ->
                         val id = entry.arguments?.getString("id")
                         val channel = channels.firstOrNull { it.id == id }
-                        val videos = channel?.recent?.mapNotNull { itemsById[it.video.id] }
-                            ?: (youtubeFeeds.recommended + youtubeFeeds.subscriptions).filter { it.channelId == id }
-                                .distinctBy { it.id }.mapNotNull { itemsById[it.id] }
-                        ChannelScreen(channel, videos, actions, onBack = { nav.popBackStack() })
+                        val videos = everything.filter { it.video.channelId == id }
+                        val title = channel?.title ?: knownChannels.firstOrNull { it.id == id }?.title ?: videos.firstOrNull()?.video?.channelTitle.orEmpty()
+                        ChannelScreen(channel, title, videos, actions,
+                                      groupNames = groups.filter { g -> g.channels.any { it.id == id } }.map { it.name },
+                                      onGroups = { if (id != null) grouping = dev.stow.android.data.GroupChannel(id, title) },
+                                      onBack = { nav.popBackStack() })
                     }
                     composable("playlist/{id}") { entry ->
                         val playlist = playlists.firstOrNull { it.id == entry.arguments?.getString("id") }
@@ -316,7 +357,8 @@ class MainActivity : ComponentActivity() {
                     composable("search") { SearchScreen(feed, actions, onBack = { nav.popBackStack() }) }
                     composable("settings") {
                         SettingsScreen(repository, wifiOnly, onReport = { nav.navigate("report") },
-                                       onRemote = { nav.navigate("remote") }, onBack = { nav.popBackStack() })
+                                       onRemote = { nav.navigate("remote") }, onGroups = { nav.navigate("groups") },
+                                       onBack = { nav.popBackStack() })
                     }
                     composable("remote") { RemoteScreen(remote, alarm?.macName, onBack = { nav.popBackStack() }) }
                     composable("report") {
@@ -351,6 +393,35 @@ class MainActivity : ComponentActivity() {
         }
         }
 
+        grouping?.let { channel ->
+            dev.stow.android.ui.GroupPickerSheet(channel, groups, groupActions, notify = ::notify, onDismiss = { grouping = null })
+        }
+        if (newGroup) {
+            dev.stow.android.ui.NameDialog("New group", "", onDismiss = { newGroup = false }) { name ->
+                newGroup = false
+                val group = repository.createGroup(name)
+                nav.navigate("group/${group.id}")
+            }
+        }
+        sizing?.let { item ->
+            var size by remember(item.id) { mutableStateOf<Long?>(null) }
+            var checking by remember(item.id) { mutableStateOf(true) }
+            LaunchedEffect(item.id) {
+                val cookies = if (item.video.isMembersOnly) repository.cookiesFile() else null
+                size = runCatching { dev.stow.android.sync.YtDlp.downloadSize(this@MainActivity, item.video, cookies) }.getOrNull()
+                cookies?.delete()
+                checking = false
+            }
+            dev.stow.android.ui.DownloadSizeDialog(
+                item.video.title, item.durationMs, size, checking,
+                onDownload = {
+                    sizing = null
+                    repository.download(item)
+                    notify("Downloading")
+                },
+                onDismiss = { sizing = null },
+            )
+        }
         saving?.let { item ->
             SaveToPlaylistSheet(
                 item = itemsById[item.id] ?: item, playlists = playlists,
@@ -367,6 +438,8 @@ class MainActivity : ComponentActivity() {
     companion object {
         /** The alarm notification's tap: opens the remote. */
         const val ACTION_OPEN_REMOTE = "dev.stow.android.OPEN_REMOTE"
+        /** Downloads longer than this ask first, with the size. */
+        const val LONG_VIDEO_MS = 20 * 60 * 1000L
     }
 
     private data class Tab(val route: String, val label: String, val selected: ImageVector, val unselected: ImageVector)
@@ -374,7 +447,7 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun BottomBar(tabs: List<Tab>, route: String?, nav: NavHostController) {
         // A floating capsule, as in iOS: filled symbols, the selected tab in the accent on a soft highlight.
-        val behind = if (route == "settings") Stow.colors.groupedBackground else Stow.colors.background
+        val behind = if (route in setOf("settings", "groups", "group/{id}")) Stow.colors.groupedBackground else Stow.colors.background
         Box(Modifier.fillMaxWidth().background(behind).navigationBarsPadding()
                 .padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 8.dp)) {
             Row(Modifier.fillMaxWidth().height(62.dp)

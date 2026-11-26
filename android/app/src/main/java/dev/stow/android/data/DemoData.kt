@@ -14,6 +14,8 @@ object DemoData {
         Video("dQw4w9WgXcQ", "UCuAXFkgsw1L7xaCfnd5JJOw", "Rick Astley", "Rick Astley - Never Gonna Give You Up (Official Video)", daysAgo(1.5), thumb("dQw4w9WgXcQ"), false),
         Video("yPYZpwSpKmA", "UCuAXFkgsw1L7xaCfnd5JJOw", "Rick Astley", "Rick Astley - Together Forever (Official Video)", daysAgo(9.0), thumb("yPYZpwSpKmA"), false),
         Video("AC3Ejf7vPEY", "UCuAXFkgsw1L7xaCfnd5JJOw", "Rick Astley", "Rick Astley - Cry For Help (Official Video)", daysAgo(20.0), thumb("AC3Ejf7vPEY"), true),
+        Video("lYBUbBu4W08", "UCuAXFkgsw1L7xaCfnd5JJOw", "Rick Astley", "Rick Astley live from the studio", daysAgo(3.0), thumb("lYBUbBu4W08"), false,
+              liveStatus = "wasLive", durationSeconds = 5_400),
     )
 
     val channels = listOf(

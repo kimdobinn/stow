@@ -20,8 +20,11 @@ struct AccountFeedClient: Sendable {
         return try Self.parse(feedJSON: output.stdout)
     }
 
-    /// The feed's long-form videos in order, without repeats: no Mixes or playlists, Shorts or
-    /// streams that haven't started.
+    /// Anything this short is a Short, whatever the feed calls it.
+    static let shortsMaxSeconds: Double = 60
+
+    /// The feed's long-form videos and finished streams in order, without repeats: no Mixes or
+    /// playlists, no Shorts, nothing live now or still to come (none of that can be downloaded).
     static func parse(feedJSON: Data) throws -> [FeedVideo] {
         let feed: Feed?
         do {
@@ -32,7 +35,8 @@ struct AccountFeedClient: Sendable {
         var seen = Set<String>()
         return (feed?.entries ?? []).compactMap { entry -> FeedVideo? in
             guard let entry, entry.id.count == 11, let channelId = entry.channel_id,
-                  !(entry.url ?? "").contains("/shorts/"), entry.live_status != "is_upcoming",
+                  !(entry.url ?? "").contains("/shorts/"), (entry.duration ?? .infinity) > shortsMaxSeconds,
+                  !["is_upcoming", "is_live", "post_live"].contains(entry.live_status ?? ""),
                   seen.insert(entry.id).inserted else { return nil }
             let thumbnail = entry.thumbnails?.max { ($0.width ?? 0) < ($1.width ?? 0) }?.url.flatMap(URL.init(string:))
             return FeedVideo(id: entry.id, channelId: channelId,
@@ -41,7 +45,8 @@ struct AccountFeedClient: Sendable {
                              duration: entry.duration,
                              thumbnailURL: thumbnail ?? URL(string: "https://i.ytimg.com/vi/\(entry.id)/hqdefault.jpg"),
                              isMembersOnly: entry.availability == "subscriber_only",
-                             isLive: entry.live_status == "is_live")
+                             isLive: false, wasLive: entry.live_status == "was_live",
+                             timestamp: entry.timestamp)
         }
     }
 }
@@ -57,6 +62,7 @@ private struct Feed: Decodable {
         var channel_id: String?
         var uploader: String?
         var duration: Double?
+        var timestamp: Double?
         var live_status: String?
         var availability: String?
         var thumbnails: [Thumbnail]?

@@ -16,7 +16,11 @@ struct AccountFeedClientTests {
            "channel_id": "UCu", "live_status": "is_upcoming"},
           null,
           {"id": "bbbbbbbbbbb", "url": "https://www.youtube.com/watch?v=bbbbbbbbbbb", "title": "Members",
-           "uploader": "Chan B", "channel_id": "UCb", "availability": "subscriber_only", "live_status": "is_live"},
+           "uploader": "Chan B", "channel_id": "UCb", "availability": "subscriber_only", "live_status": "was_live", "timestamp": 1800000000},
+          {"id": "lllllllllll", "url": "https://www.youtube.com/watch?v=lllllllllll", "title": "Live now",
+           "channel_id": "UCl", "live_status": "is_live"},
+          {"id": "qqqqqqqqqqq", "url": "https://www.youtube.com/watch?v=qqqqqqqqqqq", "title": "A Short by length",
+           "channel_id": "UCq", "duration": 45},
           {"id": "aaaaaaaaaaa", "url": "https://www.youtube.com/watch?v=aaaaaaaaaaa", "title": "First again", "channel_id": "UCa"}
         ]}
         """
@@ -26,7 +30,8 @@ struct AccountFeedClientTests {
                                        duration: 754, thumbnailURL: URL(string: "https://i.ytimg.com/vi/aaaaaaaaaaa/big.jpg"),
                                        isMembersOnly: false, isLive: false))
         #expect(videos[1].channelTitle == "Chan B")
-        #expect(videos[1].isMembersOnly && videos[1].isLive)
+        #expect(videos[1].isMembersOnly && videos[1].wasLive && !videos[1].isLive)
+        #expect(videos[1].timestamp == 1_800_000_000)
         #expect(videos[1].thumbnailURL == URL(string: "https://i.ytimg.com/vi/bbbbbbbbbbb/hqdefault.jpg"))
     }
 

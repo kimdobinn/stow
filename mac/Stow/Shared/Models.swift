@@ -77,6 +77,8 @@ struct Video: Codable, Hashable, Identifiable, Sendable {
     var thumbnailURL: URL?
     var isMembersOnly: Bool
     var liveStatus: LiveStatus
+    /// Seconds; known for past streams and members-only videos (yt-dlp lists it), not RSS uploads.
+    var duration: TimeInterval? = nil
 
     var watchURL: URL { URL(string: "https://www.youtube.com/watch?v=\(id)")! }
 }
@@ -90,6 +92,8 @@ struct InboxItem: Codable, Hashable, Identifiable, Sendable {
 
 enum CheckTrigger: String, Codable, Sendable {
     case launch, scheduled, wake, manual, channelAdded, signIn
+    /// Pulled down to refresh on the phone.
+    case phone
     /// The alarm's prep step refreshing feeds before it picks videos.
     case alarm
 }
@@ -183,6 +187,14 @@ enum FeedKind: String, Codable, CaseIterable, Sendable {
     case uploads
     /// Members-only uploads (UUMF via yt-dlp).
     case members
+    /// Finished public live streams (the channel's Live tab via yt-dlp, UULV RSS for titles and dates).
+    case streams
+    /// Finished members-only live streams (UUMV via yt-dlp).
+    case memberStreams
+
+    /// Past streams are kept for the phone's channel pages, but a channel's back catalogue of them
+    /// isn't news: the first fetch of these puts nothing in the Inbox.
+    var seedsInbox: Bool { self == .uploads || self == .members }
 }
 
 /// state.json: machine-written, human-readable.

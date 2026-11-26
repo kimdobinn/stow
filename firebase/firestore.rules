@@ -30,11 +30,9 @@ service cloud.firestore {
                     && onlyChanges(['fcmToken', 'name', 'lastSeenAt']);
     }
 
-    // Written by the Mac; the phone may switch a channel's auto-download on or off.
+    // The Mac's channels with their recent videos. Only the Mac writes them.
     match /channels/{channelId} {
       allow read: if isMember();
-      allow update: if isMember() && onlyChanges(['phone', 'updatedAt', 'updatedBy'])
-                    && request.resource.data.updatedBy == 'phone';
     }
 
     // Videos sent to the phone, by the Mac or by the phone itself (picked from a channel page).
@@ -48,6 +46,25 @@ service cloud.firestore {
                          'updatedAt', 'updatedBy']);
       allow update: if isMember()
                     && onlyChanges(['watched', 'watchedAt', 'watchedBy', 'phone', 'updatedAt', 'updatedBy']);
+    }
+
+    // Shared by the Mac and the phones: the channel groups (either side edits them) and
+    // pull-to-refresh (the phone asks with refreshRequestedAt; the Mac answers with refreshHandledAt).
+    match /shared/phone {
+      allow read: if isMember();
+      allow create: if isMember()
+                    && request.resource.data.keys().hasOnly(['groups', 'groupsUpdatedBy', 'refreshRequestedAt'])
+                    && phoneFieldsValid();
+      allow update: if isMember()
+                    && onlyChanges(['groups', 'groupsUpdatedBy', 'refreshRequestedAt'])
+                    && phoneFieldsValid();
+    }
+
+    function phoneFieldsValid() {
+      let data = request.resource.data;
+      return (!('groups' in data) || (data.groups is list && data.groups.size() <= 100))
+          && (!('refreshRequestedAt' in data) || data.refreshRequestedAt == request.time
+              || (resource != null && data.refreshRequestedAt == resource.data.refreshRequestedAt));
     }
 
     // The YouTube sign-in, encrypted on the Mac with the key from the pairing QR code.

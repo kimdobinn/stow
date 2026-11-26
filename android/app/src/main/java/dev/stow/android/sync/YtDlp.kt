@@ -115,6 +115,27 @@ object YtDlp {
         }
     }
 
+    /** What a download would take, in bytes (yt-dlp's figure for the format it would pick); null when it doesn't say. */
+    suspend fun downloadSize(context: Context, video: Video, cookies: File?): Long? = withContext(Dispatchers.IO) {
+        ensureReady(context)
+        val request = YoutubeDLRequest(video.watchUrl).apply {
+            addOption("-j")
+            addOption("-S", "res:1080,fps,vcodec:h264,acodec:m4a")
+            addOption("-f", "bv*+ba/b")
+            addOption("--no-playlist")
+            if (cookies != null) addOption("--cookies", cookies.absolutePath)
+        }
+        val response = YoutubeDL.getInstance().execute(request, "size-${video.id}")
+        if (response.exitCode != 0) return@withContext null
+        val info = org.json.JSONObject(response.out.lineSequence().first { it.trimStart().startsWith("{") })
+        fun size(o: org.json.JSONObject) = o.optLong("filesize").takeIf { it > 0 } ?: o.optLong("filesize_approx").takeIf { it > 0 }
+        val formats = info.optJSONArray("requested_formats")
+        if (formats != null && formats.length() > 0) {
+            val sizes = (0 until formats.length()).map { size(formats.getJSONObject(it)) }
+            if (sizes.any { it == null }) null else sizes.sumOf { it!! }
+        } else size(info)
+    }
+
     fun cancel(id: String) {
         runCatching { YoutubeDL.getInstance().destroyProcessById(id) }
     }

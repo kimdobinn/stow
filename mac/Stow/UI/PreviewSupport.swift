@@ -7,6 +7,8 @@ private struct PreviewYouTube: YouTubeService {
     func resolveChannel(input: String) async throws -> ChannelInfo { throw StowError.channelNotFound(input) }
     func fetchPublicVideos(channelId: String) async throws -> [Video] { [] }
     func fetchMembersVideos(channelId: String, cookiesFile: URL) async throws -> MembersFeed { MembersFeed(videos: []) }
+    func fetchPastStreams(channelId: String) async throws -> [Video] { [] }
+    func fetchMembersStreams(channelId: String, cookiesFile: URL) async throws -> MembersFeed { MembersFeed(videos: []) }
     func fetchWatchHistory(cookiesFile: URL, limit: Int) async throws -> WatchHistory { WatchHistory(videoIds: []) }
     func markWatched(videoId: String, cookiesFile: URL) async throws {}
     func fetchAccountFeeds(cookiesFile: URL, limit: Int) async throws -> AccountFeeds {

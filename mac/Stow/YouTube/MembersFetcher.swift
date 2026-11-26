@@ -9,11 +9,21 @@ struct MembersFetcher: Sendable {
     /// Returns no videos when the channel has no members playlist. Live and upcoming entries are
     /// dropped. Throws `.notSignedIn` when the cookies file is missing.
     func fetch(channelId: String, cookiesFile: URL) async throws -> MembersFeed {
+        try await fetch(playlistId: PlaylistID.membersOnly(channelId: channelId), channelId: channelId, cookiesFile: cookiesFile)
+            .filtered { $0.liveStatus != .live && $0.liveStatus != .upcoming }
+    }
+
+    /// The members-only live streams playlist (UUMV), finished streams only.
+    func fetchStreams(channelId: String, cookiesFile: URL) async throws -> MembersFeed {
+        try await fetch(playlistId: PlaylistID.membersStreams(channelId: channelId), channelId: channelId, cookiesFile: cookiesFile)
+            .filtered { $0.liveStatus == .wasLive }
+    }
+
+    private func fetch(playlistId: String, channelId: String, cookiesFile: URL) async throws -> MembersFeed {
         // Parallel runs must not clobber each other or the file Account owns.
         let cookies = try CookieCopy.make(of: cookiesFile)
         defer { try? FileManager.default.removeItem(at: cookies) }
 
-        let playlistId = PlaylistID.membersOnly(channelId: channelId)
         let playlist = "https://www.youtube.com/playlist?list=\(playlistId)"
         // yt-dlp's titles come back auto-translated and undated; the members RSS feed has the
         // original titles and publish dates, so it's used to correct them where it can.
@@ -26,7 +36,6 @@ struct MembersFetcher: Sendable {
             return MembersFeed(videos: [])
         }
         let videos = try Self.parse(playlistJSON: output.stdout, channelId: channelId)
-            .filter { $0.liveStatus != .live && $0.liveStatus != .upcoming }
         return MembersFeed(videos: Self.applyOriginalMetadata(videos, from: await feed ?? []),
                            cookiesRejected: output.cookiesRejected)
     }
@@ -65,17 +74,19 @@ struct MembersFetcher: Sendable {
                 publishedAt: (entry.timestamp ?? entry.releaseTimestamp).map(Date.init(timeIntervalSince1970:)),
                 thumbnailURL: URL(string: "https://i.ytimg.com/vi/\(entry.id)/hqdefault.jpg"),
                 isMembersOnly: true,
-                liveStatus: liveStatus(entry.liveStatus)
+                liveStatus: liveStatus(entry.liveStatus),
+                duration: entry.duration
             )
         }
     }
 
-    private static func liveStatus(_ value: String?) -> LiveStatus {
+    /// "post_live" (just ended, still processing) counts as live: not ready to download yet.
+    static func liveStatus(_ value: String?) -> LiveStatus {
         switch value {
         case "not_live": .none
-        case "is_live": .live
+        case "is_live", "post_live": .live
         case "is_upcoming": .upcoming
-        case "was_live", "post_live": .wasLive
+        case "was_live": .wasLive
         default: .unknown
         }
     }
@@ -96,8 +107,17 @@ private struct Entry: Decodable {
     var releaseTimestamp: Double?
     var liveStatus: String?
     var availability: String?
+    var duration: Double?
 
     var isViewable: Bool {
         availability != "private" && title != "[Private video]" && title != "[Deleted video]"
+    }
+}
+
+extension MembersFeed {
+    func filtered(_ keep: (Video) -> Bool) -> MembersFeed {
+        var feed = self
+        feed.videos = videos.filter(keep)
+        return feed
     }
 }

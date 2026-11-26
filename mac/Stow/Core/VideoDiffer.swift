@@ -33,6 +33,8 @@ enum VideoDiffer {
             let unseen = videos.filter { !seenSet.contains($0.id) }
             if checkedFeeds.contains(kind) {
                 result.newVideos += unseen
+            } else if !kind.seedsInbox {
+                // First fetch of past streams: all seen, none new.
             } else if seen == nil {
                 newChannelCandidates += unseen
             } else {
