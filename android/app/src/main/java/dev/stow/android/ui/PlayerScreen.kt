@@ -12,6 +12,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -111,6 +115,8 @@ import kotlin.math.abs
 
 /** Each double-tap skips this far; taps in a row add up (5, 10, 15 s). */
 private const val SKIP_MS = 5_000L
+/** How fast the video plays while you hold the screen. */
+private const val HOLD_SPEED = 2f
 
 private val Speeds = listOf(0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f)
 
@@ -356,7 +362,7 @@ fun PlayerScreen(
                     }
                     IconButton(onClick = { connection.stop() }) { Icon(Icons.Filled.Close, contentDescription = "Close", tint = Stow.colors.text) }
                 }
-                Box(Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f)).height(2.dp).background(ProgressRed))
+                Box(Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f)).height(2.dp).background(Stow.colors.accent))
             }
         }
 
@@ -495,18 +501,56 @@ private fun PlayerControls(
         }
     }
 
+    val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+    // Held down: the video plays at 2x until you let go.
+    var holding by remember { mutableStateOf(false) }
     BoxWithConstraints(Modifier.fillMaxSize().pointerInput(player) {
-        detectTapGestures(
-            onTap = { visible = !visible; lastTouch = System.currentTimeMillis() },
-            onDoubleTap = { offset ->
-                val forward = offset.x > size.width / 2
+        // A tap shows or hides the controls at once (not after waiting to rule out a double tap);
+        // a second tap soon after on one side skips instead and puts the controls back as they were.
+        var lastTap: Pair<Long, Boolean>? = null
+        var visibleBeforeTap = visible
+        awaitEachGesture {
+            val down = awaitFirstDown()
+            var cancelled = false
+            val up = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                waitForUpOrCancellation().also { if (it == null) cancelled = true }
+            }
+            if (cancelled) return@awaitEachGesture
+            if (up == null) {
+                val previous = player.playbackParameters
+                val wasPlaying = player.playWhenReady
+                holding = true
+                visible = false
+                haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                player.setPlaybackSpeed(HOLD_SPEED)
+                player.play()
+                try {
+                    waitForUpOrCancellation()
+                } finally {
+                    player.playbackParameters = previous
+                    if (!wasPlaying) player.pause()
+                    holding = false
+                    lastTap = null
+                }
+                return@awaitEachGesture
+            }
+            val now = System.currentTimeMillis()
+            val forward = down.position.x > size.width / 2
+            val skipping = skip?.let { it.first == forward && now - it.third < 800 } == true
+            val doubleTap = lastTap?.let { (at, side) -> side == forward && now - at < viewConfiguration.doubleTapTimeoutMillis } == true
+            if (skipping || doubleTap) {
+                if (doubleTap && !skipping) visible = visibleBeforeTap
                 player.seekTo((player.currentPosition + if (forward) SKIP_MS else -SKIP_MS).coerceIn(0, player.duration.coerceAtLeast(0)))
-                val now = System.currentTimeMillis()
                 val previous = skip?.takeIf { it.first == forward && now - it.third < 800 }
                 skip = Triple(forward, (previous?.second ?: 0) + (SKIP_MS / 1000).toInt(), now)
-                lastTouch = now
-            },
-        )
+                lastTap = null
+            } else {
+                visibleBeforeTap = visible
+                visible = !visible
+                lastTap = now to forward
+            }
+            lastTouch = now
+        }
     }) {
         val width = constraints.maxWidth.toFloat()
         skip?.let { (forward, seconds, _) ->
@@ -522,10 +566,16 @@ private fun PlayerControls(
                 }
             }
         }
+        if (holding) {
+            Text("2x  ▶▶", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                 modifier = Modifier.align(Alignment.TopCenter).padding(top = 14.dp)
+                     .background(Color.Black.copy(alpha = 0.55f), androidx.compose.foundation.shape.RoundedCornerShape(50))
+                     .padding(horizontal = 12.dp, vertical = 5.dp))
+        }
         if (buffering) {
             androidx.compose.material3.CircularProgressIndicator(Modifier.align(Alignment.Center).size(44.dp), color = Color.White, strokeWidth = 3.dp)
         }
-        AnimatedVisibility(visible, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.fillMaxSize()) {
+        AnimatedVisibility(visible, enter = fadeIn(tween(90)), exit = fadeOut(tween(160)), modifier = Modifier.fillMaxSize()) {
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f))) {
                 Row(Modifier.fillMaxWidth().padding(4.dp).align(Alignment.TopStart)) {
                     IconButton(onClick = onCollapse) { Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Minimize", tint = Color.White) }
@@ -588,12 +638,12 @@ private fun PlayerControls(
             val barHeight = if (visible || scrubbing != null) 3.dp else 2.dp
             Box(Modifier.fillMaxWidth().height(barHeight).align(Alignment.CenterStart).background(Color.White.copy(alpha = 0.3f)))
             Box(Modifier.fillMaxWidth(bufferedFraction.coerceIn(0f, 1f)).height(barHeight).align(Alignment.CenterStart).background(Color.White.copy(alpha = 0.5f)))
-            Box(Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f)).height(barHeight).align(Alignment.CenterStart).background(ProgressRed))
+            Box(Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f)).height(barHeight).align(Alignment.CenterStart).background(Stow.colors.accent))
             if (visible || scrubbing != null) {
                 val dot = if (scrubbing != null) 16.dp else 12.dp
                 Box(Modifier.align(Alignment.CenterStart)
                         .offset { IntOffset((fraction.coerceIn(0f, 1f) * width - dot.toPx() / 2).roundToInt(), 0) }
-                        .size(dot).background(ProgressRed, CircleShape))
+                        .size(dot).background(Stow.colors.accent, CircleShape))
             }
         }
     }

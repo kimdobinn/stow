@@ -13,6 +13,7 @@ struct PlayerPanel: View {
     var onDetailsHeight: (CGFloat) -> Void = { _ in }
     /// The spot (0–1) on the timeline under the pointer, for the preview above it.
     @State private var scrub: Double?
+    @Environment(\.appTheme) private var theme
     @AppStorage(PlaybackScreen.seekStepKey) private var storedSeekStep = PlaybackScreen.defaultSeekStep
     private var seekStep: Int { PlaybackScreen.seekStep(stored: storedSeekStep) }
 
@@ -29,7 +30,8 @@ struct PlayerPanel: View {
         }
         // The video gets the height the details leave (it shrinks rather than pushing them off).
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(dock.isExpanded ? Color.black : Color(nsColor: .windowBackgroundColor), ignoresSafeAreaEdges: [])
+        .background(dock.isExpanded ? Color.black : theme == .paper ? Paper.background : Color(nsColor: .windowBackgroundColor),
+                    ignoresSafeAreaEdges: [])
         .task(id: screen.nowPlaying?.video.id) {
             guard let videoId = screen.nowPlaying?.video.id else { return }
             StoryboardLoader.shared.load(videoId: videoId, cookiesFile: model.playbackCookiesFile)

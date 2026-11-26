@@ -13,13 +13,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import dev.stow.android.data.AppTheme
 
 /** The app icon's orange → pink → purple: the download ring and the app mark, nowhere else. */
 val StowGradient = Brush.linearGradient(listOf(Color(0xFFFF8A3D), Color(0xFFFF2D55), Color(0xFF8B5CF6)))
 val StowGradientColors = listOf(Color(0xFFFF8A3D), Color(0xFFFF2D55), Color(0xFF8B5CF6), Color(0xFFFF8A3D))
-
-/** How far you got in a video: the accent, so "yours" reads the same everywhere. */
-val ProgressRed = Color(0xFFFF2D55)
 
 /**
  * Apple-style semantic colors, by role. Contrast against `background`:
@@ -59,6 +57,24 @@ private val Dark = StowColors(
     divider = Color(0xFF38383A), raised = Color(0xFF1C1C1E), accent = Color(0xFFFF375F),
 )
 
+/**
+ * Warm paper: off-white and cream with a terracotta accent. Contrast: text 16:1; secondaryText
+ * #66655F 5.6:1 on `background`, 5.0:1 on `groupedBackground`; accent #C96442 4.8:1.
+ */
+private val Paper = StowColors(
+    background = Color(0xFFFAF9F5), groupedBackground = Color(0xFFF0EEE6),
+    text = Color(0xFF1F1E1D), secondaryText = Color(0xFF66655F),
+    chip = Color(0xFFEDEBE3), chipSelected = Color(0xFF1F1E1D), chipSelectedText = Color(0xFFFAF9F5),
+    divider = Color(0xFFDEDBD0), raised = Color(0xFFFFFEFB), accent = Color(0xFFC96442),
+)
+
+/** The colors a theme uses (Automatic follows the phone's dark mode). */
+fun stowColors(theme: AppTheme, systemDark: Boolean): StowColors = when {
+    theme.isDark(systemDark) -> Dark
+    theme == AppTheme.PAPER -> Paper
+    else -> Light
+}
+
 val LocalStowColors = staticCompositionLocalOf { Light }
 
 /** Calm mode: titles only, no thumbnails. */
@@ -82,9 +98,10 @@ object StowType {
 }
 
 @Composable
-fun StowTheme(content: @Composable () -> Unit) {
-    val dark = isSystemInDarkTheme()
-    val colors = if (dark) Dark else Light
+fun StowTheme(theme: AppTheme = AppTheme.SYSTEM, content: @Composable () -> Unit) {
+    val systemDark = isSystemInDarkTheme()
+    val dark = theme.isDark(systemDark)
+    val colors = stowColors(theme, systemDark)
     val scheme = if (dark) {
         darkColorScheme(
             primary = colors.accent, onPrimary = Color.White,

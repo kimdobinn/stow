@@ -71,6 +71,7 @@ enum StowMain {
 struct StowApp: App {
     @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
     @State private var model: AppModel
+    @AppStorage(AppTheme.storageKey) private var theme: AppTheme = .system
 
     init() {
         // Unit tests are hosted by the app; don't touch the network, real files or audio devices then.
@@ -106,12 +107,19 @@ struct StowApp: App {
         Window("Stow", id: SceneID.main) {
             MainView()
                 .environment(model)
+                .environment(\.appTheme, theme)
                 .frame(minWidth: 820, minHeight: 540)
+                .onChange(of: theme, initial: true) { NSApp.appearance = theme.appearance }
         }
         .defaultSize(width: 1180, height: 760)
         .defaultLaunchBehavior(.presented)
         .restorationBehavior(.disabled)
         .commands {
+            CommandGroup(after: .toolbar) {
+                Picker("Theme", selection: $theme) {
+                    ForEach(AppTheme.allCases) { Text($0.title).tag($0) }
+                }
+            }
             CommandGroup(replacing: .newItem) {
                 Button("Check Now") { Task { await model.checkNow() } }
                     .keyboardShortcut("r")

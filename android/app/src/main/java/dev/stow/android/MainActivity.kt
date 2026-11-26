@@ -102,7 +102,15 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         handle(intent)
         setContent {
-            StowTheme {
+            val theme by repository.prefs.theme.collectAsStateWithLifecycle()
+            val dark = theme.isDark(androidx.compose.foundation.isSystemInDarkTheme())
+            // The status and navigation bar icons follow the app's theme, not the phone's.
+            LaunchedEffect(dark) {
+                val style = if (dark) androidx.activity.SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                            else androidx.activity.SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
+                enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
+            }
+            StowTheme(theme) {
                 Surface(Modifier.fillMaxSize(), color = Stow.colors.background) { App() }
             }
         }

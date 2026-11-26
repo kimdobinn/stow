@@ -35,16 +35,17 @@ enum Snapshot {
                        phase: samplePlayingPhase(model)),
             ] + playbackScreens(model)
                 + playerPanelScreens(model)
-            for appearance in [NSAppearance.Name.aqua, .darkAqua] {
-                let suffix = appearance == .aqua ? "light" : "dark"
+            let passes: [(NSAppearance.Name, String, AppTheme)] = [(.aqua, "light", .system), (.darkAqua, "dark", .system),
+                                                                   (.aqua, "paper", .paper)]
+            for (appearance, suffix, theme) in passes {
                 for screen in screens {
                     model.previewAlarmPhase(screen.phase)
                     PlayerDock.shared.showPreview(screen.player)
                     let url = output.appending(path: "\(screen.name)-\(suffix).png")
                     if let size = screen.windowSize {
-                        try await renderWindow(screen.view.environment(model), size: size, appearance: appearance, to: url)
+                        try await renderWindow(screen.view.environment(model).environment(\.appTheme, theme), size: size, appearance: appearance, to: url)
                     } else {
-                        try await render(screen.view.environment(model), appearance: appearance, to: url)
+                        try await render(screen.view.environment(model).environment(\.appTheme, theme), appearance: appearance, to: url)
                     }
                     print(url.path)
                 }

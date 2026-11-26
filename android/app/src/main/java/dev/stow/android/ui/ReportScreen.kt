@@ -65,7 +65,7 @@ fun ReportScreen(
                             Text(if (day.seconds >= 60) "${day.seconds / 60}" else "", fontSize = 11.sp, color = Stow.colors.secondaryText)
                             val fraction = (day.seconds.toFloat() / most).coerceIn(0.02f, 1f)
                             Box(Modifier.fillMaxWidth().fillMaxHeight(fraction * 0.8f).clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
-                                    .background(if (i == thisWeek.lastIndex) ProgressRed else Stow.colors.secondaryText.copy(alpha = 0.45f)))
+                                    .background(if (i == thisWeek.lastIndex) Stow.colors.accent else Stow.colors.secondaryText.copy(alpha = 0.45f)))
                             Spacer(Modifier.height(4.dp))
                             Text(day.date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault()), fontSize = 11.sp, color = Stow.colors.secondaryText)
                         }
@@ -85,7 +85,7 @@ fun ReportScreen(
                              fontSize = 13.sp, color = Stow.colors.secondaryText)
                     }
                     Box(Modifier.padding(start = 38.dp, top = 6.dp).fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(Stow.colors.chip)) {
-                        Box(Modifier.fillMaxWidth((seconds.toFloat() / channelMax).coerceIn(0.02f, 1f)).height(4.dp).background(ProgressRed))
+                        Box(Modifier.fillMaxWidth((seconds.toFloat() / channelMax).coerceIn(0.02f, 1f)).height(4.dp).background(Stow.colors.accent))
                     }
                 }
             }

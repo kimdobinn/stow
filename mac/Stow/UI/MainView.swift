@@ -33,6 +33,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
 /// panel beside it while a video plays (or filling it, expanded).
 struct MainView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.appTheme) private var theme
     @State private var selection: SidebarItem
     /// The player panel's width as last dragged; 0 until then (an automatic width).
     @AppStorage("playerPanelWidth") private var preferredPanelWidth: Double = 0
@@ -57,11 +58,13 @@ struct MainView: View {
                 }
             }
             .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
+            .themedBackground(Paper.sidebar)
         } detail: {
             let range = panelWidthRange(in: detailSize)
             let panelWidth = currentPanelWidth(range: range)
             HStack(spacing: 0) {
                 detail
+                    .themedBackground()
                     .frame(maxWidth: dock.isExpanded && dock.screen != nil ? 0 : .infinity)
                     .opacity(dock.isExpanded && dock.screen != nil ? 0 : 1)
                 if let screen = dock.screen {
@@ -77,17 +80,27 @@ struct MainView: View {
                 dock.detailWidth = $0.width
             }
             .onChange(of: plannedPanelWidth, initial: true) { dock.plannedPanelWidth = $1 }
-            .background(WindowReader { dock.hostWindow = $0 })
+            .background(WindowReader { window in
+                dock.hostWindow = window
+                paintWindow(window)
+            })
+            .onChange(of: theme) { if let window = dock.hostWindow { paintWindow(window) } }
             .animation(.snappy(duration: 0.3), value: dock.screen == nil)
             .animation(.snappy(duration: 0.3), value: dock.isExpanded)
             .navigationTitle(selection.title)
             .toolbar { toolbar }
         }
+        .tint(theme == .paper ? Paper.accent : nil)
         // Closing the main window stops the video playing in it.
         .onDisappear { dock.stop() }
     }
 
     private var dock: PlayerDock { PlayerDock.shared }
+
+    /// The title bar and toolbar take the theme's background too.
+    private func paintWindow(_ window: NSWindow) {
+        window.backgroundColor = theme == .paper ? Paper.nsBackground : .windowBackgroundColor
+    }
 
     private static let minPanelWidth: CGFloat = 420
     /// What the panel always leaves of the section beside it.

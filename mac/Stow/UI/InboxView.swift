@@ -4,6 +4,7 @@ import SwiftUI
 /// recent videos per channel, reorderable by dragging. Chips at the top filter by channel.
 struct InboxView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.appTheme) private var theme
     @State private var confirmsClear = false
     @State private var channelFilter: Channel.ID?
     /// The Recent row a channel is being dragged over. Kept here (not per row) so it can be
@@ -108,7 +109,7 @@ struct InboxView: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 1)
-                        .background(Color.accentColor, in: Capsule())
+                        .background(theme.accent, in: Capsule())
                 }
             }
             LazyVGrid(columns: columns, spacing: 24) {
@@ -131,6 +132,7 @@ struct InboxView: View {
 /// A channel's name and picture in a column on the left (the drag handle for reordering), and
 /// its videos in a horizontal strip beside it.
 private struct ChannelShelf: View {
+    @Environment(\.appTheme) private var theme
     let channel: Channel
     let videos: [Video]
     let isDropTarget: Bool
@@ -167,15 +169,15 @@ private struct ChannelShelf: View {
             }
             .scrollIndicators(.automatic)
         }
-        .background(isDropTarget ? Color.accentColor.opacity(0.08) : Color.primary.opacity(0.035), in: shape)
+        .background(isDropTarget ? theme.accent.opacity(0.08) : Color.primary.opacity(0.035), in: shape)
         .clipShape(shape)
         .overlay {
-            shape.strokeBorder(isDropTarget ? Color.accentColor : Color.primary.opacity(0.08),
+            shape.strokeBorder(isDropTarget ? theme.accent : Color.primary.opacity(0.08),
                                lineWidth: isDropTarget ? 2 : 1)
         }
         .overlay(alignment: .top) {
             if isDropTarget {
-                Capsule().fill(Color.accentColor).frame(height: 3).offset(y: -9)
+                Capsule().fill(theme.accent).frame(height: 3).offset(y: -9)
             }
         }
         .dropDestination(for: String.self) { ids, _ in

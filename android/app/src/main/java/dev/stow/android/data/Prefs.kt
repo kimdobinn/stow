@@ -56,6 +56,15 @@ class Prefs(context: Context) {
     val grayscale: StateFlow<Boolean> = _grayscale.asStateFlow()
     fun setGrayscale(on: Boolean) = set(_grayscale, KEY_GRAYSCALE, on)
 
+    private val _theme = MutableStateFlow(
+        runCatching { AppTheme.valueOf(prefs.getString(KEY_THEME, null) ?: "") }.getOrDefault(AppTheme.SYSTEM))
+    /** How the app looks: following the phone, light, dark or warm paper. */
+    val theme: StateFlow<AppTheme> = _theme.asStateFlow()
+    fun setTheme(theme: AppTheme) {
+        prefs.edit().putString(KEY_THEME, theme.name).apply()
+        _theme.value = theme
+    }
+
     /** Videos marked watched on the phone that were never sent to it (streamed). */
     private val _watchedHere = MutableStateFlow(prefs.getStringSet(KEY_WATCHED_HERE, emptySet()).orEmpty().toSet())
     val watchedHere: StateFlow<Set<String>> = _watchedHere.asStateFlow()
@@ -124,11 +133,23 @@ class Prefs(context: Context) {
         const val KEY_GRAYSCALE = "grayscale"
         const val KEY_WATCHED_HERE = "watchedHere"
         const val KEY_GROUP = "groupByChannel"
+        const val KEY_THEME = "theme"
         const val KEY_ALARM_HOSTS = "alarmHosts"
         const val KEY_ALARM_PORT = "alarmPort"
         const val KEY_ALARM_MAC = "alarmMac"
         const val KEY_ALARM_AT = "alarmAt"
         const val KEY_ALARM_ENDED = "alarmEndedSentAt"
+    }
+}
+
+/** The app's look. Paper is a light theme in warm off-white with a terracotta accent. */
+enum class AppTheme(val label: String) {
+    SYSTEM("Automatic"), LIGHT("Light"), DARK("Dark"), PAPER("Paper");
+
+    fun isDark(systemDark: Boolean) = when (this) {
+        SYSTEM -> systemDark
+        DARK -> true
+        LIGHT, PAPER -> false
     }
 }
 

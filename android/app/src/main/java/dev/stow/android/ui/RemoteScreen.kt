@@ -256,7 +256,7 @@ private fun Progress(state: AlarmState, onSeekTo: (Double) -> Unit) {
             detectTapGestures { offset -> duration?.let { onSeekTo((offset.x / size.width).coerceIn(0f, 1f) * it) } }
         }, contentAlignment = Alignment.CenterStart) {
             Box(Modifier.fillMaxWidth().height(3.dp).background(Stow.colors.divider))
-            Box(Modifier.fillMaxWidth(fraction).height(3.dp).background(ProgressRed))
+            Box(Modifier.fillMaxWidth(fraction).height(3.dp).background(Stow.colors.accent))
         }
         Row {
             Text(Format.duration((state.position * 1000).toLong()), fontSize = 12.sp, color = Stow.colors.secondaryText)
@@ -314,7 +314,7 @@ private fun VideoLine(video: AlarmVideo, current: Boolean, onClick: () -> Unit, 
             Text(video.title, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Stow.colors.text, maxLines = 2,
                  overflow = TextOverflow.Ellipsis, lineHeight = 19.sp)
             Text(if (current) "Now playing" else subtitle, fontSize = 12.sp,
-                 color = if (current) ProgressRed else Stow.colors.secondaryText, maxLines = 1)
+                 color = if (current) Stow.colors.accent else Stow.colors.secondaryText, maxLines = 1)
         }
     }
 }

@@ -123,7 +123,7 @@ fun Thumbnail(item: VideoItem, modifier: Modifier = Modifier, rounded: Dp = 0.dp
         }
         if (item.progress > 0.01f) {
             Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(4.dp).background(Color(0x59FFFFFF)))
-            Box(Modifier.align(Alignment.BottomStart).fillMaxWidth(item.progress).height(4.dp).background(ProgressRed))
+            Box(Modifier.align(Alignment.BottomStart).fillMaxWidth(item.progress).height(4.dp).background(Stow.colors.accent))
         }
         overlay()
     }
@@ -395,7 +395,7 @@ private fun MoreButton(onClick: () -> Unit) {
 @Composable
 private fun WatchedLine(fraction: Float) {
     Box(Modifier.padding(top = 6.dp).width(120.dp).height(3.dp).background(Stow.colors.chip)) {
-        Box(Modifier.fillMaxWidth(fraction).height(3.dp).background(ProgressRed))
+        Box(Modifier.fillMaxWidth(fraction).height(3.dp).background(Stow.colors.accent))
     }
 }
 

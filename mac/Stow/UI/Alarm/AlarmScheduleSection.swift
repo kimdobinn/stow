@@ -32,6 +32,7 @@ struct AlarmScheduleSection: View {
 
 /// M T W T F S S as round toggle buttons.
 struct WeekdayPicker: View {
+    @Environment(\.appTheme) private var theme
     let selection: [Weekday]
     let toggle: (Weekday) -> Void
 
@@ -44,7 +45,7 @@ struct WeekdayPicker: View {
                         .font(.body.weight(.semibold))
                         .frame(width: 30, height: 30)
                         .foregroundStyle(isOn ? Color.white : Color.primary)
-                        .background(isOn ? Color.accentColor : Color.primary.opacity(0.08), in: Circle())
+                        .background(isOn ? theme.accent : Color.primary.opacity(0.08), in: Circle())
                         .contentShape(Circle())
                 }
                 .buttonStyle(.plain)

@@ -4,6 +4,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.border
+import dev.stow.android.data.AppTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -67,6 +71,7 @@ fun SettingsScreen(repository: Repository, wifiOnly: Boolean, onReport: () -> Un
     val autoplay by repository.prefs.autoplay.collectAsStateWithLifecycle()
     val calm by repository.prefs.calm.collectAsStateWithLifecycle()
     val grayscale by repository.prefs.grayscale.collectAsStateWithLifecycle()
+    val theme by repository.prefs.theme.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var storage by remember { mutableStateOf<Long?>(null) }
@@ -86,6 +91,9 @@ fun SettingsScreen(repository: Repository, wifiOnly: Boolean, onReport: () -> Un
     Column(Modifier.fillMaxSize().background(Stow.colors.groupedBackground)) {
         BackTopBar("Settings", onBack)
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+            Section("Appearance") {
+                ThemePicker(theme, repository.prefs::setTheme)
+            }
             Section("Watching") {
                 SettingRow(Icons.Rounded.BarChart, Purple, "Your week", "Time watched per day and channel", onClick = onReport, chevron = true)
                 SettingRow(Icons.Rounded.Folder, Orange, "Channel groups",
@@ -188,6 +196,52 @@ private val Orange = Color(0xFFFF9500)
 private val Red = Color(0xFFFF3B30)
 private val Green = Color(0xFF34C759)
 private val Indigo = Color(0xFF5856D6)
+
+/** The four themes as little phone screens in their colors; tap one to switch. */
+@Composable
+private fun ThemePicker(selected: AppTheme, onSelect: (AppTheme) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 14.dp)) {
+        AppTheme.entries.forEach { theme ->
+            val isSelected = theme == selected
+            Column(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).clickable { onSelect(theme) }.padding(vertical = 4.dp),
+                   horizontalAlignment = Alignment.CenterHorizontally) {
+                val shape = RoundedCornerShape(12.dp)
+                Box(Modifier.size(width = 62.dp, height = 92.dp)
+                        .border(if (isSelected) 2.5.dp else 1.dp, if (isSelected) Stow.colors.accent else Stow.colors.divider, shape)
+                        .padding(if (isSelected) 4.dp else 1.dp)
+                        .clip(RoundedCornerShape(if (isSelected) 8.dp else 11.dp))) {
+                    if (theme == AppTheme.SYSTEM) {
+                        Row(Modifier.fillMaxSize()) {
+                            MiniScreen(stowColors(AppTheme.LIGHT, false), Modifier.weight(1f))
+                            MiniScreen(stowColors(AppTheme.DARK, true), Modifier.weight(1f))
+                        }
+                    } else {
+                        MiniScreen(stowColors(theme, false), Modifier.fillMaxSize())
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(theme.label, style = StowType.footnote, fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                     color = if (isSelected) Stow.colors.accent else Stow.colors.text)
+            }
+        }
+    }
+}
+
+/** A tiny screen in a theme's colors: a title, a thumbnail, a line of text and an accent dot. */
+@Composable
+private fun MiniScreen(colors: StowColors, modifier: Modifier) {
+    Column(modifier.fillMaxHeight().background(colors.background).padding(7.dp)) {
+        Box(Modifier.width(28.dp).height(5.dp).clip(RoundedCornerShape(3.dp)).background(colors.text))
+        Spacer(Modifier.height(7.dp))
+        Box(Modifier.width(44.dp).height(24.dp).clip(RoundedCornerShape(4.dp)).background(colors.chip))
+        Spacer(Modifier.height(5.dp))
+        Box(Modifier.width(36.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(colors.secondaryText))
+        Spacer(Modifier.weight(1f))
+        Box(Modifier.width(44.dp).height(10.dp).clip(RoundedCornerShape(5.dp)).background(colors.raised)) {
+            Box(Modifier.padding(start = 6.dp).size(6.dp).align(Alignment.CenterStart).clip(RoundedCornerShape(3.dp)).background(colors.accent))
+        }
+    }
+}
 
 /** An inset grouped section: a small header, rounded rows, and an optional note under it. */
 @Composable
