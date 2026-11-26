@@ -423,7 +423,7 @@ class MainActivity : ComponentActivity() {
             var checking by remember(item.id) { mutableStateOf(true) }
             LaunchedEffect(item.id) {
                 val cookies = if (item.video.isMembersOnly) repository.cookiesFile() else null
-                size = runCatching { dev.stow.android.sync.YtDlp.downloadSize(this@MainActivity, item.video, cookies) }.getOrNull()
+                size = runCatching { dev.stow.android.sync.YtDlp.downloadSize(this@MainActivity, item.video, cookies, repository.prefs.downloadFormatSort) }.getOrNull()
                 cookies?.delete()
                 checking = false
             }

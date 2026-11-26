@@ -8,6 +8,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.border
 import dev.stow.android.data.AppTheme
+import dev.stow.android.data.DownloadQuality
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.material.icons.rounded.HighQuality
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -72,6 +78,8 @@ fun SettingsScreen(repository: Repository, wifiOnly: Boolean, onReport: () -> Un
     val calm by repository.prefs.calm.collectAsStateWithLifecycle()
     val grayscale by repository.prefs.grayscale.collectAsStateWithLifecycle()
     val theme by repository.prefs.theme.collectAsStateWithLifecycle()
+    val quality by repository.prefs.downloadQuality.collectAsStateWithLifecycle()
+    var pickQuality by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var storage by remember { mutableStateOf<Long?>(null) }
@@ -117,6 +125,9 @@ fun SettingsScreen(repository: Repository, wifiOnly: Boolean, onReport: () -> Un
                            onClick = { repository.setWifiOnly(!wifiOnly) }) {
                     StowSwitch(wifiOnly, repository::setWifiOnly)
                 }
+                SettingRow(Icons.Rounded.HighQuality, Purple, "Quality",
+                           if (quality == DownloadQuality.BEST) "Best available" else "Up to ${quality.label}",
+                           onClick = { pickQuality = true }, chevron = true)
                 SettingRow(Icons.Rounded.SdStorage, Gray, "Storage used", storage?.let(Format::bytes) ?: "…")
                 SettingRow(Icons.Rounded.DeleteSweep, Orange, "Delete watched downloads", "Frees space; videos stay in your lists",
                            onClick = { confirmDeleteWatched = true })
@@ -142,6 +153,36 @@ fun SettingsScreen(repository: Repository, wifiOnly: Boolean, onReport: () -> Un
         }
     }
 
+    if (pickQuality) {
+        AlertDialog(
+            onDismissRequest = { pickQuality = false },
+            title = { Text("Download quality") },
+            text = {
+                Column {
+                    Text("The highest a download takes. Videos without it download at the next best. Videos already downloaded stay as they are.",
+                         style = StowType.footnote, color = Stow.colors.secondaryText, modifier = Modifier.padding(bottom = 8.dp))
+                    DownloadQuality.entries.forEach { option ->
+                        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                                .selectable(option == quality, role = Role.RadioButton) {
+                                    repository.prefs.setDownloadQuality(option)
+                                    pickQuality = false
+                                }
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(option == quality, onClick = null, colors = RadioButtonDefaults.colors(selectedColor = Stow.colors.accent),
+                                        modifier = Modifier.padding(horizontal = 8.dp))
+                            Column {
+                                Text(option.label + if (option == DownloadQuality.P1080) " (default)" else "",
+                                     style = StowType.body, color = Stow.colors.text)
+                                Text(option.detail, style = StowType.footnote, color = Stow.colors.secondaryText)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { pickQuality = false }) { Text("Done") } },
+        )
+    }
     if (confirmUnpair) {
         AlertDialog(
             onDismissRequest = { confirmUnpair = false },

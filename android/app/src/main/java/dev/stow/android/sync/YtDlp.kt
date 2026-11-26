@@ -52,18 +52,21 @@ object YtDlp {
         downloadDir(context).listFiles { file -> file.name.startsWith("$id.") }?.forEach { it.delete() }
     }
 
+    /** Streams: H.264 up to 1080p, preferring 60 fps (downloads follow the quality setting instead). */
+    private const val STREAM_SORT = "res:1080,fps,vcodec:h264,acodec:m4a"
+
     /**
-     * Downloads the best H.264 video up to 1080p (preferring 60 fps) with AAC audio, merged into
-     * an MP4. `cookies` (members-only videos) is a Netscape cookies.txt. Returns the file.
+     * Downloads the video in `formatSort`'s order (see [dev.stow.android.data.DownloadQuality])
+     * with the best audio, merged into an MP4. `cookies` (members-only videos) is a Netscape
+     * cookies.txt. Returns the file.
      */
-    suspend fun download(context: Context, video: Video, cookies: File?, onProgress: (Int) -> Unit): File =
+    suspend fun download(context: Context, video: Video, cookies: File?, formatSort: String, onProgress: (Int) -> Unit): File =
         withContext(Dispatchers.IO) {
             ensureReady(context)
             val dir = downloadDir(context)
             val request = YoutubeDLRequest(video.watchUrl).apply {
                 addOption("-o", File(dir, "%(id)s.%(ext)s").absolutePath)
-                // H.264 + AAC: hardware-decoded on every phone (AV1 isn't everywhere).
-                addOption("-S", "res:1080,fps,vcodec:h264,acodec:m4a")
+                addOption("-S", formatSort)
                 addOption("-f", "bv*+ba/b")
                 addOption("--merge-output-format", "mp4")
                 addOption("--no-playlist")
@@ -93,7 +96,7 @@ object YtDlp {
         ensureReady(context)
         val request = YoutubeDLRequest(video.watchUrl).apply {
             addOption("-j")
-            addOption("-S", "res:1080,fps,vcodec:h264,acodec:m4a")
+            addOption("-S", STREAM_SORT)
             addOption("-f", "bv*+ba/b")
             addOption("--no-playlist")
             if (cookies != null) addOption("--cookies", cookies.absolutePath)
@@ -116,11 +119,11 @@ object YtDlp {
     }
 
     /** What a download would take, in bytes (yt-dlp's figure for the format it would pick); null when it doesn't say. */
-    suspend fun downloadSize(context: Context, video: Video, cookies: File?): Long? = withContext(Dispatchers.IO) {
+    suspend fun downloadSize(context: Context, video: Video, cookies: File?, formatSort: String): Long? = withContext(Dispatchers.IO) {
         ensureReady(context)
         val request = YoutubeDLRequest(video.watchUrl).apply {
             addOption("-j")
-            addOption("-S", "res:1080,fps,vcodec:h264,acodec:m4a")
+            addOption("-S", formatSort)
             addOption("-f", "bv*+ba/b")
             addOption("--no-playlist")
             if (cookies != null) addOption("--cookies", cookies.absolutePath)

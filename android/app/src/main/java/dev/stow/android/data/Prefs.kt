@@ -41,6 +41,18 @@ class Prefs(context: Context) {
         flow.value = on
     }
 
+    private val _downloadQuality = MutableStateFlow(
+        runCatching { DownloadQuality.valueOf(prefs.getString(KEY_QUALITY, null) ?: "") }.getOrDefault(DownloadQuality.P1080))
+    /** The highest resolution a download takes (it takes less when the video has nothing that high). */
+    val downloadQuality: StateFlow<DownloadQuality> = _downloadQuality.asStateFlow()
+    fun setDownloadQuality(quality: DownloadQuality) {
+        prefs.edit().putString(KEY_QUALITY, quality.name).apply()
+        _downloadQuality.value = quality
+    }
+
+    /** yt-dlp's format order for downloads. */
+    val downloadFormatSort: String get() = downloadQuality.value.formatSort
+
     /** Play the next video when one ends (off: stop with a "done" screen). PlaybackService reads it too. */
     private val _autoplay = flag(KEY_AUTOPLAY, false)
     val autoplay: StateFlow<Boolean> = _autoplay.asStateFlow()
@@ -134,6 +146,7 @@ class Prefs(context: Context) {
         const val KEY_WATCHED_HERE = "watchedHere"
         const val KEY_GROUP = "groupByChannel"
         const val KEY_THEME = "theme"
+        const val KEY_QUALITY = "downloadQuality"
         const val KEY_ALARM_HOSTS = "alarmHosts"
         const val KEY_ALARM_PORT = "alarmPort"
         const val KEY_ALARM_MAC = "alarmMac"
@@ -151,6 +164,23 @@ enum class AppTheme(val label: String) {
         DARK -> true
         LIGHT, PAPER -> false
     }
+}
+
+/** The highest resolution downloads take. */
+enum class DownloadQuality(val height: Int?, val label: String, val detail: String) {
+    BEST(null, "Best available", "Up to 4K or more; the largest files"),
+    P1440(1440, "1440p", "Sharper than 1080p on a big screen; about twice the size"),
+    P1080(1080, "1080p", "Full HD"),
+    P720(720, "720p", "About half the size of 1080p"),
+    P480(480, "480p", "Smallest; fine for talks and podcasts");
+
+    /**
+     * yt-dlp's `-S`: the highest resolution up to the cap, then the highest frame rate, then H.264
+     * and AAC, which every phone decodes in hardware. YouTube has no H.264 above 1080p, so higher
+     * downloads are VP9 or AV1. (No frame-rate setting: YouTube offers 60 fps videos at 30 fps
+     * only at 480p and below.)
+     */
+    val formatSort: String get() = "${height?.let { "res:$it" } ?: "res"},fps,vcodec:h264,acodec:m4a"
 }
 
 /** From the Mac's "alarm" push: its LAN addresses (likeliest first), the remote's port and its name. */

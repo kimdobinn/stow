@@ -39,7 +39,7 @@
 - **Home** with all of YouTube's recommendations, **Subscriptions** like YouTube's, and **channel
   groups** to see only the channels you pick.
 - **No Shorts anywhere.** Live streams show only once they're over (labelled "Streamed").
-- **Download** any video to watch offline, in the background or on the lock screen. Long videos show
+- **Download** any video to watch offline (up to 1080p, or the quality you pick, up to 4K), in the background or on the lock screen. Long videos show
   their size first.
 - **Player** with double-tap to skip, hold for 2×, comments, playback speed and autoplay.
 - **Your week:** time watched per day and per channel. Optional calm mode (no thumbnails) and black and white.

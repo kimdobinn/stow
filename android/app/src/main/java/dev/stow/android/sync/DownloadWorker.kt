@@ -42,7 +42,7 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
         val cookies = if (video.isMembersOnly) repository.cookiesFile() else null
         try {
             var lastShown = 0L
-            val file = YtDlp.download(applicationContext, video, cookies) { percent ->
+            val file = YtDlp.download(applicationContext, video, cookies, repository.prefs.downloadFormatSort) { percent ->
                 repository.local.update(id) { it?.copy(progress = percent) }
                 val now = System.currentTimeMillis()
                 if (now - lastShown > 1_000) {
