@@ -98,7 +98,7 @@ private struct UpNextRow: View {
 
     private var subtitle: String {
         guard let date = video.publishedAt else { return video.channelTitle }
-        return "\(video.channelTitle) · \(date.formatted(.relative(presentation: .named)))"
+        return "\(video.channelTitle) · \(date.formatted(.relative(presentation: .numeric)))"
     }
 }
 

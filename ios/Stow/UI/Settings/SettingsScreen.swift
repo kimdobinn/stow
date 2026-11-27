@@ -5,6 +5,7 @@ import SwiftUI
 struct SettingsScreen: View {
     @Environment(Repository.self) private var repository
     @Environment(Shell.self) private var shell
+    @Environment(UpdateChecker.self) private var updates
     @Environment(\.stowColors) private var colors
     @State private var storage: Int64?
     @State private var ytDlpVersion: String?
@@ -101,9 +102,13 @@ struct SettingsScreen: View {
             macSection
                 .listRowBackground(colors.raised)
 
-            Section("About") {
-                LabeledContent("Version", value: Self.appVersion)
+            Section {
+                updateRow
                     .id("about")
+            } header: {
+                Text("About")
+            } footer: {
+                Text("Stow looks for a new version on GitHub once a day.")
             }
             .listRowBackground(colors.raised)
         }
@@ -164,6 +169,48 @@ struct SettingsScreen: View {
         }
     }
 
+    /// "Stow 0.1.0 · Up to date", "Update to 0.1.1" (opens the release notes), "Checking…", or
+    /// why the check failed. Tapping checks again, or opens the update.
+    private var updateRow: some View {
+        Button {
+            if let update = updates.available, updates.status != .checking {
+                shell.update = update
+            } else {
+                Task { await updates.check() }
+            }
+        } label: {
+            HStack {
+                if updates.status == .checking {
+                    SettingLabel("Stow \(updates.currentVersion)", "Checking…", icon: "arrow.triangle.2.circlepath", color: .gray)
+                    Spacer()
+                    ProgressView()
+                } else if let update = updates.available {
+                    SettingLabel("Update to \(update.version)", "You have \(updates.currentVersion) · see what's new",
+                                 icon: "arrow.down.circle.fill", color: colors.accent)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(colors.secondaryText.opacity(0.6))
+                } else if case .failed(let message) = updates.status {
+                    SettingLabel("Stow \(updates.currentVersion)", "\(message). Tap to try again",
+                                 icon: "exclamationmark.triangle.fill", color: .orange)
+                } else if let checked = updates.lastChecked {
+                    SettingLabel("Stow \(updates.currentVersion)", "Up to date · checked " + Self.lowercasedFirst(Format.ago(checked)),
+                                 icon: "checkmark.seal.fill", color: .green)
+                } else {
+                    SettingLabel("Stow \(updates.currentVersion)", "Tap to look for an update", icon: "arrow.triangle.2.circlepath", color: .gray)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint(updates.available == nil ? "Looks for a new version" : "Shows what's new")
+    }
+
+    private static func lowercasedFirst(_ text: String) -> String {
+        text.prefix(1).lowercased() + text.dropFirst()
+    }
+
     /// "Checked 2 minutes ago", or why it couldn't.
     private var syncText: String {
         if let error = repository.syncError { return error }
@@ -187,13 +234,6 @@ struct SettingsScreen: View {
         items.forEach { repository.deleteDownload($0.id) }
         storage = repository.storageUsedBytes()
         shell.notify(items.count == 1 ? "Deleted 1 video" : "Deleted \(items.count) videos")
-    }
-
-    static var appVersion: String {
-        let info = Bundle.main.infoDictionary
-        let version = info?["CFBundleShortVersionString"] as? String ?? "?"
-        let build = info?["CFBundleVersion"] as? String ?? "?"
-        return "\(version) (\(build))"
     }
 }
 

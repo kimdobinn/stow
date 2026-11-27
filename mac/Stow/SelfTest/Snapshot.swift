@@ -37,6 +37,9 @@ enum Snapshot {
                 + playerPanelScreens(model)
             let passes: [(NSAppearance.Name, String, AppTheme)] = [(.aqua, "light", .system), (.darkAqua, "dark", .system),
                                                                    (.aqua, "paper", .paper)]
+            // The Account section shows an update on offer, with its notes.
+            let updater = AppUpdater.preview(status: .available(AppUpdater.sampleRelease))
+            let ytdlp = YtDlpUpdater.preview(version: DottedVersion("2026.11.23"))
             for (appearance, suffix, theme) in passes {
                 for screen in screens {
                     model.previewAlarmPhase(screen.phase)
@@ -47,9 +50,11 @@ enum Snapshot {
                     }
                     let url = output.appending(path: "\(screen.name)-\(suffix).png")
                     if let size = screen.windowSize {
-                        try await renderWindow(screen.view.environment(model).environment(\.appTheme, theme), size: size, appearance: appearance, to: url)
+                        try await renderWindow(screen.view.environment(model).environment(updater).environment(ytdlp)
+                            .environment(\.appTheme, theme), size: size, appearance: appearance, to: url)
                     } else {
-                        try await render(screen.view.environment(model).environment(\.appTheme, theme), appearance: appearance, to: url)
+                        try await render(screen.view.environment(model).environment(updater).environment(ytdlp)
+                            .environment(\.appTheme, theme), appearance: appearance, to: url)
                     }
                     print(url.path)
                 }

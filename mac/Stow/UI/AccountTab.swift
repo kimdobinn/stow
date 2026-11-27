@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Sign-in state, Sign in / Sign out, launch at login, how far the player skips.
+/// Sign-in state, Sign in / Sign out, launch at login, how far the player skips, updates.
 struct AccountTab: View {
     @Environment(AppModel.self) private var model
     @State private var isBusy = false
@@ -51,6 +51,7 @@ struct AccountTab: View {
                     ForEach(PlaybackScreen.seekSteps, id: \.self) { Text("\($0) seconds").tag($0) }
                 }
             }
+            UpdatesSection()
         }
         .formStyle(.grouped)
         .confirmationDialog("Sign out of YouTube?", isPresented: $confirmsSignOut) {

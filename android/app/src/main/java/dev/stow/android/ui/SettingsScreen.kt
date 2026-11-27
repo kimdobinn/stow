@@ -66,13 +66,16 @@ import androidx.compose.ui.unit.sp
 import dev.stow.android.data.DownloadState
 import dev.stow.android.data.Repository
 import dev.stow.android.sync.YtDlp
+import dev.stow.android.update.Updater
+import androidx.compose.material.icons.rounded.SystemUpdate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** Downloads, the downloader and the pairing, in YouTube's plain settings style. */
 @Composable
-fun SettingsScreen(repository: Repository, wifiOnly: Boolean, onReport: () -> Unit, onRemote: () -> Unit, onGroups: () -> Unit, onBack: () -> Unit) {
+fun SettingsScreen(repository: Repository, updater: Updater, wifiOnly: Boolean, onReport: () -> Unit, onRemote: () -> Unit, onGroups: () -> Unit,
+                   onUpdate: () -> Unit, onBack: () -> Unit) {
     val groups by repository.groups.collectAsStateWithLifecycle()
     val autoplay by repository.prefs.autoplay.collectAsStateWithLifecycle()
     val calm by repository.prefs.calm.collectAsStateWithLifecycle()
@@ -144,6 +147,9 @@ fun SettingsScreen(repository: Repository, wifiOnly: Boolean, onReport: () -> Un
                                    updating = false
                                }
                            }), last = true)
+            }
+            Section("About") {
+                UpdateRow(updater, onUpdate)
             }
             Section("Mac") {
                 SettingRow(Icons.Rounded.Alarm, Indigo, "Alarm remote", "Control the Mac's morning alarm from this phone", onClick = onRemote, chevron = true)
@@ -237,6 +243,37 @@ private val Orange = Color(0xFFFF9500)
 private val Red = Color(0xFFFF3B30)
 private val Green = Color(0xFF34C759)
 private val Indigo = Color(0xFF5856D6)
+
+/** The app's version and whether there's a newer one (tap: check now, or see the update). */
+@Composable
+private fun UpdateRow(updater: Updater, onUpdate: () -> Unit) {
+    val check by updater.check.collectAsStateWithLifecycle()
+    val install by updater.install.collectAsStateWithLifecycle()
+    val current = updater.currentVersion
+    val downloading = install as? Updater.Install.Downloading
+    val (title, subtitle) = when {
+        downloading != null -> "Update to ${downloading.release.version}" to
+            "Downloading… ${(downloading.bytes * 100 / downloading.release.apkSize.coerceAtLeast(1)).coerceIn(0, 100)}%"
+        install is Updater.Install.Installing || install is Updater.Install.Confirm -> "Update to ${install.release?.version}" to "Installing…"
+        else -> when (val c = check) {
+            is Updater.Check.Available -> "Update to ${c.release.version}" to "You have $current · see what's new"
+            Updater.Check.Checking -> "Stow $current" to "Checking for updates…"
+            Updater.Check.UpToDate -> "Stow $current" to "Up to date · checks daily by itself"
+            Updater.Check.Unknown -> "Stow $current" to "Tap to check for updates"
+            is Updater.Check.Failed -> "Stow $current" to "${c.message} Tap to try again."
+        }
+    }
+    val available = check is Updater.Check.Available
+    SettingRow(Icons.Rounded.SystemUpdate, Blue, title, subtitle,
+               onClick = when {
+                   available || install != Updater.Install.Idle -> onUpdate
+                   check == Updater.Check.Checking -> null
+                   else -> updater::checkInBackground
+               },
+               chevron = available, last = true) {
+        if (available) UpdateDot(Modifier.padding(end = 6.dp))
+    }
+}
 
 /** The four themes as little phone screens in their colors; tap one to switch. */
 @Composable

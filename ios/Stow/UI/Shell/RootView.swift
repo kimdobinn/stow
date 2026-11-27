@@ -60,6 +60,9 @@ struct MainView: View {
         .sheet(item: $shell.saving) { item in
             SaveToPlaylistSheet(item: item).sheetTheme(repository)
         }
+        .sheet(item: $shell.update) { update in
+            UpdateSheet(update: update).sheetTheme(repository)
+        }
         // The watch page and mini player (UI/Player), over the tabs so the sheets above still show.
         .playerHost()
         .nameAlert("New group", isPresented: $shell.namingNewGroup, confirm: "Create") { name in

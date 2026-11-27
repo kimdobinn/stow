@@ -9,6 +9,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Settings › Update: installs the newer APK from GitHub (Android asks you to confirm). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:name=".StowApplication"
@@ -59,6 +61,11 @@
         <!-- The alarm notification's buttons (I'm awake, pause/play, volume). -->
         <receiver
             android:name=".remote.AlarmActionReceiver"
+            android:exported="false" />
+
+        <!-- The package installer's answers while the app updates itself. -->
+        <receiver
+            android:name=".update.InstallReceiver"
             android:exported="false" />
 
         <!-- Downloads run as WorkManager foreground work of type dataSync. -->

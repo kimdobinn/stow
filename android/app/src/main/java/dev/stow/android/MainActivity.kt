@@ -84,6 +84,7 @@ import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.graphicsLayer
 import dev.stow.android.ui.ReportScreen
+import dev.stow.android.ui.release
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -114,6 +115,17 @@ class MainActivity : ComponentActivity() {
                 Surface(Modifier.fillMaxSize(), color = Stow.colors.background) { App() }
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        app.updater.checkIfDueInBackground()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Back from "Install unknown apps": carry on with the update.
+        app.updater.onResume()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -151,6 +163,13 @@ class MainActivity : ComponentActivity() {
         val pairState by repository.pairState.collectAsStateWithLifecycle()
         val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
         LaunchedEffect(Unit) { notifications.launch(Manifest.permission.POST_NOTIFICATIONS) }
+        // An update the package installer wants confirmed: show Android's screen (only while the app is in front).
+        val install by app.updater.install.collectAsStateWithLifecycle()
+        LaunchedEffect(install) {
+            val confirm = install as? dev.stow.android.update.Updater.Install.Confirm ?: return@LaunchedEffect
+            runCatching { startActivity(confirm.intent) }
+            app.updater.confirmShown(confirm)
+        }
         if (pairState != PairState.Paired) {
             PairScreen(pairState, onScanned = repository::pair)
         } else {
@@ -181,6 +200,12 @@ class MainActivity : ComponentActivity() {
             openRoute = null
         }
         val alarm by repository.prefs.alarm.collectAsStateWithLifecycle()
+        val updater = app.updater
+        val updateCheck by updater.check.collectAsStateWithLifecycle()
+        val updateInstall by updater.install.collectAsStateWithLifecycle()
+        val dismissedUpdate by repository.prefs.dismissedUpdate.collectAsStateWithLifecycle()
+        val update = (updateCheck as? dev.stow.android.update.Updater.Check.Available)?.release
+        var showUpdate by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
         val calm by repository.prefs.calm.collectAsStateWithLifecycle()
         val grayscale by repository.prefs.grayscale.collectAsStateWithLifecycle()
         val statsVersion by repository.stats.changes.collectAsStateWithLifecycle()
@@ -287,7 +312,7 @@ class MainActivity : ComponentActivity() {
                 android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix().apply { setSaturation(0f) })
             ).asComposeRenderEffect()
         } else Modifier
-        androidx.compose.runtime.CompositionLocalProvider(dev.stow.android.ui.LocalCalm provides calm, dev.stow.android.ui.LocalChannelAvatars provides avatars) {
+        androidx.compose.runtime.CompositionLocalProvider(dev.stow.android.ui.LocalCalm provides calm, dev.stow.android.ui.LocalUpdateAvailable provides (update != null), dev.stow.android.ui.LocalChannelAvatars provides avatars) {
         Box(Modifier.fillMaxSize().then(gray)) {
         Column(Modifier.fillMaxSize()) {
             Box(Modifier.weight(1f)) {
@@ -302,7 +327,9 @@ class MainActivity : ComponentActivity() {
                                    onSearch = { nav.navigate("search") }, onSettings = { nav.navigate("settings") },
                                    onRefresh = refresh, onNewGroup = { newGroup = true },
                                    onEditGroup = { nav.navigate("group/$it") },
-                                   alarmMac = alarm?.takeIf { it.isRecent() }?.macName, onRemote = { nav.navigate("remote") })
+                                   alarmMac = alarm?.takeIf { it.isRecent() }?.macName, onRemote = { nav.navigate("remote") },
+                                   update = update?.version?.takeIf { it != dismissedUpdate }, onUpdate = { showUpdate = true },
+                                   onHideUpdate = { update?.let { repository.prefs.dismissUpdate(it.version) } })
                     }
                     composable("subscriptions") {
                         SubscriptionsScreen(subscriptionsFeed, subscribedChannels, actions, onAllChannels = { nav.navigate("channels") },
@@ -405,9 +432,9 @@ class MainActivity : ComponentActivity() {
                                      onBack = { nav.popBackStack() })
                     }
                     composable("settings") {
-                        SettingsScreen(repository, wifiOnly, onReport = { nav.navigate("report") },
+                        SettingsScreen(repository, updater, wifiOnly, onReport = { nav.navigate("report") },
                                        onRemote = { nav.navigate("remote") }, onGroups = { nav.navigate("groups") },
-                                       onBack = { nav.popBackStack() })
+                                       onUpdate = { showUpdate = true }, onBack = { nav.popBackStack() })
                     }
                     composable("remote") { RemoteScreen(remote, alarm?.macName, onBack = { nav.popBackStack() }) }
                     composable("report") {
@@ -443,6 +470,11 @@ class MainActivity : ComponentActivity() {
         }
         }
 
+        // The update's notes, then its download and install (shown while one is under way, too).
+        val updating = updateInstall.release
+        (updating ?: update?.takeIf { showUpdate })?.let { release ->
+            dev.stow.android.ui.UpdateDialog(updater, release, onDismiss = { showUpdate = false })
+        }
         grouping?.let { channel ->
             dev.stow.android.ui.GroupPickerSheet(channel, groups, groupActions, notify = ::notify, onDismiss = { grouping = null })
         }

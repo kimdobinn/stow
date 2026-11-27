@@ -4,10 +4,11 @@ import SwiftUI
 /// For checking screens without tapping (simulator screenshots): `-tab downloads` picks a tab and
 /// `-open settings,report` pushes routes on it. Routes: search, settings, report, groups, channels,
 /// ytdlp, channel:<id>, group:<id>, playlist:<id> (or playlist:first), save:<video id> (the
-/// save-to-playlist sheet). `-search <text>` runs a search when the search screen opens.
+/// save-to-playlist sheet), update (the update sheet, once a check finds one; with `-updates-url`). `-search <text>` runs a search when the search screen opens.
 /// `-scroll-end` or `-scroll-to <id>` scroll screens that support it (see `launchScroll`).
 enum LaunchRoutes {
-    static func apply(to shell: Shell, repository: Repository, arguments: [String] = ProcessInfo.processInfo.arguments) {
+    static func apply(to shell: Shell, repository: Repository, updates: UpdateChecker? = nil,
+                      arguments: [String] = ProcessInfo.processInfo.arguments) {
         func value(_ flag: String) -> String? {
             guard let index = arguments.firstIndex(of: flag), index + 1 < arguments.count else { return nil }
             return arguments[index + 1]
@@ -33,6 +34,12 @@ enum LaunchRoutes {
                 if let id = argument == "first" ? repository.playlists.first?.id : argument { shell.open(.playlist(id)) }
             case "save":
                 shell.saving = repository.item(argument)
+            case "update":
+                guard let updates else { break }
+                Task {
+                    await updates.check()
+                    shell.update = updates.available
+                }
             default: break
             }
         }

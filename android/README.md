@@ -20,3 +20,7 @@ in the background and on the lock screen.
   YouTube's JS challenges) and updates itself daily.
 - `player/PlaybackService.kt`: Media3 session service for background and lock-screen playback.
 - Cookies (decrypted with the pairing key) are used only for members-only videos.
+- `update/`: once a day (and from Settings › About) asks GitHub for the latest release
+  (`/releases/latest`, which skips the iPhone's and Mac's pre-releases; tag `v<version>` with an
+  `.apk`), and on Update downloads it and installs it with Android's package installer. Debug
+  builds read the feed URL from `files/update-feed` if it exists, to test against a local server.

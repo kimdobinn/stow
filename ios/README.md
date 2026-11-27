@@ -69,10 +69,11 @@ For trying the app in the simulator without a Mac or Firebase:
 | --- | --- |
 | `-demo` | Demo mode: sample channels and videos (the same as Android's `DemoData`), no Firebase. A file named `demo` in Application Support does the same. |
 | `-tab downloads\|subscriptions` | Opens on that tab. |
-| `-open settings,report,…` | Opens screens: `search`, `settings`, `report`, `groups`, `channels`, `ytdlp`, `channel:<id>`, `group:<id>`, `playlist:<id\|first>`, `save:<video id>`. |
+| `-open settings,report,…` | Opens screens: `search`, `settings`, `report`, `groups`, `channels`, `ytdlp`, `channel:<id>`, `group:<id>`, `playlist:<id\|first>`, `save:<video id>`, `update` (the update sheet, once a check finds one). |
 | `-search <query>` | Runs a search once. |
 | `-play <video id>` | Opens the player on that video. |
 | `-theme system\|light\|dark\|paper`, `-calm YES`, `-grayscale YES`, `-downloadQuality p480` | Settings for this launch only. |
+| `-updates-url <url>` | Debug builds only: the update check reads this releases list instead of GitHub's, at every launch (a fake one served from the Mac). |
 | `-ytdlp-selftest [-ytdlp-selftest-exit] [-ytdlp-nojs] [-ytdlp-debug]` | Runs yt-dlp's self-test against public videos and prints `SELFTEST PASS/FAIL` lines. |
 
 ```sh
@@ -146,6 +147,14 @@ ios/
   resumes when you open Stow, or when iOS runs the background processing task
   (`dev.stow.ios.downloads`), often overnight while charging. A background `URLSession` isn't
   used because yt-dlp does the downloading in Python.
+- **Updates go through SideStore.** An app can't install itself, so Stow only looks: once a day
+  (at launch, when it comes back, or in the background refresh) and from Settings › About, it reads
+  GitHub's releases, keeps the iPhone ones (`ios-v*` pre-releases, not Android's `v*` or the Mac's
+  `mac-v*`) and compares the newest with its own version. A new one shows in Settings and as a
+  one-line banner on Home (closable, per version). "Update in SideStore" opens
+  `sidestore://install?url=<Stow-x.y.z.ipa>` (AltStore's `altstore://install?url=` when SideStore
+  isn't there, the release page when neither is); SideStore asks before it installs. SideStore can
+  also update Stow from its Updates list, from `source.json`.
 - **yt-dlp updates with the app.** Android updates yt-dlp by itself every day; here the pinned
   version changes only when you run `fetch-python.sh` with a new version and rebuild.
 - **Not on iPhone:** the Mac's alarm remote and anything else that needs push, and Android's

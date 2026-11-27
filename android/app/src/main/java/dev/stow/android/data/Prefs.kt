@@ -149,7 +149,28 @@ class Prefs(context: Context) {
         get() = prefs.getLong(KEY_YTDLP_UPDATE, 0)
         set(value) { prefs.edit().putLong(KEY_YTDLP_UPDATE, value).apply() }
 
+    /** When the app last asked GitHub for a newer release (see update/Updater). */
+    var lastUpdateCheck: Long
+        get() = prefs.getLong(KEY_UPDATE_CHECK, 0)
+        set(value) { prefs.edit().putLong(KEY_UPDATE_CHECK, value).apply() }
+
+    /** The newer release that check found (JSON, see update/Release), kept so the dot shows offline too. */
+    var availableUpdate: String?
+        get() = prefs.getString(KEY_UPDATE_AVAILABLE, null)
+        set(value) { prefs.edit().putString(KEY_UPDATE_AVAILABLE, value).apply() }
+
+    private val _dismissedUpdate = MutableStateFlow(prefs.getString(KEY_UPDATE_DISMISSED, null))
+    /** The version whose banner on Home was closed (the dot on the settings button stays). */
+    val dismissedUpdate: StateFlow<String?> = _dismissedUpdate.asStateFlow()
+    fun dismissUpdate(version: String) {
+        prefs.edit().putString(KEY_UPDATE_DISMISSED, version).apply()
+        _dismissedUpdate.value = version
+    }
+
     companion object {
+        const val KEY_UPDATE_CHECK = "lastUpdateCheck"
+        const val KEY_UPDATE_AVAILABLE = "availableUpdate"
+        const val KEY_UPDATE_DISMISSED = "dismissedUpdate"
         const val KEY_WIFI_ONLY = "wifiOnly"
         const val KEY_PROJECT = "pairedProject"
         const val KEY_KEY = "pairingKey"

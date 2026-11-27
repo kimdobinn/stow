@@ -366,7 +366,7 @@ struct VideoCard: View {
 
     /// "Channel · 2 days ago", or "Channel · Streamed 2 days ago" for a past live broadcast.
     private var subtitle: String {
-        let when = video.publishedAt?.formatted(.relative(presentation: .named))
+        let when = video.publishedAt?.formatted(.relative(presentation: .numeric))
         let streamed = video.liveStatus == .wasLive
         let detail = streamed ? ["Streamed", when].compactMap(\.self).joined(separator: " ") : when
         return [video.channelTitle, detail].compactMap(\.self).joined(separator: " · ")

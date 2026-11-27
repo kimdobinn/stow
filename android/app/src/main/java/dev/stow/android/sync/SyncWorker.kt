@@ -18,7 +18,10 @@ import java.util.concurrent.TimeUnit
 /** Reads the Mac's videos and queues downloads. Runs on each push and hourly as a fallback. */
 class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
-        val repository = (applicationContext as StowApplication).repository
+        val app = applicationContext as StowApplication
+        val repository = app.repository
+        // At most once a day, so the dot on the settings button is there before you open the app.
+        app.updater.checkIfDue()
         if (!repository.isPaired || repository.demo) return Result.success()
         return try {
             val videos = repository.remote.fetchVideos()

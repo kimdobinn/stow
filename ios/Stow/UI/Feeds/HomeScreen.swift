@@ -17,6 +17,7 @@ struct HomeScreen: View {
         let actions = shell.actions
         ScrollView {
             LazyVStack(spacing: 0) {
+                UpdateBanner()
                 ChipRow {
                     Chip(label: "All", selected: group == nil) { groupId = "" }
                     ForEach(groups) { g in

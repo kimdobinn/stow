@@ -33,7 +33,7 @@ struct PastStreamsFetcher: Sendable {
             return Video(id: entry.id, channelId: channelId,
                          channelTitle: original?.channelTitle ?? tab.channel ?? "",
                          title: original?.title ?? entry.title ?? entry.id,
-                         publishedAt: original?.publishedAt,
+                         publishedAt: original?.publishedAt ?? entry.timestamp.map(Date.init(timeIntervalSince1970:)),
                          thumbnailURL: original?.thumbnailURL ?? URL(string: "https://i.ytimg.com/vi/\(entry.id)/hqdefault.jpg"),
                          isMembersOnly: false, liveStatus: .wasLive, duration: entry.duration)
         }
@@ -49,5 +49,6 @@ struct PastStreamsFetcher: Sendable {
         var title: String?
         var live_status: String?
         var duration: Double?
+        var timestamp: Double?
     }
 }

@@ -12,3 +12,5 @@ firebase/google-services.json
 *firebase-adminsdk*.json
 *.apk
 *.ipa
+Stow-Mac-*.zip
+Stow-Mac-*.zip.sha256

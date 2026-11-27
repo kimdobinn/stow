@@ -26,28 +26,23 @@ extension Format {
         return ago.isEmpty ? "Streamed" : "Streamed " + ago.prefix(1).lowercased() + ago.dropFirst()
     }
 
-    /// As Android's DateUtils says it: "Just now", "5 minutes ago", "Yesterday", "3 days ago",
-    /// then the date ("Nov 3", or "Nov 3, 2024" in another year).
-    static func ago(_ date: Date?, now: Date = .now, calendar: Calendar = .current, locale: Locale = .current) -> String {
+    /// As YouTube says it: "Just now", "5 minutes ago", "3 days ago", "2 weeks ago", "4 months ago",
+    /// "1 year ago". Never a full date: most dates from YouTube's listings are only that rough.
+    static func ago(_ date: Date?, now: Date = .now) -> String {
         guard let date else { return "" }
-        let seconds = now.timeIntervalSince(date)
-        if seconds < 60 { return seconds > -60 ? "Just now" : dateText(date, now: now, calendar: calendar, locale: locale) }
-        if seconds < 7 * 86_400 {
-            let formatter = RelativeDateTimeFormatter()
-            formatter.locale = locale
-            formatter.calendar = calendar
-            formatter.unitsStyle = .full
-            formatter.dateTimeStyle = seconds >= 86_400 ? .named : .numeric
-            let text = formatter.localizedString(for: date, relativeTo: now)
-            return text.prefix(1).uppercased() + text.dropFirst()
+        let seconds = Int(now.timeIntervalSince(date))
+        if seconds < 60 { return "Just now" }
+        let day = 86_400
+        // YouTube's rough dates ("1 year ago") come back rounded to the day, up to a day short.
+        let rough = seconds + day
+        let (n, unit): (Int, String) = switch seconds {
+        case ..<3_600: (seconds / 60, "minute")
+        case ..<day: (seconds / 3_600, "hour")
+        case ..<(7 * day): (seconds / day, "day")
+        case _ where rough < 30 * day: (rough / (7 * day), "week")
+        case _ where rough < 360 * day: (rough / (30 * day), "month")
+        default: (max(rough / (365 * day), 1), "year")
         }
-        return dateText(date, now: now, calendar: calendar, locale: locale)
-    }
-
-    private static func dateText(_ date: Date, now: Date, calendar: Calendar, locale: Locale) -> String {
-        let sameYear = calendar.component(.year, from: date) == calendar.component(.year, from: now)
-        var style = Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone).month(.abbreviated).day()
-        if !sameYear { style = style.year() }
-        return date.formatted(style)
+        return "\(n) \(unit)\(n == 1 ? "" : "s") ago"
     }
 }

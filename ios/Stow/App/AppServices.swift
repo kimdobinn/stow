@@ -13,6 +13,8 @@ final class AppServices {
     let shell: Shell
     let player: PlaybackController
     let backgroundDownloads: BackgroundDownloads
+    /// Looks for a newer iPhone release on GitHub (Settings › About, the banner on Home).
+    let updates: UpdateChecker
     private var started = false
     private let log = Logger(subsystem: "dev.stow.ios", category: "app")
 
@@ -24,6 +26,28 @@ final class AppServices {
         shell.player = player
         player.onExpand = { [weak shell] in shell?.playerExpanded = true }
         backgroundDownloads = BackgroundDownloads(repository: repository)
+        updates = Self.makeUpdateChecker()
+    }
+
+    /// The installed version, and in debug builds `-updates-url <url>`: the releases list from
+    /// there instead of GitHub (a fake one on the Mac, for the simulator), checked at every launch.
+    private static func makeUpdateChecker(arguments: [String] = ProcessInfo.processInfo.arguments) -> UpdateChecker {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+        #if DEBUG
+        if let index = arguments.firstIndex(of: "-updates-url"), index + 1 < arguments.count,
+           let url = URL(string: arguments[index + 1]) {
+            let suite = "dev.stow.ios.updates-debug"
+            UserDefaults.standard.removePersistentDomain(forName: suite)
+            return UpdateChecker(currentVersion: version, url: url, defaults: UserDefaults(suiteName: suite) ?? .standard)
+        }
+        #endif
+        return UpdateChecker(currentVersion: version)
+    }
+
+    /// The daily update check, unless the app is hosting unit tests.
+    func checkForUpdatesIfDue() async {
+        guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
+        await updates.checkIfDue()
     }
 
     /// Once, at launch.
@@ -37,7 +61,10 @@ final class AppServices {
     /// Polls while the app is on screen; asks iOS for a refresh (and time for downloads) when it leaves.
     func scenePhaseChanged(_ phase: ScenePhase) {
         repository.setActive(phase == .active)
-        if phase == .active { backgroundDownloads.appBecameActive() }
+        if phase == .active {
+            backgroundDownloads.appBecameActive()
+            Task { await checkForUpdatesIfDue() }
+        }
         if phase == .background {
             BackgroundWork.scheduleRefresh()
             if !repository.downloads.queuedIds.isEmpty { BackgroundWork.scheduleDownloads() }

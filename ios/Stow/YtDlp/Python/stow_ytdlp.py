@@ -253,8 +253,11 @@ def _session(call, request, **options):
             youtube_args['player_client'] = list(request['player_client'])
         if request.get('youtube_args'):
             youtube_args.update({key: list(value) for key, value in request['youtube_args'].items()})
+        # Flat listings (search, channel tabs) have no dates unless asked: this turns YouTube's
+        # "3 days ago" into an approximate timestamp.
+        params['extractor_args'] = {'youtubetab': {'approximate_date': ['']}}
         if youtube_args:
-            params['extractor_args'] = {'youtube': youtube_args}
+            params['extractor_args']['youtube'] = youtube_args
         cookies = request.get('cookies')
         if cookies:
             fd, cookie_copy = tempfile.mkstemp(prefix='cookies-', suffix='.txt', dir=_cache_dir)

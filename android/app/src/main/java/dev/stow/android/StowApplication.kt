@@ -9,6 +9,7 @@ import dev.stow.android.remote.AlarmNotification
 import dev.stow.android.remote.RemoteClient
 import dev.stow.android.sync.SyncWorker
 import dev.stow.android.sync.YtDlp
+import dev.stow.android.update.Updater
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -21,6 +22,8 @@ class StowApplication : Application() {
     val player: PlayerConnection by lazy { PlayerConnection(this, repository) }
     /** The Mac's alarm remote, shared by the remote screen and the alarm notification. */
     val remoteClient: RemoteClient by lazy { RemoteClient(this, repository.prefs) }
+    /** Checks GitHub for a newer version of the app and installs it. */
+    val updater: Updater by lazy { Updater(this, repository.prefs) }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onCreate() {

@@ -32,8 +32,8 @@ targets:
       path: Stow/Info.plist
       properties:
         CFBundleDisplayName: Stow
-        CFBundleShortVersionString: "0.1.0"
-        CFBundleVersion: "1"
+        CFBundleShortVersionString: "0.2.0"
+        CFBundleVersion: "2"
         LSApplicationCategoryType: public.app-category.utilities
         NSBluetoothAlwaysUsageDescription: Stow connects your Bluetooth speaker before the morning alarm and keeps it from powering off.
         NSLocalNetworkUsageDescription: While the morning alarm plays, your paired phone controls it over your home Wi-Fi.

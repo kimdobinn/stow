@@ -79,17 +79,21 @@ fun LargeTitleBar(title: String, onSearch: () -> Unit, onSettings: () -> Unit) {
              maxLines = 1, overflow = TextOverflow.Ellipsis)
         ToolbarButton(Icons.Rounded.Search, "Search", onSearch)
         Spacer(Modifier.width(10.dp))
-        ToolbarButton(Icons.Rounded.Settings, "Settings", onSettings)
+        val update = LocalUpdateAvailable.current
+        ToolbarButton(Icons.Rounded.Settings, if (update) "Settings, update available" else "Settings", onSettings, dot = update)
     }
 }
 
-/** A round toolbar button on a light fill. */
+/** A round toolbar button on a light fill, with an optional dot (an update is out). */
 @Composable
-fun ToolbarButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
-    Box(Modifier.size(44.dp).clip(CircleShape).background(Stow.colors.chip)
-            .clickable(onClickLabel = label, role = androidx.compose.ui.semantics.Role.Button, onClick = onClick),
-        contentAlignment = Alignment.Center) {
-        Icon(icon, contentDescription = label, tint = Stow.colors.text, modifier = Modifier.size(22.dp))
+fun ToolbarButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit, dot: Boolean = false) {
+    Box {
+        Box(Modifier.size(44.dp).clip(CircleShape).background(Stow.colors.chip)
+                .clickable(onClickLabel = label, role = androidx.compose.ui.semantics.Role.Button, onClick = onClick),
+            contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = label, tint = Stow.colors.text, modifier = Modifier.size(22.dp))
+        }
+        if (dot) UpdateDot(Modifier.align(Alignment.TopEnd).offset(x = (-3).dp, y = 3.dp))
     }
 }
 
@@ -135,6 +139,7 @@ fun HomeScreen(
     onReport: () -> Unit, onSearch: () -> Unit, onSettings: () -> Unit,
     onRefresh: suspend () -> Unit, onNewGroup: () -> Unit, onEditGroup: (String) -> Unit,
     alarmMac: String? = null, onRemote: () -> Unit = {},
+    update: String? = null, onUpdate: () -> Unit = {}, onHideUpdate: () -> Unit = {},
 ) {
     var groupId by rememberSaveable { mutableStateOf<String?>(null) }
     var showWatched by rememberSaveable { mutableStateOf(false) }
@@ -142,6 +147,7 @@ fun HomeScreen(
     Column(Modifier.fillMaxSize()) {
         LargeTitleBar("Home", onSearch, onSettings)
         alarmMac?.let { AlarmBanner(it, onRemote) }
+        update?.let { UpdateBanner(it, onUpdate, onHideUpdate) }
         ChipRow {
             Chip("All", group == null, onClick = { groupId = null })
             groups.forEach { g ->

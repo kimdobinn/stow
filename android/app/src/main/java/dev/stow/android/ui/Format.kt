@@ -1,6 +1,5 @@
 package dev.stow.android.ui
 
-import android.text.format.DateUtils
 import java.util.Date
 import dev.stow.android.data.VideoItem
 
@@ -51,8 +50,27 @@ object Format {
         return if (item.video.isPastStream) listOf("Streamed", ago.replaceFirstChar { it.lowercase() }).filter { it.isNotEmpty() }.joinToString(" ") else ago
     }
 
-    fun ago(date: Date?): String =
-        date?.let { DateUtils.getRelativeTimeSpanString(it.time, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS).toString() } ?: ""
+    /**
+     * As YouTube says it: "Just now", "5 minutes ago", "3 days ago", "2 weeks ago", "4 months ago",
+     * "1 year ago". Never a full date: most dates from YouTube's listings are only that rough.
+     */
+    fun ago(date: Date?, now: Long = System.currentTimeMillis()): String {
+        date ?: return ""
+        val seconds = (now - date.time) / 1000
+        if (seconds < 60) return "Just now"
+        val day = 86_400L
+        // YouTube's rough dates ("1 year ago") come back rounded to the day, up to a day short.
+        val rough = seconds + day
+        val (n, unit) = when {
+            seconds < 3_600 -> seconds / 60 to "minute"
+            seconds < day -> seconds / 3_600 to "hour"
+            seconds < 7 * day -> seconds / day to "day"
+            rough < 30 * day -> rough / (7 * day) to "week"
+            rough < 360 * day -> rough / (30 * day) to "month"
+            else -> maxOf(rough / (365 * day), 1) to "year"
+        }
+        return "${count(n.toInt(), unit)} ago"
+    }
 
     fun bytes(bytes: Long): String = when {
         bytes >= 1L shl 30 -> "%.1f GB".format(bytes / (1L shl 30).toDouble())

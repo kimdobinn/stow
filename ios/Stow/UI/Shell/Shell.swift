@@ -69,6 +69,8 @@ final class Shell {
     var sizing: VideoItem?
     /// "Save to playlist" is open for this video.
     var saving: VideoItem?
+    /// The update sheet (release notes, "Update in SideStore") is open for this release.
+    var update: AppUpdate?
 
     @ObservationIgnored private var toastTask: Task<Void, Never>?
 

@@ -42,6 +42,7 @@
 - **No Shorts anywhere.** Live streams show only once they're over (labelled "Streamed").
 - **Download** any video to watch offline (up to 1080p, or the quality you pick, up to 4K), in the background or on the lock screen. Long videos show
   their size first.
+- **Upload dates** on every video ("3 days ago"), search results and channel pages included.
 - **Player** with double-tap to skip, hold for 2×, comments, playback speed and autoplay.
 - **Your week:** time watched per day and per channel. Optional calm mode (no thumbnails) and black and white.
 - **Themes:** Automatic, Light, Dark and Paper, on both apps.
@@ -93,7 +94,9 @@ open .build/Build/Products/Debug/Stow.app
 To sign with your own Apple ID, change `DEVELOPMENT_TEAM` and `CODE_SIGN_IDENTITY` in
 [mac/project.yml](mac/project.yml) first.
 
-Then sign in to YouTube under **Account** and add channels under **Channels**. More in
+Then sign in to YouTube under **Account** and add channels under **Channels**. After that the Mac
+app updates itself: **Account › Updates** offers each new version from GitHub (published with
+`mac/release.sh`), and it keeps its own copy of yt-dlp current every day. More in
 [mac/README.md](mac/README.md) and [mac/ARCHITECTURE.md](mac/ARCHITECTURE.md).
 
 **Firebase** (once, about 5 minutes): follow [firebase/SETUP.md](firebase/SETUP.md), then choose the
@@ -121,6 +124,9 @@ there.
 2. In Obtainium, tap **Add App**, paste `https://github.com/kimdobinn/stow` (or your fork) and tap
    **Add**, then **Install**.
 3. Obtainium checks for new releases in the background and offers each update.
+
+Stow also checks by itself once a day: **Settings › About** shows **Update to …** with what's new, and
+installs it after Android asks you to confirm.
 
 To publish an update: bump `versionCode` and `versionName` in
 [android/app/build.gradle.kts](android/app/build.gradle.kts), commit and push, then run
@@ -158,7 +164,8 @@ source that [SideStore](https://sidestore.io) and [AltStore](https://altstore.io
 3. Install Stow from that source, then pair it from **Phone › Pair a Phone** on the Mac, the same
    way as the Android phone. Both phones can stay paired.
 
-With a free Apple ID, apps installed this way stop opening after 7 days unless they're refreshed.
+Stow checks GitHub once a day and shows when a new version is out; **Update in SideStore** opens
+SideStore to install it. With a free Apple ID, apps installed this way stop opening after 7 days unless they're refreshed.
 SideStore refreshes them on the phone; AltStore needs your computer on the same Wi-Fi.
 
 ## Notes

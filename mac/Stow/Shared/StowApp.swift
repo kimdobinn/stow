@@ -57,6 +57,13 @@ enum StowMain {
             NSApplication.shared.run()
         }
         #endif
+        #if DEBUG || STOW_TEST_OVERRIDES
+        if CommandLine.arguments.contains(UpdateTest.argument) {
+            setvbuf(stdout, nil, _IOLBF, 0)
+            Task { exit(await UpdateTest.run() ? 0 : 1) }
+            dispatchMain()
+        }
+        #endif
         // Two copies (e.g. a dev build and the installed app) would double every check and alarm.
         let others = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
         if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil,
@@ -71,6 +78,8 @@ enum StowMain {
 struct StowApp: App {
     @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
     @State private var model: AppModel
+    @State private var updater: AppUpdater?
+    @State private var ytdlp: YtDlpUpdater?
     @AppStorage(AppTheme.storageKey) private var theme: AppTheme = .system
 
     init() {
@@ -89,6 +98,16 @@ struct StowApp: App {
         model.start()
         MiddleDragScroller.shared.install()
         _model = State(initialValue: model)
+
+        // Updates never run while the alarm runs or is near.
+        let block = { [model] in UpdateGate.block(alarmRunning: model.isAlarmRunning, nextAlarm: model.nextAlarmDate) }
+        let log = { [model] (level: LogLevel, message: String) in model.logAlarm(level, message) }
+        let updater = AppUpdater(blocker: block, log: log)
+        let ytdlp = YtDlpUpdater(blocker: block, log: log)
+        updater.start()
+        ytdlp.start()
+        _updater = State(initialValue: updater)
+        _ytdlp = State(initialValue: ytdlp)
     }
 
     /// Cookie copies must not outlive a run: remove any left by a previous quit, and on quit stop
@@ -107,6 +126,8 @@ struct StowApp: App {
         Window("Stow", id: SceneID.main) {
             MainView()
                 .environment(model)
+                .environment(updater)
+                .environment(ytdlp)
                 .environment(\.appTheme, theme)
                 .frame(minWidth: 820, minHeight: 540)
                 .onChange(of: theme, initial: true) { NSApp.appearance = theme.appearance }

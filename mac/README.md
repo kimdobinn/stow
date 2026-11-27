@@ -8,7 +8,7 @@ It stores no videos. Design notes are in [ARCHITECTURE.md](ARCHITECTURE.md).
 ## Requirements
 
 - macOS 26, Xcode 26
-- `brew install xcodegen yt-dlp mpv` (tools are looked up in /opt/homebrew/bin, /usr/local/bin and /usr/bin)
+- `brew install xcodegen yt-dlp mpv` (tools are looked up in /opt/homebrew/bin, /usr/local/bin and /usr/bin; Stow's own yt-dlp, see Updates, comes first)
 
 ## Build and run
 
@@ -36,6 +36,30 @@ was launched from; turn that off under Account or with `"launchAtLogin": false` 
 
 Debug builds can render every screen to PNGs for review: `Stow --snapshot <dir>`.
 The app icon is drawn by `scripts/make-icon.swift`.
+
+## Updates
+
+Account › Updates shows "Stow 0.1.0 · Up to date" or "Update to 0.2.0" with the release notes and
+**Update and Relaunch** (the sidebar marks Account with "Update" when one is out). Stow checks GitHub at most once
+a day, or on **Check for Updates**. An update is downloaded, checked (checksum, and a valid signature from the
+same developer team as the running app), swapped in place of the running Stow.app and opened again. It's refused
+while the alarm runs or within 10 minutes of it.
+
+Stow also keeps its own yt-dlp (the official standalone build, checked against the release's SHA2-256SUMS) in
+`~/Library/Application Support/Stow/bin/yt-dlp`, updated once a day in the background (never around the alarm), so
+YouTube changes are fixed as soon as yt-dlp ships the fix. Homebrew's yt-dlp is used when Stow's copy is missing or
+doesn't run. **Update Now** gets the latest yt-dlp right away.
+
+### Releasing
+
+```sh
+mac/release.sh                  # notes: the commit subjects since the last Mac release
+mac/release.sh "What changed"   # your own notes
+```
+
+Bump `CFBundleShortVersionString` (and `CFBundleVersion`) in `project.yml`, commit and push first. The script builds
+Release, checks the signature, zips Stow.app as `Stow-Mac-<version>.zip` in the repository root, and publishes it with its
+SHA-256 as a GitHub pre-release tagged `mac-v<version>` (pre-release, so Obtainium keeps following the Android releases).
 
 ## Morning alarm
 
@@ -128,6 +152,7 @@ Everything is in `~/Library/Application Support/Stow/`:
 | `settings.json` | Channels (with `morning` and `phone` toggles), check interval, launch at login, the alarm. Hand-editable; picked up before the next check. |
 | `state.json` | Seen video ids per channel, the Inbox, recent videos per channel, the last check result, videos the alarm played or you watched, the last alarm run. |
 | `log.json` | The last 500 log entries. |
+| `bin/yt-dlp` | Stow's own yt-dlp, kept current (see Updates). |
 | `cookies.txt` | YouTube cookies for yt-dlp (mode 0600), exported from Stow's own sign-in window. Deleted on sign-out. |
 
 The sign-in session itself is in a dedicated WebKit data store, separate from Safari.

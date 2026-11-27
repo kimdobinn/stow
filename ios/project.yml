@@ -44,8 +44,8 @@ targets:
       path: Stow/App/Info.plist
       properties:
         CFBundleDisplayName: Stow
-        CFBundleShortVersionString: "0.1.0"
-        CFBundleVersion: "1"
+        CFBundleShortVersionString: "0.1.1"
+        CFBundleVersion: "2"
         LSRequiresIPhoneOS: true
         UILaunchScreen: {}
         UIApplicationSceneManifest:
@@ -69,6 +69,10 @@ targets:
           - CFBundleURLName: dev.stow.ios.pair
             CFBundleURLSchemes:
               - stow
+        # The update button hands the new .ipa to SideStore (or AltStore): sidestore://install?url=…
+        LSApplicationQueriesSchemes:
+          - sidestore
+          - altstore
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.stow.ios

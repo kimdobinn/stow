@@ -55,6 +55,7 @@ enum BackgroundWork {
         }
         let work = Task { @MainActor in
             let ok = await repository.backgroundRefresh()
+            if !downloads { await services.checkForUpdatesIfDue() }
             if downloads { await repository.downloads.waitUntilIdle() }
             if downloads { keeper.inProcessingTask = false }
             finish.complete(ok)

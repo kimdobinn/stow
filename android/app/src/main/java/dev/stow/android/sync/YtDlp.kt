@@ -18,6 +18,8 @@ import java.io.File
 object YtDlp {
     private val mutex = Mutex()
     @Volatile private var ready = false
+    /** Flat listings have no dates unless asked: this turns YouTube's "3 days ago" into an approximate timestamp. */
+    private const val APPROXIMATE_DATES = "youtubetab:approximate_date"
     private const val UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000L
 
     /** Unpacks Python and ffmpeg the first time (a few seconds). */
@@ -149,6 +151,7 @@ object YtDlp {
         val request = YoutubeDLRequest("ytsearch$count:$query").apply {
             addOption("--flat-playlist")
             addOption("-J")
+            addOption("--extractor-args", APPROXIMATE_DATES)
         }
         val response = try {
             YoutubeDL.getInstance().execute(request, id)
@@ -165,6 +168,7 @@ object YtDlp {
         val request = YoutubeDLRequest("https://www.youtube.com/channel/$channelId/$tab").apply {
             addOption("--flat-playlist")
             addOption("-J")
+            addOption("--extractor-args", APPROXIMATE_DATES)
             addOption("--playlist-end", count.toString())
         }
         val response = YoutubeDL.getInstance().execute(request, "channel-${searches.incrementAndGet()}")

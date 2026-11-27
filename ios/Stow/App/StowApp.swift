@@ -16,6 +16,7 @@ struct StowApp: App {
                 .environment(services.repository)
                 .environment(services.shell)
                 .environment(services.player)
+                .environment(services.updates)
                 .environment(selfTest)
                 .onOpenURL { services.open($0) }
                 .task {
@@ -24,7 +25,7 @@ struct StowApp: App {
                         await selfTest.run(javaScript: !arguments.contains("-ytdlp-nojs"), debug: arguments.contains("-ytdlp-debug"))
                         if arguments.contains("-ytdlp-selftest-exit") { exit(0) }
                     } else {
-                        LaunchRoutes.apply(to: services.shell, repository: services.repository)
+                        LaunchRoutes.apply(to: services.shell, repository: services.repository, updates: services.updates)
                         // Loads Python and yt-dlp while the first screen shows.
                         try? await YtDlp.shared.prepare()
                     }

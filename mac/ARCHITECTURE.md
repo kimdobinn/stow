@@ -23,7 +23,8 @@ Each folder has exactly one owner. Owners may add files only inside their own fo
 | `Stow/Player/` | player | `MPVPlayer: AlarmPlayer` (mpv + JSON IPC, overlay, SponsorBlock), `AlarmSound: AlarmSoundPlayer` |
 | `Stow/Remote/` | remote | `AlarmRemote: AlarmRemoteService` (phone remote while the alarm runs: `RemoteServer` on Network.framework, `RemoteAPI`, `RemoteAuth`, `RemoteHTTP`) |
 | `Stow/System/` | system | `CoreAudioOutputs`, `BluetoothSpeaker`, `KeepAlive`, `PowerAssertions` |
-| `Stow/UI/` | ui | Main window: sidebar (`MainView`, frozen) with Inbox grid, Channels, Alarm (`UI/Alarm/`), Account, Log |
+| `Stow/UI/` | ui | Main window: sidebar (`MainView`, frozen) with Inbox grid, Channels, Alarm (`UI/Alarm/`), Account (with `UpdatesSection`), Log |
+| `Stow/Update/` | update | `AppUpdater` (Stow updates itself from GitHub pre-releases tagged mac-v*), `YtDlpUpdater` (Stow's own yt-dlp), release feed parsing, checksums, code signature checks, the bundle swap. Depends only on Shared |
 | `Stow/SelfTest/` | integrator | `Stow --selftest` (headless check against real YouTube), `Stow --alarm-dryrun` (`AlarmDryRun`, `AlarmDryRunServices`), Debug-only `Stow --snapshot <dir>` (`Snapshot`), `--playback-demo`, `--remote-demo` |
 | `StowTests/<Module>/` | same as module | Swift Testing tests (hosted by the app, `@testable import Stow`) |
 
@@ -34,6 +35,9 @@ Dependency rules:
 - Core/Alarm depends on Shared, uses Player, System and `YTDLPVideoDetails` only through the alarm protocols, and
   reaches the rest of the app only through `AlarmHost` (implemented by `AppModel`).
 - Player, System and Remote depend only on Shared (Remote also reads the pairing key through `PairingKey`).
+- Update depends only on Shared. `StowApp` creates `AppUpdater` and `YtDlpUpdater`, gives them the alarm gate and the
+  log, and puts them in the SwiftUI environment (optional there, so previews and tests work without them); the UI
+  reads them with `@Environment(AppUpdater.self) var updater: AppUpdater?`. `ToolLocator` prefers `AppPaths.binDirectory`.
 - `StowApp` is the only place that names the concrete services (`SelfTest` also uses `YouTubeClient`, with a fixed fake account and a temporary store;
   `AlarmDryRun` also uses `MPVPlayer`, `CoreAudioOutputs`, `BluetoothSpeaker` and `YTDLPVideoDetails`, wrapped so nothing changes).
 
@@ -83,6 +87,46 @@ Dependency rules:
   Saving keeps keys the app doesn't know, at the top level and per channel.
   A malformed file is renamed to `settings.corrupt-<epoch>.json`. Defaults are written on first launch.
 - `launchAtLogin` in settings.json is the source of truth and is applied at every launch.
+
+## Updates
+
+Stow for Mac ships as GitHub pre-releases of kimdobinn/stow tagged `mac-v<version>`, made by `mac/release.sh`
+(pre-releases, so Obtainium, which reads `/releases/latest`, keeps seeing the Android release). Each has
+`Stow-Mac-<version>.zip` (`ditto -c -k --keepParent Stow.app`), `Stow-Mac-<version>.zip.sha256`, and a
+`SHA-256: <hex>` line at the end of the notes.
+
+`AppUpdater` (Account › Updates; "Update" badge on Account in the sidebar):
+- Reads `https://api.github.com/repos/kimdobinn/stow/releases?per_page=100` unauthenticated at launch (after 20 s) and
+  then hourly when the last check (UserDefaults `updates.lastChecked`) is a day old, or on "Check for Updates". It keeps
+  mac-v* tags that aren't drafts and have a zip, takes the highest version (numeric, `DottedVersion`) and offers it
+  when it's above `CFBundleShortVersionString`. What it found is remembered (`updates.latestRelease`) until the next check.
+- "Update and Relaunch": refused while the alarm runs or within 10 minutes of it (`UpdateGate`, checked again before the
+  swap). Otherwise: the zip is downloaded (progress) into a staging folder on the same volume as the app
+  (`.itemReplacementDirectory`), checked against the notes' SHA-256 (else the .sha256 asset; with neither, no checksum),
+  unzipped with ditto, com.apple.quarantine removed from every file, and checked: same bundle id, the advertised version,
+  `codesign --verify --deep --strict`, and `SecStaticCodeCheckValidity` (all architectures, nested code, strict) against
+  `anchor apple generic and certificate leaf[subject.OU] = "<team>"` with the running app's team (LYD6WV79Y4).
+  An unsigned running copy can't update.
+- The swap is one `renamex_np(RENAME_SWAP)` of the new bundle with `Bundle.main.bundleURL` (two renames with rollback
+  where that isn't supported). A detached `/bin/sh` helper waits for this process to exit, runs `open -n` on the app and
+  deletes the staging folder (which now holds the old copy); then the app quits. If the helper can't start, the swap is
+  undone. Any failure before that leaves the app as it was and shows (and logs) why.
+
+`YtDlpUpdater` keeps `~/Library/Application Support/Stow/bin/yt-dlp`, the official standalone `yt-dlp_macos` from
+github.com/yt-dlp/yt-dlp/releases/latest:
+- At launch it runs `bin/yt-dlp --version`; a copy that doesn't run is deleted, so Homebrew's is used.
+- Then (and hourly, when the last check, UserDefaults `ytdlp.lastChecked`, is a day old; or on "Update Now") it reads
+  the latest release, and when that's newer, downloads `yt-dlp_macos` to `bin/yt-dlp.download`, checks it against the
+  release's `SHA2-256SUMS`, makes it executable, removes quarantine, runs `--version`, and renames it over `bin/yt-dlp`
+  (running yt-dlp processes keep the old file). Never while the alarm runs or is within 10 minutes.
+- `ToolLocator.url(for:)` looks in `AppPaths.binDirectory` first, so every yt-dlp run (and mpv's lookups through
+  `StreamCache.wrapper`) uses Stow's copy when present; any failure leaves Homebrew's as the fallback. The standalone
+  build finds ffmpeg and deno on the child PATH like Homebrew's.
+
+Testing: Debug builds, and builds made with `SWIFT_ACTIVE_COMPILATION_CONDITIONS=STOW_TEST_OVERRIDES`, read
+`STOW_UPDATE_FEED_URL` (a JSON list like GitHub's) instead of GitHub, and have `Stow --update-test <report file>`: the whole
+update headless (no settings, state or UserDefaults), relaunching the new copy with the same arguments so it reports its
+version. Network test of the real yt-dlp download: `TEST_RUNNER_STOW_NETWORK_TESTS=1` (`YtDlpUpdaterTests`).
 
 ## Self-test
 
@@ -135,6 +179,8 @@ inside object sections such as `alarm`, and per channel.
 ```
 
 `log.json` is a capped array (newest last on disk), with entries of the form `{ "date", "id", "level": "info|warning|error", "message" }`.
+
+`bin/yt-dlp` is Stow's own yt-dlp (see Updates).
 
 `cookies.txt` is a Netscape cookie file for `.youtube.com` and `.google.com`, with mode 0600. It is written by Account and read by yt-dlp.
 

@@ -13,6 +13,9 @@ enum AppPaths {
     static let firebaseKeyFile = supportDirectory.appending(path: "firebase-key.json")
     /// Encrypts what only paired phones may read; shared with them through the pairing QR code.
     static let pairingKeyFile = supportDirectory.appending(path: "pairing-key")
+    /// Tools Stow keeps itself (its own yt-dlp, kept current by Update/YtDlpUpdater); preferred
+    /// over Homebrew's.
+    static let binDirectory = supportDirectory.appending(path: "bin", directoryHint: .isDirectory)
 
     static func ensureSupportDirectory() throws {
         try FileManager.default.createDirectory(at: supportDirectory, withIntermediateDirectories: true)

@@ -22,18 +22,20 @@ import Testing
               thumbnailURL: nil, isMembersOnly: members, liveStatus: live, durationSeconds: seconds)
     }
 
-    @Test func agoSaysItLikeAndroid() {
-        func ago(_ seconds: TimeInterval) -> String {
-            Format.ago(now.addingTimeInterval(-seconds), now: now, calendar: calendar, locale: locale)
-        }
+    @Test func agoSaysItLikeYouTube() {
+        func ago(_ seconds: TimeInterval) -> String { Format.ago(now.addingTimeInterval(-seconds), now: now) }
         #expect(ago(10) == "Just now")
+        #expect(ago(60) == "1 minute ago")
         #expect(ago(5 * 60) == "5 minutes ago")
         #expect(ago(4 * 3600) == "4 hours ago")
         #expect(ago(3 * 86_400) == "3 days ago")
+        #expect(ago(17 * 86_400) == "2 weeks ago")
+        #expect(ago(100 * 86_400) == "3 months ago")
+        #expect(ago(340 * 86_400) == "11 months ago")
+        #expect(ago(364 * 86_400) == "1 year ago")
+        #expect(ago(729 * 86_400) == "2 years ago")
+        #expect(ago(3 * 365 * 86_400) == "3 years ago")
         #expect(Format.ago(nil, now: now) == "")
-        // A week or more: the date (another year adds the year).
-        #expect(ago(20 * 86_400) == "Sep 1")
-        #expect(ago(400 * 86_400) == "Aug 17, 2025")
     }
 
     @Test func pastStreamsSayStreamed() {

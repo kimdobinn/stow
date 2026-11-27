@@ -12,7 +12,11 @@ struct YTDLP: Sendable {
     }
 
     /// Keeps the user's yt-dlp config from changing the output format.
-    private static let baseArguments = ["--ignore-config", "--no-progress"] + youTubeWorkaround
+    private static let baseArguments = ["--ignore-config", "--no-progress"] + youTubeWorkaround + approximateDates
+
+    /// Flat listings (YouTube's Home and Subscriptions, channel tabs) have no dates unless asked:
+    /// this turns YouTube's "3 days ago" into an approximate timestamp.
+    static let approximateDates = ["--extractor-args", "youtubetab:approximate_date"]
 
     /// Has yt-dlp read YouTube's TV player script: with yt-dlp 2026.10.26 the challenge solver
     /// fails on the default script whenever you're signed in (no playable formats, so members-only

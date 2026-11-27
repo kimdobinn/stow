@@ -38,6 +38,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
 struct MainView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.appTheme) private var theme
+    @Environment(AppUpdater.self) private var updater: AppUpdater?
     @State private var selection: SidebarItem
     /// The player panel's width as last dragged; 0 until then (an automatic width).
     @AppStorage("playerPanelWidth") private var preferredPanelWidth: Double = 0
@@ -58,7 +59,7 @@ struct MainView: View {
             List(selection: $selection) {
                 ForEach(SidebarItem.allCases) { item in
                     Label(item.title, systemImage: item.systemImage)
-                        .badge(item == .inbox ? model.inbox.count : 0)
+                        .badge(badge(for: item))
                         .tag(item)
                 }
             }
@@ -103,6 +104,15 @@ struct MainView: View {
     }
 
     private var dock: PlayerDock { PlayerDock.shared }
+
+    /// The Inbox count, and "Update" on Account when a new Stow is out.
+    private func badge(for item: SidebarItem) -> Text? {
+        switch item {
+        case .inbox: model.inbox.isEmpty ? nil : Text("\(model.inbox.count)")
+        case .account: updater?.availableRelease == nil ? nil : Text("Update")
+        default: nil
+        }
+    }
 
 
     /// The title bar and toolbar take the theme's background too.
