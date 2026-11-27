@@ -11,3 +11,4 @@ mac/Stow/Info.plist
 firebase/google-services.json
 *firebase-adminsdk*.json
 *.apk
+*.ipa

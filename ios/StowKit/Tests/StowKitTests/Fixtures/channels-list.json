@@ -1,0 +1,49 @@
+{
+  "documents": [
+    {
+      "name": "projects/stow-test/databases/(default)/documents/channels/UCuAXFkgsw1L7xaCfnd5JJOw",
+      "fields": {
+        "title": {"stringValue": "Rick Astley"},
+        "handle": {"stringValue": "@RickAstleyYT"},
+        "avatarURL": {"stringValue": "https://yt3.googleusercontent.com/rick=s176"},
+        "morning": {"booleanValue": true},
+        "order": {"integerValue": "1"},
+        "recent": {"arrayValue": {"values": [
+          {"mapValue": {"fields": {
+            "id": {"stringValue": "dQw4w9WgXcQ"},
+            "title": {"stringValue": "Never Gonna Give You Up"},
+            "publishedAt": {"timestampValue": "2009-10-25T06:57:33Z"},
+            "thumbnailURL": {"stringValue": "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg"},
+            "isMembersOnly": {"booleanValue": false},
+            "liveStatus": {"stringValue": "none"},
+            "duration": {"nullValue": null},
+            "watched": {"booleanValue": true}
+          }}},
+          {"mapValue": {"fields": {
+            "id": {"stringValue": "AC3Ejf7vPEY"},
+            "title": {"stringValue": "Cry For Help"},
+            "publishedAt": {"timestampValue": "2026-11-01T10:00:00.000001Z"},
+            "isMembersOnly": {"booleanValue": true},
+            "liveStatus": {"stringValue": "none"},
+            "duration": {"doubleValue": 271.5},
+            "watched": {"booleanValue": false}
+          }}},
+          {"mapValue": {"fields": {"title": {"stringValue": "no id: skipped"}}}}
+        ]}},
+        "updatedAt": {"timestampValue": "2026-11-20T07:00:00Z"},
+        "updatedBy": {"stringValue": "mac"}
+      }
+    },
+    {
+      "name": "projects/stow-test/databases/(default)/documents/channels/UC4QobU6STFB0P71PMvOGN5A",
+      "fields": {
+        "title": {"stringValue": "jawed"},
+        "handle": {"nullValue": null},
+        "avatarURL": {"nullValue": null},
+        "order": {"integerValue": "0"},
+        "recent": {"arrayValue": {}}
+      }
+    }
+  ],
+  "nextPageToken": ""
+}

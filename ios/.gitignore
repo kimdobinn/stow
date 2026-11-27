@@ -1,0 +1,8 @@
+# Made by xcodebuild, scripts/fetch-python.sh and xcodegen
+build/
+Vendor/
+*.xcodeproj
+Stow/App/Info.plist
+__pycache__/
+# Made by scripts/firebase-config.sh from android/app/google-services.json
+Stow/Config/Firebase.plist

@@ -1,0 +1,22 @@
+{
+  "name": "projects/stow-test/databases/(default)/documents/shared/phone",
+  "fields": {
+    "groups": {"arrayValue": {"values": [
+      {"mapValue": {"fields": {
+        "id": {"stringValue": "g1"},
+        "name": {"stringValue": "Music"},
+        "channels": {"arrayValue": {"values": [
+          {"mapValue": {"fields": {"id": {"stringValue": "UCuAXFkgsw1L7xaCfnd5JJOw"}, "title": {"stringValue": "Rick Astley"}}}},
+          {"mapValue": {"fields": {"id": {"stringValue": "UCnotitle"}}}}
+        ]}}
+      }}},
+      {"mapValue": {"fields": {"id": {"stringValue": "g2"}}}},
+      {"mapValue": {"fields": {"name": {"stringValue": "no id"}}}}
+    ]}},
+    "groupsUpdatedBy": {"stringValue": "mac"},
+    "refreshRequestedAt": {"timestampValue": "2026-11-27T09:00:00.123Z"},
+    "refreshHandledAt": {"timestampValue": "2026-11-27T09:00:00.123Z"}
+  },
+  "createTime": "2026-11-01T00:00:00Z",
+  "updateTime": "2026-11-27T09:00:05Z"
+}

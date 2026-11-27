@@ -1,0 +1,30 @@
+{
+  "name": "Stow",
+  "identifier": "dev.stow.source",
+  "subtitle": "A calmer YouTube, with no Shorts.",
+  "sourceURL": "https://raw.githubusercontent.com/kimdobinn/stow/main/ios/source.json",
+  "iconURL": "https://raw.githubusercontent.com/kimdobinn/stow/main/docs/icon.png",
+  "website": "https://github.com/kimdobinn/stow",
+  "tintColor": "#FF2D55",
+  "apps": [
+    {
+      "name": "Stow",
+      "bundleIdentifier": "dev.stow.ios",
+      "developerName": "Stow",
+      "subtitle": "A calmer YouTube, with no Shorts.",
+      "localizedDescription": "Plays and downloads the videos your Mac picks, plus YouTube's Home and Subscriptions and search, with no Shorts. Pairs with the Stow Mac app.",
+      "iconURL": "https://raw.githubusercontent.com/kimdobinn/stow/main/docs/icon.png",
+      "tintColor": "#FF2D55",
+      "category": "entertainment",
+      "screenshots": [],
+      "versions": [],
+      "appPermissions": {
+        "entitlements": [],
+        "privacy": {
+          "NSCameraUsageDescription": "Stow uses the camera to scan the pairing code on your Mac."
+        }
+      }
+    }
+  ],
+  "news": []
+}

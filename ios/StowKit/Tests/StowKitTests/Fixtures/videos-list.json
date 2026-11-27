@@ -1,0 +1,55 @@
+{
+  "documents": [
+    {
+      "name": "projects/stow-test/databases/(default)/documents/videos/dQw4w9WgXcQ",
+      "fields": {
+        "channelId": {"stringValue": "UCuAXFkgsw1L7xaCfnd5JJOw"},
+        "channelTitle": {"stringValue": "Rick Astley"},
+        "title": {"stringValue": "Rick Astley - Never Gonna Give You Up (Official Video)"},
+        "publishedAt": {"timestampValue": "2009-10-25T06:57:33.123456Z"},
+        "thumbnailURL": {"stringValue": "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg"},
+        "isMembersOnly": {"booleanValue": false},
+        "liveStatus": {"stringValue": "none"},
+        "duration": {"doubleValue": 213.0},
+        "sentAt": {"timestampValue": "2026-11-20T07:00:01.5Z"},
+        "sentBy": {"stringValue": "morning"},
+        "watched": {"booleanValue": true},
+        "watchedAt": {"timestampValue": "2026-11-20T08:00:00Z"},
+        "watchedBy": {"stringValue": "mac"},
+        "phone": {"mapValue": {"fields": {"state": {"stringValue": "downloaded"}, "error": {"nullValue": null}}}},
+        "updatedAt": {"timestampValue": "2026-11-20T08:00:00.987654321Z"},
+        "updatedBy": {"stringValue": "mac"}
+      },
+      "createTime": "2026-11-20T07:00:01.512345Z",
+      "updateTime": "2026-11-20T08:00:00.987654Z"
+    },
+    {
+      "name": "projects/stow-test/databases/(default)/documents/videos/lYBUbBu4W08",
+      "fields": {
+        "channelId": {"stringValue": "UCuAXFkgsw1L7xaCfnd5JJOw"},
+        "channelTitle": {"stringValue": "Rick Astley"},
+        "title": {"stringValue": "Rick Astley live from the studio"},
+        "publishedAt": {"nullValue": null},
+        "thumbnailURL": {"nullValue": null},
+        "isMembersOnly": {"booleanValue": true},
+        "liveStatus": {"stringValue": "wasLive"},
+        "duration": {"integerValue": "5400"},
+        "sentAt": {"timestampValue": "2026-11-21T07:00:00Z"},
+        "sentBy": {"stringValue": "phone"},
+        "watched": {"booleanValue": false},
+        "updatedAt": {"timestampValue": "2026-11-21T07:00:00Z"},
+        "updatedBy": {"stringValue": "phone"}
+      },
+      "createTime": "2026-11-21T07:00:00Z",
+      "updateTime": "2026-11-21T07:00:00Z"
+    },
+    {
+      "name": "projects/stow-test/databases/(default)/documents/videos/brokenDoc01",
+      "fields": {
+        "watched": {"booleanValue": true}
+      },
+      "createTime": "2026-11-21T07:00:00Z",
+      "updateTime": "2026-11-21T07:00:00Z"
+    }
+  ]
+}

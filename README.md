@@ -131,6 +131,36 @@ The APKs here are built against my own Firebase project, so they only pair with 
 Stow with yours, fork the repository, build with your `google-services.json` and signing key, and
 point Obtainium at your fork.
 
+**iPhone** (iOS 17 or later, new): a SwiftUI version of the phone app, with yt-dlp running on its
+own copy of Python. Build it with
+
+```sh
+ios/scripts/fetch-python.sh
+ios/scripts/firebase-config.sh      # from android/app/google-services.json
+cd ios && xcodegen generate
+```
+
+then open `ios/Stow.xcodeproj`. More in [ios/README.md](ios/README.md). It differs from Android in
+a few ways: there are no push notifications (they need a paid Apple developer account), so it checks
+the Mac's list when you open it, every minute while it's open and when iOS lets it refresh in the
+background; downloads stop a few minutes after you leave the app and continue when you come back;
+downloads go up to 1080p; and the alarm remote isn't there yet.
+
+### Installing and updating the iPhone app with SideStore
+
+Apple doesn't allow YouTube downloaders in the App Store either. `ios/release.sh` publishes
+`Stow-<version>.ipa` as a GitHub pre-release and lists it in [ios/source.json](ios/source.json), a
+source that [SideStore](https://sidestore.io) and [AltStore](https://altstore.io) can follow.
+
+1. Install SideStore on the iPhone (its website explains how; you need a computer once).
+2. In SideStore, open **Sources**, tap **+** and add
+   `https://raw.githubusercontent.com/kimdobinn/stow/main/ios/source.json`.
+3. Install Stow from that source, then pair it from **Phone › Pair a Phone** on the Mac, the same
+   way as the Android phone. Both phones can stay paired.
+
+With a free Apple ID, apps installed this way stop opening after 7 days unless they're refreshed.
+SideStore refreshes them on the phone; AltStore needs your computer on the same Wi-Fi.
+
 ## Notes
 
 Stow is a personal project and isn't affiliated with YouTube or Google. It uses your own account and
