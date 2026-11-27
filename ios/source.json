@@ -17,7 +17,17 @@
       "tintColor": "#FF2D55",
       "category": "entertainment",
       "screenshots": [],
-      "versions": [],
+      "versions": [
+        {
+          "version": "0.1.0",
+          "buildVersion": "1",
+          "date": "2026-11-27",
+          "localizedDescription": "First iPhone version. Not yet tested on a real iPhone: install it with SideStore or AltStore from ios/source.json, then pair it from Phone › Pair a Phone on the Mac.",
+          "downloadURL": "https://github.com/kimdobinn/stow/releases/download/ios-v0.1.0/Stow-0.1.0.ipa",
+          "size": 15354292,
+          "minOSVersion": "17.0"
+        }
+      ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {
