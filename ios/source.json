@@ -19,6 +19,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "0.1.1",
+          "buildVersion": "2",
+          "date": "2026-11-27",
+          "localizedDescription": "- Stow shows when a new version is out: Settings › About, or the banner on Home, then Update in SideStore.\n- Upload dates on search results and channel pages, said the way YouTube says them (\"3 days ago\", \"1 year ago\").",
+          "downloadURL": "https://github.com/kimdobinn/stow/releases/download/ios-v0.1.1/Stow-0.1.1.ipa",
+          "size": 15442723,
+          "minOSVersion": "17.0"
+        },
+        {
           "version": "0.1.0",
           "buildVersion": "1",
           "date": "2026-11-27",
