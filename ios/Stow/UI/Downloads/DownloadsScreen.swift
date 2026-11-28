@@ -46,7 +46,7 @@ struct DownloadsScreen: View {
             SectionHeader(text: "Downloaded · \(playable.count)") { sortMenu }.plainRow()
             ChipRow {
                 ForEach(WatchFilter.allCases, id: \.self) { option in
-                    Chip(label: option.label, selected: filter == option) { filter = option }
+                    Chip(label: option.label, selected: filter == option) { withoutAnimation { filter = option } }
                 }
             }
             .plainRow()
@@ -64,6 +64,11 @@ struct DownloadsScreen: View {
             footer.plainRow()
         }
         .listStyle(.plain)
+        // Rows coming and going (a download finishing, a delete from the menu or several at once,
+        // a new sort) slide into place instead of jumping. Only when the lists change, not on
+        // every percent; a filter chip switches at once (withoutAnimation).
+        .animation(Motion.standard, value: downloading.map(\.id))
+        .animation(Motion.standard, value: downloaded.map(\.id))
         .scrollContentBackground(.hidden)
         .background(colors.background)
         .environment(\.defaultMinListRowHeight, 0)
@@ -76,7 +81,7 @@ struct DownloadsScreen: View {
                 TabToolbar(shell: shell)
                 if !playable.isEmpty {
                     ToolbarItem(placement: .topBarLeading) {
-                        Button("Select") { selecting = true }.tint(colors.text)
+                        Button("Select") { withAnimation(Motion.standard) { selecting = true } }.tint(colors.text)
                     }
                 }
             }
@@ -142,7 +147,7 @@ struct DownloadsScreen: View {
             if selecting { toggle(items.map(\.id), on: !allPicked) } else { shell.openChannel(channelId) }
         } label: {
             HStack(spacing: 10) {
-                if selecting { SelectionMark(selected: allPicked) }
+                if selecting { SelectionMark(selected: allPicked).transition(SelectionMark.transition) }
                 ChannelAvatar(url: avatars[channelId], name: items[0].video.channelTitle, size: 28)
                 Text(items[0].video.channelTitle)
                     .font(.callout.weight(.bold))
@@ -232,14 +237,16 @@ struct DownloadsScreen: View {
     }
 
     private func toggle(_ ids: [String], on: Bool? = nil) {
-        selecting = true
+        if !selecting { withAnimation(Motion.standard) { selecting = true } }
         let add = on ?? !ids.allSatisfy(picked.contains)
         if add { picked.formUnion(ids) } else { picked.subtract(ids) }
     }
 
     private func stopSelecting() {
-        selecting = false
-        picked = []
+        withAnimation(Motion.standard) {
+            selecting = false
+            picked = []
+        }
     }
 
     private func pickedItems(_ playable: [VideoItem]) -> [VideoItem] {

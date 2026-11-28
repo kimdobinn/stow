@@ -61,10 +61,12 @@ struct CommentsCard: View {
         .task(id: "\(video.id)/\(attempt)") {
             state = .loading
             do {
-                state = .loaded(try await repository.comments(video, fresh: attempt > 0))
+                let page = try await repository.comments(video, fresh: attempt > 0)
+                // The top comment fades in and the card grows, moving Up next down with it.
+                withAnimation(Motion.fade) { state = .loaded(page) }
             } catch is CancellationError {
             } catch {
-                state = .failed
+                withAnimation(Motion.fade) { state = .failed }
             }
         }
         .sheet(isPresented: $open) {
@@ -134,10 +136,12 @@ private struct CommentThread: View {
             CommentRow(comment: thread, avatar: 32)
             if !thread.replies.isEmpty {
                 Button {
-                    withAnimation(.snappy) { showReplies.toggle() }
+                    withAnimation(Motion.brisk) { showReplies.toggle() }
                 } label: {
                     HStack(spacing: 4) {
-                        Image(systemName: showReplies ? "chevron.up" : "chevron.down").font(.caption.weight(.bold))
+                        // One chevron that turns over, rather than two swapping.
+                        Image(systemName: "chevron.down").font(.caption.weight(.bold))
+                            .rotationEffect(.degrees(showReplies ? 180 : 0))
                         Text(thread.replies.count == 1 ? "1 reply" : "\(thread.replies.count) replies")
                             .font(.footnote.weight(.semibold))
                     }
@@ -154,6 +158,7 @@ private struct CommentThread: View {
                     }
                     .padding(.leading, 42)
                     .padding(.top, 8)
+                    .transition(.opacity.combined(with: .offset(y: -6)))
                 }
             }
         }
@@ -198,7 +203,7 @@ private struct CommentRow: View {
                     .lineLimit(isLong && !showAll ? 5 : nil)
                     .textSelection(.enabled)
                 if isLong {
-                    Button(showAll ? "Show less" : "Read more") { showAll.toggle() }
+                    Button(showAll ? "Show less" : "Read more") { withAnimation(Motion.brisk) { showAll.toggle() } }
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(colors.secondaryText)
                         .buttonStyle(.plain)

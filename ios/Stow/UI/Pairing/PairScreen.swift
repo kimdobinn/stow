@@ -61,6 +61,8 @@ struct PairScreen: View {
                 }
             }
             .padding(.top, 32)
+            // Waiting for the Mac, and a reason for being unpaired, fade in and out.
+            .animation(Motion.fade, value: repository.pairState)
             Spacer()
             Spacer()
         }

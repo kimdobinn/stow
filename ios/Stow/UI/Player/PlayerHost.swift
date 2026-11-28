@@ -27,11 +27,13 @@ private struct PlayerHost: ViewModifier {
                 if expanded {
                     WatchPage()
                         .accessibilityAddTraits(.isModal)
-                        .transition(.move(edge: .bottom))
+                        .motionTransition(.move(edge: .bottom))
                 }
             }
-            .animation(.spring(duration: 0.35, bounce: 0), value: shell.playerExpanded)
-            .animation(.spring(duration: 0.35, bounce: 0), value: shell.playback == nil)
+            // Opening and closing the player from anywhere moves on the player's spring; a drag
+            // that ends it brings its own, carrying the finger's speed.
+            .defaultAnimation(Motion.player, value: shell.playerExpanded)
+            .defaultAnimation(Motion.player, value: shell.playback == nil)
             .environment(\.downloadHold, repository.downloads.hold)
             // The watch page covers the tabs: VoiceOver mustn't reach the hidden cards and tab bar.
             // SwiftUI's accessibilityHidden doesn't reach into the UIKit tab bar controller, so
@@ -119,7 +121,6 @@ private struct MiniPlayerInset: ViewModifier {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if shell.playback != nil, !shell.playerExpanded {
                     MiniPlayer()
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
     }
@@ -131,7 +132,10 @@ struct MiniPlayer: View {
     @Environment(Shell.self) private var shell
     @Environment(PlaybackController.self) private var controller
     @Environment(\.stowColors) private var colors
+    /// Sideways, following the finger to swipe it away.
     @State private var swipe: CGFloat = 0
+    /// Up, following the finger (held back a little) toward the watch page.
+    @State private var lift: CGFloat = 0
 
     var body: some View {
         let item = controller.current
@@ -161,6 +165,9 @@ struct MiniPlayer: View {
                 Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 20))
                     .foregroundStyle(colors.text)
+                    // Play and pause morph into each other.
+                    .contentTransition(.symbolEffect(.replace))
+                    .animation(Motion.quick, value: controller.isPlaying)
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
@@ -195,33 +202,53 @@ struct MiniPlayer: View {
         }
         .padding(.horizontal, 8)
         .padding(.bottom, 6)
-        .offset(x: swipe)
+        .offset(x: swipe, y: lift)
         .opacity(1 - min(abs(swipe) / 300, 0.8))
         .contentShape(Rectangle())
         .onTapGesture { expand() }
         .gesture(
             DragGesture(minimumDistance: 12)
                 .onChanged { value in
-                    if abs(value.translation.width) > abs(value.translation.height) { swipe = value.translation.width }
-                }
-                .onEnded { value in
-                    let sideways = abs(value.translation.width) > abs(value.translation.height)
-                    if sideways, abs(value.translation.width) > 120 || abs(value.predictedEndTranslation.width) > 260 {
-                        withAnimation(.easeOut(duration: 0.2)) { swipe = value.translation.width > 0 ? 500 : -500 }
-                        shell.closePlayer()
-                    } else if !sideways, value.translation.height < -20 {
-                        expand()
+                    if abs(value.translation.width) > abs(value.translation.height) {
+                        swipe = value.translation.width
                     } else {
-                        withAnimation(.spring) { swipe = 0 }
+                        lift = MotionRules.miniPlayerLift(value.translation.height)
                     }
                 }
+                .onEnded(released)
         )
+        // Swiped away it has already gone sideways: it only fades. Otherwise it comes up from,
+        // and goes down to, the bottom.
+        .motionTransition(swipe != 0 ? .opacity : .move(edge: .bottom).combined(with: .opacity))
         .accessibilityElement(children: .contain)
         .accessibilityAction(named: "Open player") { expand() }
     }
 
+    private func released(_ value: DragGesture.Value) {
+        switch MotionRules.miniPlayerRelease(translation: value.translation, predictedEnd: value.predictedEndTranslation,
+                                             velocity: value.velocity) {
+        case .dismiss(let direction):
+            // Carries on at the fling's speed off the side, and only then stops the video.
+            let target = direction * MotionRules.miniPlayerFling
+            withAnimation(Motion.settle(from: swipe, to: target, velocity: value.velocity.width, duration: 0.22)) {
+                swipe = target
+            } completion: {
+                shell.closePlayer()
+            }
+        case .expand:
+            expand()
+        case .settle:
+            let sideways = swipe != 0
+            withAnimation(Motion.settle(from: sideways ? swipe : lift, to: 0,
+                                        velocity: sideways ? value.velocity.width : value.velocity.height * 0.6, duration: 0.28)) {
+                swipe = 0
+                lift = 0
+            }
+        }
+    }
+
     private func expand() {
-        withAnimation(.spring(duration: 0.35, bounce: 0)) { shell.playerExpanded = true }
+        withAnimation(Motion.player) { shell.playerExpanded = true }
     }
 }
 

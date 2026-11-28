@@ -1,5 +1,6 @@
 package dev.stow.android.ui
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -97,8 +98,10 @@ fun UpdateDialog(updater: Updater, release: Release, onDismiss: () -> Unit) {
             title = { Text("Downloading ${state.release.version}") },
             text = {
                 Column {
+                    // Fills steadily between the download's updates instead of stepping.
+                    val shown by animateFloatAsState((state.bytes.toFloat() / state.release.apkSize).coerceIn(0f, 1f), Motion.Progress, label = "update")
                     LinearProgressIndicator(
-                        progress = { (state.bytes.toFloat() / state.release.apkSize).coerceIn(0f, 1f) },
+                        progress = { shown },
                         color = Stow.colors.accent, trackColor = Stow.colors.chip,
                         modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
                         drawStopIndicator = {},

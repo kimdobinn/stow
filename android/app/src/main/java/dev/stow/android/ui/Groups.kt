@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -113,9 +114,11 @@ fun GroupsScreen(groups: List<ChannelGroup>, actions: GroupActions, onOpen: (Str
             if (groups.isEmpty()) {
                 item { EmptyState("No groups yet. Tap + to make one, or use “Add channel to a group” on any video.") }
             } else {
-                item {
-                    Column(Modifier.padding(horizontal = 16.dp).clip(RoundedCornerShape(12.dp)).background(Stow.colors.raised)) {
-                        groups.forEachIndexed { index, group ->
+                // One card row per group, so groups coming and going slide the others.
+                itemsIndexed(groups, key = { _, group -> group.id }) { index, group ->
+                    Column(itemMotion().padding(horizontal = 16.dp)
+                               .clip(groupedRowShape(first = index == 0, last = index == groups.lastIndex, radius = 12.dp))
+                               .background(Stow.colors.raised)) {
                             Row(Modifier.fillMaxWidth().clickable { onOpen(group.id) }.padding(start = 16.dp, end = 8.dp).height(52.dp),
                                 verticalAlignment = Alignment.CenterVertically) {
                                 Text(group.name, style = StowType.body, color = Stow.colors.text, modifier = Modifier.weight(1f),
@@ -124,7 +127,6 @@ fun GroupsScreen(groups: List<ChannelGroup>, actions: GroupActions, onOpen: (Str
                                 Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = Stow.colors.secondaryText)
                             }
                             if (index < groups.lastIndex) HorizontalDivider(Modifier.padding(start = 16.dp), color = Stow.colors.divider)
-                        }
                     }
                 }
             }
@@ -158,10 +160,11 @@ fun GroupScreen(
             TextButton(onClick = { renaming = true }) { Text("Rename", color = Stow.colors.accent) }
         }
         LazyColumn(Modifier.fillMaxSize()) {
-            item { SectionLabel("Channels") }
-            item {
-                Column(Modifier.padding(horizontal = 16.dp).clip(RoundedCornerShape(12.dp)).background(Stow.colors.raised)) {
-                    group.channels.forEach { channel ->
+            item(key = "label") { SectionLabel("Channels") }
+            // One card row per channel: removing one collapses it and the rest slide up.
+            itemsIndexed(group.channels, key = { _, channel -> "c-" + channel.id }) { index, channel ->
+                Column(itemMotion().padding(horizontal = 16.dp)
+                           .clip(groupedRowShape(first = index == 0, last = false, radius = 12.dp)).background(Stow.colors.raised)) {
                         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp).height(56.dp), verticalAlignment = Alignment.CenterVertically) {
                             ChannelAvatar(avatars[channel.id], 32.dp, name = channel.title)
                             Spacer(Modifier.width(12.dp))
@@ -172,7 +175,11 @@ fun GroupScreen(
                             }
                         }
                         HorizontalDivider(Modifier.padding(start = 60.dp), color = Stow.colors.divider)
-                    }
+                }
+            }
+            item(key = "add") {
+                Column(itemMotion().padding(horizontal = 16.dp)
+                           .clip(groupedRowShape(first = group.channels.isEmpty(), last = true, radius = 12.dp)).background(Stow.colors.raised)) {
                     Row(Modifier.fillMaxWidth().clickable { adding = true }.padding(horizontal = 16.dp).height(52.dp),
                         verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.Add, contentDescription = null, tint = Stow.colors.accent)
@@ -181,19 +188,22 @@ fun GroupScreen(
                     }
                 }
             }
-            item {
+            item(key = "note") {
                 Text(if (actions.standalone) "Any video's ⋯ menu can add its channel too. Channels you don't follow yet get followed."
                      else "Any video's ⋯ menu can add its channel too. Channels the Mac doesn't follow yet get added there (with Morning off).",
-                     style = StowType.footnote, color = Stow.colors.secondaryText, modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp))
+                     style = StowType.footnote, color = Stow.colors.secondaryText, modifier = itemMotion().padding(horizontal = 32.dp, vertical = 8.dp))
             }
-            item {
-                Spacer(Modifier.height(16.dp))
-                Row(Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Stow.colors.raised)
-                        .clickable { deleting = true }.padding(horizontal = 16.dp).height(52.dp),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Text("Delete group", style = StowType.body, color = Color(0xFFFF3B30))
+            item(key = "delete") {
+                // One root, so the whole item slides (a lazy item animates only the children that carry the modifier).
+                Column(itemMotion()) {
+                    Spacer(Modifier.height(16.dp))
+                    Row(Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Stow.colors.raised)
+                            .clickable { deleting = true }.padding(horizontal = 16.dp).height(52.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text("Delete group", style = StowType.body, color = Color(0xFFFF3B30))
+                    }
+                    Spacer(Modifier.height(32.dp))
                 }
-                Spacer(Modifier.height(32.dp))
             }
         }
     }

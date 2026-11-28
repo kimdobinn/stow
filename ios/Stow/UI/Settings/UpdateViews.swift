@@ -33,7 +33,7 @@ struct UpdateBanner: View {
                 }
                 .buttonStyle(.plain)
                 Button {
-                    withAnimation(.snappy) { updates.dismissBanner() }
+                    withAnimation(Motion.standard) { updates.dismissBanner() }
                 } label: {
                     Image(systemName: "xmark")
                         .font(.footnote.weight(.semibold))
@@ -52,7 +52,7 @@ struct UpdateBanner: View {
             .padding(.horizontal, 16)
             .padding(.top, 4)
             .padding(.bottom, 8)
-            .transition(.opacity.combined(with: .move(edge: .top)))
+            .motionTransition(.opacity.combined(with: .move(edge: .top)))
         }
     }
 }

@@ -1,6 +1,12 @@
 package dev.stow.android.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -95,9 +101,11 @@ fun LargeTitleBar(title: String, onSearch: () -> Unit, onSettings: () -> Unit) {
 /** A round toolbar button on a light fill, with an optional dot (an update is out). */
 @Composable
 fun ToolbarButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit, dot: Boolean = false) {
+    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     Box {
-        Box(Modifier.size(44.dp).clip(CircleShape).background(Stow.colors.chip)
-                .clickable(onClickLabel = label, role = androidx.compose.ui.semantics.Role.Button, onClick = onClick),
+        Box(Modifier.size(44.dp).pressScale(interaction).clip(CircleShape).background(Stow.colors.chip)
+                .clickable(interactionSource = interaction, indication = androidx.compose.foundation.LocalIndication.current,
+                           onClickLabel = label, role = androidx.compose.ui.semantics.Role.Button, onClick = onClick),
             contentAlignment = Alignment.Center) {
             Icon(icon, contentDescription = label, tint = Stow.colors.text, modifier = Modifier.size(22.dp))
         }
@@ -175,11 +183,19 @@ fun HomeScreen(
     val group = groups.firstOrNull { it.id == groupId }
     Column(Modifier.fillMaxSize()) {
         LargeTitleBar("Home", onSearch, onSettings)
-        alarmMac?.let { AlarmBanner(it, onRemote) }
-        update?.let { UpdateBanner(it, onUpdate, onHideUpdate) }
-        standalone?.let { s ->
-            if (s.expiredBanner) ExpiredBanner(s.onSignIn, s.onDismissExpired)
-            else if (s.signInPrompt && !s.signedIn) SignInPromptCard(s.onSignIn, s.onDismissPrompt)
+        // The banners open and fold away (the feed slides with them) instead of popping; each keeps
+        // its last text while it folds.
+        val lastAlarm = rememberLast(alarmMac)
+        Appear(alarmMac != null, enter = Motion.ExpandIn, exit = Motion.CollapseOut) { lastAlarm?.let { AlarmBanner(it, onRemote) } }
+        val lastUpdate = rememberLast(update)
+        Appear(update != null, enter = Motion.ExpandIn, exit = Motion.CollapseOut) { lastUpdate?.let { UpdateBanner(it, onUpdate, onHideUpdate) } }
+        val lastStandalone = rememberLast(standalone)
+        Appear(standalone?.expiredBanner == true, enter = Motion.ExpandIn, exit = Motion.CollapseOut) {
+            lastStandalone?.let { ExpiredBanner(it.onSignIn, it.onDismissExpired) }
+        }
+        Appear(standalone != null && !standalone.expiredBanner && standalone.signInPrompt && !standalone.signedIn,
+               enter = Motion.ExpandIn, exit = Motion.CollapseOut) {
+            lastStandalone?.let { SignInPromptCard(it.onSignIn, it.onDismissPrompt) }
         }
         ChipRow {
             Chip("All", group == null, onClick = { groupId = null })
@@ -197,7 +213,7 @@ fun HomeScreen(
                     // YouTube's recommendations; your channels' newest until the Mac has shared them.
                     val videos = recommended.ifEmpty { everything.filter { !it.watched } }
                     if (standalone != null && standalone.followsNone && videos.isEmpty()) {
-                        item(key = "follow-some") { FollowSomeChannels(standalone, onSearch) }
+                        item(key = "follow-some") { Box(itemMotion()) { FollowSomeChannels(standalone, onSearch) } }
                         return@LazyColumn
                     }
                     if (recommended.isEmpty()) {
@@ -207,12 +223,13 @@ fun HomeScreen(
                             else -> "What's new from your channels. Sign in to YouTube in Settings to see its recommendations here too."
                         }
                         item(key = "no-recs") {
-                            Text(note, style = StowType.footnote, color = Stow.colors.secondaryText, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+                            Text(note, style = StowType.footnote, color = Stow.colors.secondaryText, modifier = itemMotion().padding(horizontal = 16.dp, vertical = 4.dp))
                         }
                     }
-                    items(videos, key = { "all-" + it.id }) { VideoCard(it, avatars[it.video.channelId], actions) }
+                    // New videos after a refresh fade in while the rest slide down; switching chips fades one list into the other.
+                    items(videos, key = { "all-" + it.id }) { VideoCard(it, avatars[it.video.channelId], actions, itemMotion()) }
                     item(key = "end") {
-                        EndNote(when {
+                        EndNote(modifier = itemMotion(), text = when {
                                     standalone != null && videos.isEmpty() -> "Nothing here yet. Pull down to check your channels."
                                     standalone != null -> "That's everything for now. Pull up to check for new videos."
                                     videos.isEmpty() -> "Nothing here yet. Pull down to ask the Mac for videos."
@@ -225,18 +242,18 @@ fun HomeScreen(
                     val watched = videos.filter { it.watched }
                     if (group.channels.isEmpty()) {
                         item(key = "empty-group") {
-                            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Column(itemMotion().fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                                 EmptyState("“${group.name}” has no channels yet.")
                                 TextButton(onClick = { onEditGroup(group.id) }) { Text("Add channels", color = Color3D()) }
                             }
                         }
                     } else {
-                        items(fresh, key = { "g-" + it.id }) { VideoCard(it, avatars[it.video.channelId], actions) }
+                        items(fresh, key = { "g-" + it.id }) { VideoCard(it, avatars[it.video.channelId], actions, itemMotion()) }
                         item(key = "caught-up") {
                             CaughtUp(todaySeconds, watched.size, showWatched, onToggle = { showWatched = !showWatched }, onReport = onReport,
-                                     what = "That's everything new from ${group.name}.")
+                                     what = "That's everything new from ${group.name}.", modifier = itemMotion())
                         }
-                        if (showWatched) items(watched, key = { "gw-" + it.id }) { VideoCard(it, avatars[it.video.channelId], actions) }
+                        if (showWatched) items(watched, key = { "gw-" + it.id }) { VideoCard(it, avatars[it.video.channelId], actions, itemMotion()) }
                     }
                 }
             }
@@ -319,8 +336,8 @@ private fun AlarmBanner(macName: String, onOpen: () -> Unit) {
 /** The end of Home, instead of an endless feed. */
 @Composable
 private fun CaughtUp(todaySeconds: Long, watchedCount: Int, showingWatched: Boolean, onToggle: () -> Unit, onReport: () -> Unit,
-                     what: String = "That's everything new from your channels.") {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                     what: String = "That's everything new from your channels.", modifier: Modifier = Modifier) {
+    Column(modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.size(60.dp).clip(CircleShape).background(StowGradient), contentAlignment = Alignment.Center) {
             Icon(Icons.Rounded.Check, contentDescription = null, tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(32.dp))
         }
@@ -368,17 +385,24 @@ fun SubscriptionsScreen(
                             .clickable { selected = if (selected == channel.id) null else channel.id }.padding(vertical = 4.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        val ring = if (selected == channel.id) Modifier.border(2.dp, Stow.colors.accent, CircleShape).padding(3.dp) else Modifier.padding(3.dp)
-                        Box(ring) { ChannelAvatar(channel.avatarUrl, 52.dp, name = channel.title) }
+                        // The ring and the dimming of the other names change quickly rather than blinking.
+                        val ring by animateColorAsState(if (selected == channel.id) Stow.colors.accent else Color.Transparent,
+                                                        tween(Motion.SHORT), label = "ring")
+                        val name by animateColorAsState(if (selected == null || selected == channel.id) Stow.colors.text else Stow.colors.secondaryText,
+                                                        tween(Motion.SHORT), label = "name")
+                        Box(Modifier.border(2.dp, ring, CircleShape).padding(3.dp)) { ChannelAvatar(channel.avatarUrl, 52.dp, name = channel.title) }
                         Spacer(Modifier.height(4.dp))
-                        Text(channel.title, fontSize = 11.sp, color = if (selected == null || selected == channel.id) Stow.colors.text else Stow.colors.secondaryText,
+                        Text(channel.title, fontSize = 11.sp, color = name,
                              maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
                     }
                 }
             }
             TextButton(onClick = onAllChannels) { Text("All", color = Color3D(), fontWeight = FontWeight.Medium) }
         }
-        selected?.let { id ->
+        // The picked channel's row opens under the avatars (and folds away), keeping its name while it folds.
+        val lastSelected = rememberLast(selected)
+        Appear(selected != null, enter = Motion.ExpandIn, exit = Motion.CollapseOut) {
+            val id = lastSelected.orEmpty()
             Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(channels.firstOrNull { it.id == id }?.title.orEmpty(), fontWeight = FontWeight.Medium, color = Stow.colors.text, modifier = Modifier.weight(1f))
                 TextButton(onClick = { actions.openChannel(id) }) { Text("View channel", color = Color3D()) }
@@ -387,9 +411,9 @@ fun SubscriptionsScreen(
         Refreshable(onRefresh) { listState ->
             LazyColumn(Modifier.fillMaxSize(), state = listState) {
                 topAnchor()
-                if (shown.isEmpty()) item { EmptyState(emptyText) }
-                items(shown, key = { it.id }) { VideoCard(it, avatars[it.video.channelId], actions) }
-                if (shown.isNotEmpty()) item(key = "end") { EndNote(endText) }
+                if (shown.isEmpty()) item(key = "empty") { Box(itemMotion()) { EmptyState(emptyText) } }
+                items(shown, key = { it.id }) { VideoCard(it, avatars[it.video.channelId], actions, itemMotion()) }
+                if (shown.isNotEmpty()) item(key = "end") { EndNote(endText, itemMotion()) }
             }
         }
     }
@@ -397,9 +421,9 @@ fun SubscriptionsScreen(
 
 /** The line at the end of a feed. */
 @Composable
-private fun EndNote(text: String) {
+private fun EndNote(text: String, modifier: Modifier = Modifier) {
     Text(text, style = StowType.footnote, color = Stow.colors.secondaryText, textAlign = TextAlign.Center,
-         modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 28.dp))
+         modifier = modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 28.dp))
 }
 
 /** Links and text buttons: the accent. */
@@ -413,7 +437,7 @@ fun ChannelsScreen(channels: List<SubscriptionChannel>, counts: Map<String, Int>
         BackTopBar("All channels", onBack)
         LazyColumn(Modifier.fillMaxSize()) {
             items(channels, key = { it.id }) { channel ->
-                Row(Modifier.fillMaxWidth().clickable { onOpen(channel.id) }.padding(horizontal = 16.dp, vertical = 10.dp),
+                Row(itemMotion().fillMaxWidth().clickable { onOpen(channel.id) }.padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     ChannelAvatar(channel.avatarUrl, 48.dp, name = channel.title)
                     Spacer(Modifier.width(14.dp))
@@ -426,6 +450,9 @@ fun ChannelsScreen(channels: List<SubscriptionChannel>, counts: Map<String, Int>
         }
     }
 }
+
+/** How many grey placeholder rows show while a list loads. */
+private const val PLACEHOLDERS = 5
 
 private enum class ChannelTab(val label: String) { VIDEOS("Videos"), LIVE("Live") }
 
@@ -471,16 +498,15 @@ fun ChannelScreen(
         BackTopBar(title, onBack)
         if (!ChannelPageRules.showsHeader(channel != null, videos.isNotEmpty(), follow != null, title)) {
             when {
-                loading -> Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
-                    androidx.compose.material3.CircularProgressIndicator(color = Stow.colors.accent, strokeWidth = 3.dp, modifier = Modifier.size(32.dp))
-                }
+                // Grey rows shaped like the videos while they load, so the page doesn't jump when they come.
+                loading -> Column(Modifier.padding(top = 8.dp)) { repeat(PLACEHOLDERS) { PlaceholderRow() } }
                 loadError != null -> LoadError(loadError, onRetry)
                 else -> EmptyState("No videos from this channel.")
             }
             return
         }
         val list: @Composable (androidx.compose.foundation.lazy.LazyListState?) -> Unit = { listState -> LazyColumn(Modifier.fillMaxSize(), state = listState ?: rememberLazyListState()) {
-            item {
+            item(key = "header") {
                 Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     ChannelAvatar(channel?.avatarUrl ?: page?.avatarUrl ?: avatarUrl ?: LocalChannelAvatars.current[videos.firstOrNull()?.video?.channelId], 72.dp, name = title)
                     Spacer(Modifier.width(16.dp))
@@ -513,14 +539,15 @@ fun ChannelScreen(
             }
             val sorted = if (oldestFirst) listed.reversed() else listed
             if (loading) item("loading") {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(itemMotion().fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                     androidx.compose.material3.CircularProgressIndicator(color = Stow.colors.accent, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(10.dp))
                     Text("Getting the latest videos from YouTube…", fontSize = 13.sp, color = Stow.colors.secondaryText)
                 }
-            } else if (loadError != null) item("error") { LoadError(loadError, onRetry) }
-            if (sorted.isEmpty() && !loading) item { EmptyState(if (tab == ChannelTab.LIVE) "No past live streams." else "No recent videos.") }
-            items(sorted, key = { it.id }) { item -> VideoRow(item, actions, showChannel = false) }
+            } else if (loadError != null) item("error") { Box(itemMotion()) { LoadError(loadError, onRetry) } }
+            if (sorted.isEmpty() && !loading) item("empty") { Box(itemMotion()) { EmptyState(if (tab == ChannelTab.LIVE) "No past live streams." else "No recent videos.") } }
+            // Latest ↔ Oldest and Videos ↔ Live slide and fade the rows instead of swapping them.
+            items(sorted, key = { it.id }) { item -> VideoRow(item, actions, showChannel = false, modifier = itemMotion()) }
         } }
         if (onRefresh != null) Refreshable(onRefresh) { list(it) } else list(null)
     }
@@ -634,14 +661,15 @@ fun SearchScreen(
                         inner()
                     },
                 )
-                if (field.text.isNotEmpty()) {
+                // The clear button fades in with the first letter (and out with the last).
+                Appear(field.text.isNotEmpty(), enter = fadeIn(tween(100)) + scaleIn(tween(Motion.SHORT), initialScale = 0.8f),
+                       exit = fadeOut(tween(100))) {
                     IconButton(onClick = { field = androidx.compose.ui.text.input.TextFieldValue(""); focus.requestFocus(); keyboard?.show() },
                                modifier = Modifier.size(36.dp)) {
                         Icon(Icons.Rounded.Close, contentDescription = "Clear", tint = Stow.colors.secondaryText, modifier = Modifier.size(20.dp))
                     }
-                } else {
-                    Spacer(Modifier.height(36.dp))
                 }
+                if (field.text.isEmpty()) Spacer(Modifier.height(36.dp))
             }
         }
         LazyColumn(Modifier.fillMaxSize()) {
@@ -650,35 +678,33 @@ fun SearchScreen(
                 showingResults -> {
                     val results = resultIds.mapNotNull { itemsById[it] }
                     when {
-                        loading -> item("loading") {
-                            Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
-                                androidx.compose.material3.CircularProgressIndicator(color = Stow.colors.accent, strokeWidth = 3.dp,
-                                                                                    modifier = Modifier.size(32.dp))
-                            }
-                        }
+                        // Grey cards shaped like the results while YouTube answers; the real ones fade in over them.
+                        loading -> items(PLACEHOLDERS, key = { "ph-$it" }) { PlaceholderCard(itemMotion()) }
                         error != null -> item("error") {
-                            Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Column(itemMotion().fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text("Couldn't search YouTube.", style = StowType.subheadline, color = Stow.colors.text)
                                 Text(error.orEmpty(), style = StowType.footnote, color = Stow.colors.secondaryText, textAlign = TextAlign.Center,
                                      maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
                                 TextButton(onClick = { submitted?.let(::search) }) { Text("Try Again", color = Stow.colors.accent) }
                             }
                         }
-                        results.isEmpty() -> item("none") { EmptyState("No videos found for “$submitted”.") }
+                        results.isEmpty() -> item("none") { Box(itemMotion()) { EmptyState("No videos found for “$submitted”.") } }
                         else -> {
                             val resultActions = actions.copy(play = { onPlay(results, it) })
-                            items(results, key = { "r-" + it.id }) { VideoCard(it, LocalChannelAvatars.current[it.video.channelId], resultActions) }
-                            item("note") { EmptyState("Shorts and live streams are left out.", PaddingValues(24.dp)) }
+                            items(results, key = { "r-" + it.id }) { VideoCard(it, LocalChannelAvatars.current[it.video.channelId], resultActions, itemMotion()) }
+                            item("note") { Box(itemMotion()) { EmptyState("Shorts and live streams are left out.", PaddingValues(24.dp)) } }
                         }
                     }
                 }
                 query.isEmpty() -> {
                     if (recent.isEmpty()) {
-                        item("hint") { EmptyState("Search all of YouTube. Shorts and live streams are left out.") }
+                        item("hint") { Box(itemMotion()) { EmptyState("Search all of YouTube. Shorts and live streams are left out.") } }
                     }
-                    items(recent, key = { "h-$it" }) { text -> SuggestionRow(text, history = true, onClick = { search(text) }, onRemove = { onRemoveRecent(text) }) }
+                    items(recent, key = { "h-$it" }) { text -> SuggestionRow(text, history = true, onClick = { search(text) }, onRemove = { onRemoveRecent(text) }, modifier = itemMotion()) }
                 }
                 else -> {
+                    // What you're typing: these change with every letter, so they update at once (as
+                    // YouTube's suggestions do) rather than fading and sliding on each keystroke.
                     item("search-for") { SuggestionRow(query, history = false, onClick = { search(query) }) }
                     val words = query.lowercase().split(" ").filter { it.isNotEmpty() }
                     val pastMatches = recent.filter { r -> !r.equals(query, ignoreCase = true) && words.all { it in r.lowercase() } }.take(5)
@@ -702,8 +728,8 @@ fun SearchScreen(
 
 /** A search suggestion: a past search (with a clock, removable) or "search for what you typed". */
 @Composable
-private fun SuggestionRow(text: String, history: Boolean, onClick: () -> Unit, onRemove: (() -> Unit)? = null) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = 16.dp, end = 4.dp).height(52.dp),
+private fun SuggestionRow(text: String, history: Boolean, onClick: () -> Unit, onRemove: (() -> Unit)? = null, modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = 16.dp, end = 4.dp).height(52.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Icon(if (history) Icons.Rounded.History else Icons.Rounded.Search, contentDescription = null,
              tint = Stow.colors.secondaryText, modifier = Modifier.size(22.dp))

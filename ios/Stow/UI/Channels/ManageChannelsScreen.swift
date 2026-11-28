@@ -45,7 +45,10 @@ struct ManageChannelsScreen: View {
                         Button("Remove channel", systemImage: "minus.circle", role: .destructive) { shell.unfollow(channel.id) }
                     }
                 }
-                .onMove { source, destination in standalone?.moveChannels(fromOffsets: source, toOffset: destination) }
+                .onMove { source, destination in
+                    // The finger already put the row there: no second slide from the list's animation.
+                    withoutAnimation { standalone?.moveChannels(fromOffsets: source, toOffset: destination) }
+                }
                 Button {
                     shell.addingChannel = true
                 } label: {
@@ -62,6 +65,8 @@ struct ManageChannelsScreen: View {
             }
             .listRowBackground(colors.raised)
         }
+        // Removed from the long-press menu: the row folds away like a swiped one.
+        .animation(Motion.standard, value: channels.map(\.id))
         .scrollContentBackground(.hidden)
         .background(colors.groupedBackground)
         .navigationTitle("Your channels")

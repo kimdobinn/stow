@@ -21,16 +21,19 @@ struct RootView: View {
         let screen = Self.screen(mode: repository.mode, paired: repository.pairState == .paired)
         Group {
             switch screen {
-            case .welcome: ModeChooser()
-            case .pair: PairScreen()
-            case .app: MainView()
+            case .welcome: ModeChooser().transition(.opacity)
+            case .pair: PairScreen().transition(.opacity)
+            case .app: MainView().transition(.opacity)
             }
         }
-        .animation(.default, value: screen)
+        .animation(Motion.screen, value: screen)
         .stowTheme(repository.prefs, avatars: repository.avatars)
-        .onChange(of: repository.prefs.theme, initial: true) { _, theme in
-            WindowStyle.apply(theme)
+        .onChange(of: repository.prefs.theme, initial: true) { old, theme in
+            // A change of theme cross-fades the whole screen at once (UIKit's bars included).
+            WindowStyle.apply(theme, crossfade: old != theme)
         }
+        .onChange(of: repository.prefs.calm) { WindowStyle.crossfade() }
+        .onChange(of: repository.prefs.grayscale) { WindowStyle.crossfade() }
     }
 }
 
@@ -163,9 +166,11 @@ private struct ToastHost: ViewModifier {
     func body(content: Content) -> some View {
         content.overlay(alignment: .bottom) {
             if let toast = shell.toast {
+                // Like YouTube's snackbar: up from the bottom, then a fade without moving; a new
+                // message fades the old one out as it comes in.
                 ToastView(message: toast.message)
                     .id(toast.id)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .motionTransition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
                     .allowsHitTesting(false)
             }
         }
@@ -226,6 +231,7 @@ private struct DownloadSizeSheet: View {
                     Text(sizeText)
                 }
             }
+            .animation(Motion.quick, value: checking)
             .font(.subheadline)
             .foregroundStyle(colors.secondaryText)
             HStack(spacing: 12) {

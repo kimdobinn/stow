@@ -14,6 +14,7 @@ struct PlayerVideoArea: View {
     var onPullEnd: (CGFloat, CGFloat) -> Void
     @Environment(Shell.self) private var shell
     @Environment(\.stowColors) private var colors
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var visible = true
     @State private var touches = 0
@@ -40,30 +41,42 @@ struct PlayerVideoArea: View {
                 if controller.isHolding { holdBadge }
                 if controller.isBuffering, !controller.isResolving, scrubbing == nil {
                     ProgressView().controlSize(.large).tint(.white).allowsHitTesting(false)
+                        // Only a stall that lasts shows the spinner: it fades in after a moment, so
+                        // a brief one doesn't flash it.
+                        .transition(.asymmetric(insertion: .opacity.animation(Motion.fade.delay(0.25)),
+                                                removal: .opacity.animation(Motion.quick)))
                 }
                 if controller.isPictureInPictureActive { pictureInPictureNote }
                 if controller.isResolving || controller.error != nil {
-                    statusOverlay
+                    statusOverlay.transition(.opacity)
                 } else {
                     if visible, scrubbing == nil, !controller.ended { controls }
-                    if controller.ended, scrubbing == nil { doneOverlay }
-                    if let scrubbing { scrubPreview(scrubbing, width: proxy.size.width) }
+                    if controller.ended, scrubbing == nil { doneOverlay.transition(.opacity) }
+                    if let scrubbing { scrubPreview(scrubbing, width: proxy.size.width).transition(.opacity) }
                     seekBar(width: proxy.size.width)
                 }
             }
+            // The end screen, loading and errors fade in and out; the 2× pill too.
+            .animation(Motion.fade, value: controller.ended)
+            .animation(Motion.fade, value: controller.isResolving)
+            .animation(Motion.fade, value: controller.error)
+            .animation(Motion.quick, value: controller.isHolding)
         }
         .task(id: touches) {
             // Controls hide after 3 s of playing untouched.
             try? await Task.sleep(for: .seconds(3))
-            if controller.isPlaying, scrubbing == nil { withAnimation(.easeOut(duration: 0.16)) { visible = false } }
+            if controller.isPlaying, scrubbing == nil { withAnimation(Motion.controlsOut) { visible = false } }
         }
         .task(id: skip) {
             guard skip != nil else { return }
             try? await Task.sleep(for: .milliseconds(800))
-            withAnimation(.easeOut(duration: 0.2)) { skip = nil }
+            withAnimation(Motion.fade) { skip = nil }
         }
         .onChange(of: controller.fileURL, initial: true) { _, file in frames.use(file) }
-        .onChange(of: controller.isPlaying) { _, playing in if !playing { visible = true } }
+        .onChange(of: controller.isPlaying) { _, playing in
+            // Paused from elsewhere (Picture in Picture, the lock screen, a call): the controls fade in.
+            if !playing { withAnimation(Motion.controlsIn) { visible = true } }
+        }
         .statusBarHidden(fullScreen)
         .persistentSystemOverlays(fullScreen ? .hidden : .automatic)
     }
@@ -78,14 +91,17 @@ struct PlayerVideoArea: View {
         let doubleTap = lastTap.map { $0.forward == forward && now.timeIntervalSince($0.at) < 0.3 } ?? false
         if skipping || doubleTap {
             // The first tap of the pair showed or hid the controls: put them back as they were.
-            if doubleTap && !skipping { visible = visibleBeforeTap }
+            if doubleTap && !skipping { withAnimation(Motion.quick) { visible = visibleBeforeTap } }
             controller.skip(forward: forward)
             let previous = skipping ? skip?.seconds ?? 0 : 0
-            skip = Skip(forward: forward, seconds: previous + Int(PlaybackController.skipSeconds), at: now)
+            // The badge fades in, its count ticks up, and each tap sends a ripple across it.
+            withAnimation(Motion.quick) {
+                skip = Skip(forward: forward, seconds: previous + Int(PlaybackController.skipSeconds), at: now)
+            }
             lastTap = nil
         } else {
             visibleBeforeTap = visible
-            withAnimation(.easeOut(duration: visible ? 0.16 : 0.09)) { visible.toggle() }
+            withAnimation(visible ? Motion.controlsOut : Motion.controlsIn) { visible.toggle() }
             lastTap = (now, forward)
         }
         touches += 1
@@ -95,7 +111,7 @@ struct PlayerVideoArea: View {
         if down {
             guard !controller.isResolving, controller.error == nil, !controller.ended else { return }
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            visible = false
+            withAnimation(Motion.controlsOut) { visible = false }
             controller.beginHold()
         } else {
             controller.endHold()
@@ -104,13 +120,15 @@ struct PlayerVideoArea: View {
     }
 
     private func dragged(_ distance: CGFloat) {
-        guard !fullScreen else { return }
+        // In full screen too: the video moves with the finger before it leaves full screen.
         onPull(max(distance, 0))
     }
 
     private func dragEnded(_ distance: CGFloat, _ velocity: CGFloat) {
         if fullScreen {
             if distance > 80 || velocity > 1500 { onFullScreen(false) }
+            // The watch page settles the video back (it doesn't shrink from full screen).
+            onPullEnd(max(distance, 0), velocity)
         } else if distance < -60 || velocity < -1500 {
             onPull(0)
             onFullScreen(true)
@@ -250,26 +268,40 @@ struct PlayerVideoArea: View {
         .allowsHitTesting(false)
     }
 
-    /// YouTube's half-moon on the tapped side, with arrows and the running total.
+    /// YouTube's half-moon on the tapped side: a ripple for each tap, three arrows lighting up one
+    /// after another, and the running total.
     private func skipBadge(_ skip: Skip, width: CGFloat) -> some View {
         let shape = UnevenRoundedRectangle(topLeadingRadius: skip.forward ? 1000 : 0, bottomLeadingRadius: skip.forward ? 1000 : 0,
                                            bottomTrailingRadius: skip.forward ? 0 : 1000, topTrailingRadius: skip.forward ? 0 : 1000)
-        return VStack(spacing: 4) {
-            Image(systemName: skip.forward ? "forward.fill" : "backward.fill").font(.system(size: 14))
-            Text("\(skip.seconds) seconds").font(.footnote.weight(.medium))
+        return VStack(spacing: 6) {
+            SkipArrows(forward: skip.forward)
+            Text("\(skip.seconds) seconds")
+                .font(.footnote.weight(.medium))
+                .contentTransition(.numericText(value: Double(skip.seconds)))
         }
         .foregroundStyle(.white)
         .frame(width: width / 2.4)
         .frame(maxHeight: .infinity)
-        .background(.white.opacity(0.16), in: shape)
+        .background {
+            ZStack {
+                shape.fill(.white.opacity(0.16))
+                // A new one for each tap (`at` changes), so each tap ripples.
+                if !reduceMotion { SkipRipple().id(skip.at) }
+            }
+            .clipShape(shape)
+        }
         .frame(maxWidth: .infinity, alignment: skip.forward ? .trailing : .leading)
         .allowsHitTesting(false)
+        // The other side is another badge: it fades in there rather than sliding across.
+        .id(skip.forward)
         .transition(.opacity)
     }
 
+    /// The pill at the top while held: fades down into place, its arrows pulsing.
     private var holdBadge: some View {
         Label("2×", systemImage: "forward.fill")
             .labelStyle(TrailingIconLabelStyle())
+            .symbolEffect(.pulse, isActive: !reduceMotion)
             .font(.footnote.weight(.semibold))
             .foregroundStyle(.white)
             .padding(.horizontal, 12)
@@ -278,6 +310,7 @@ struct PlayerVideoArea: View {
             .frame(maxHeight: .infinity, alignment: .top)
             .padding(.top, fullScreen ? 24 : 14)
             .allowsHitTesting(false)
+            .transition(.opacity.combined(with: .offset(y: reduceMotion ? 0 : -8)))
     }
 
     // MARK: - Seeking
@@ -322,7 +355,9 @@ struct PlayerVideoArea: View {
                 if scrubbing == nil {
                     scrubStart = controller.fraction
                     scrubMoved = false
-                    scrubbing = scrubStart
+                    // Touching the bar: the dot grows, the controls fade out and the preview fades
+                    // in. The moves after this follow the finger without animation.
+                    withAnimation(Motion.quick) { scrubbing = scrubStart }
                 }
                 if abs(value.translation.width) > 4 { scrubMoved = true }
                 if scrubMoved {
@@ -338,9 +373,9 @@ struct PlayerVideoArea: View {
                 } else if visible {
                     controller.seek(to: min(max(value.location.x / max(width, 1), 0), 1) * controller.duration)
                 } else {
-                    withAnimation(.easeOut(duration: 0.09)) { visible = true }
+                    withAnimation(Motion.controlsIn) { visible = true }
                 }
-                scrubbing = nil
+                withAnimation(Motion.quick) { scrubbing = nil }
                 touches += 1
             }
     }
@@ -395,7 +430,7 @@ struct VideoButton: View {
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableStyle())
         .accessibilityLabel(label)
     }
 }
@@ -421,11 +456,14 @@ private struct RoundControl: View {
             Image(systemName: systemImage)
                 .font(.system(size: size * 0.42))
                 .foregroundStyle(enabled ? .white : .white.opacity(0.3))
+                // Play and pause morph into each other.
+                .contentTransition(.symbolEffect(.replace))
+                .animation(Motion.quick, value: systemImage)
                 .frame(width: size, height: size)
                 .background(.black.opacity(0.35), in: Circle())
                 .contentShape(Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableStyle())
         .disabled(!enabled)
         .accessibilityLabel(label)
     }
@@ -453,7 +491,7 @@ struct DarkPill: View {
                 .background(.white.opacity(0.18), in: Capsule())
                 .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableStyle())
     }
 }
 
@@ -476,6 +514,40 @@ struct SpeedMenu<Label: View>: View {
 
     static func name(_ speed: Double) -> String {
         speed == 1 ? "Normal" : "\(speed.formatted(.number.precision(.fractionLength(0...2))))×"
+    }
+}
+
+/// A ring of light spreading across the skip badge from a tap, once.
+private struct SkipRipple: View {
+    @State private var spread = false
+
+    var body: some View {
+        Circle()
+            .fill(.white.opacity(spread ? 0 : 0.35))
+            .scaleEffect(spread ? 1.2 : 0.5)
+            .onAppear { withAnimation(.easeOut(duration: 0.45)) { spread = true } }
+    }
+}
+
+/// YouTube's three arrows on the skip badge, lit one after another in the skip's direction.
+private struct SkipArrows: View {
+    let forward: Bool
+
+    var body: some View {
+        PhaseAnimator([0, 1, 2]) { lit in
+            HStack(spacing: 1) {
+                ForEach(0..<3, id: \.self) { index in
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 11))
+                        .opacity(index == lit ? 1 : 0.35)
+                }
+            }
+        } animation: { _ in
+            .easeInOut(duration: 0.15)
+        }
+        // Mirrored for back: pointing left, lighting up leftward.
+        .scaleEffect(x: forward ? 1 : -1)
+        .accessibilityHidden(true)
     }
 }
 

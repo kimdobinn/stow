@@ -10,7 +10,9 @@ struct WatchPage: View {
     @Environment(Shell.self) private var shell
     @Environment(PlaybackController.self) private var controller
     @Environment(\.stowColors) private var colors
-    @State private var pull: CGFloat = 0
+    /// How far the video is pulled down. Read only by the small modifiers that move and fade the
+    /// page, so following the finger doesn't redraw the page itself on every frame.
+    @State private var drag = PageDrag()
     @State private var confirmDelete = false
 
     var body: some View {
@@ -18,21 +20,24 @@ struct WatchPage: View {
             let fullScreen = proxy.size.width > proxy.size.height
             Group {
                 if fullScreen {
-                    video(fullScreen: true)
+                    video(fullScreen: true, height: proxy.size.height)
                         .ignoresSafeArea()
                 } else {
                     VStack(spacing: 0) {
-                        video(fullScreen: false)
+                        video(fullScreen: false, height: proxy.size.height)
                             .aspectRatio(16 / 9, contentMode: .fit)
                             .zIndex(1)
                         details
+                            .modifier(PullFade(drag: drag))
                     }
                     .background(colors.background)
                 }
             }
-            .background((fullScreen ? Color.black : colors.background).ignoresSafeArea())
-            .offset(y: pull)
-            .animation(.interactiveSpring, value: pull)
+            .background { if !fullScreen { colors.background.ignoresSafeArea() } }
+            .modifier(PullOffset(drag: drag, shrinks: !fullScreen))
+            // In full screen the black stays put while the video moves, so nothing of the app
+            // shows above it.
+            .background { if fullScreen { Color.black.ignoresSafeArea() } }
         }
         .onAppear { Orientation.allowLandscape(true) }
         .onDisappear { Orientation.allowLandscape(false) }
@@ -43,24 +48,33 @@ struct WatchPage: View {
         }
     }
 
-    private func video(fullScreen: Bool) -> some View {
-        PlayerVideoArea(
+    private func video(fullScreen: Bool, height: CGFloat) -> some View {
+        // The page follows the finger exactly (half as far in full screen), and when let go
+        // either settles back or shrinks away, carrying on at the finger's speed.
+        let factor = fullScreen ? MotionRules.fullScreenPullFactor : 1
+        return PlayerVideoArea(
             controller: controller,
             fullScreen: fullScreen,
-            onCollapse: collapse,
+            onCollapse: { collapse() },
             onFullScreen: { Orientation.setFullScreen($0) },
-            onPull: { pull = $0 },
+            onPull: { drag.pull = $0 * factor },
             onPullEnd: { distance, velocity in
-                if distance > 120 || velocity > 900 { collapse() } else { pull = 0 }
+                if !fullScreen, MotionRules.collapses(pull: distance, velocity: velocity) {
+                    collapse(velocity: velocity, height: height)
+                } else {
+                    withAnimation(Motion.settle(from: drag.pull, to: 0, velocity: velocity * factor)) { drag.pull = 0 }
+                }
             }
         )
     }
 
-    private func collapse() {
-        withAnimation(.spring(duration: 0.35, bounce: 0)) {
+    /// Shrinks the page into the mini player. The pull is left as it is: the page slides on
+    /// from where the finger left it (and starts again at the top the next time it opens).
+    private func collapse(velocity: CGFloat = 0, height: CGFloat = 0) {
+        let animation = velocity > 0 && height > 0 ? Motion.settle(from: 0, to: height, velocity: velocity) : Motion.player
+        withAnimation(animation) {
             shell.playerExpanded = false
         }
-        pull = 0
     }
 
     // MARK: - Under the video
@@ -145,6 +159,9 @@ struct WatchPage: View {
                     PillButton(label: downloadingLabel(item), systemImage: "arrow.down.circle") {
                         shell.actions.delete(item)
                     }
+                    // The percent ticks up instead of jumping.
+                    .contentTransition(.numericText())
+                    .animation(Motion.quick, value: item.local?.progress)
                     .accessibilityHint("Stops the download")
                 } else if !item.isPlayable {
                     PillButton(label: item.state == .failed ? "Retry download" : "Download", systemImage: "arrow.down.to.line", filled: true) {
@@ -169,10 +186,41 @@ struct WatchPage: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
+            // A pill changing (watched, downloading, downloaded) flips quickly and the row
+            // closes up around it.
+            .animation(Motion.brisk, value: item.watched)
+            .animation(Motion.brisk, value: item.state)
         }
     }
 
     private func downloadingLabel(_ item: VideoItem) -> String {
         item.state == .downloading ? "Downloading \(item.local?.progress ?? 0)%" : DownloadText.waiting(item, hold: repository.downloads.hold)
+    }
+}
+
+/// The watch page's pull, apart from the page so only what moves redraws while it follows the finger.
+@MainActor @Observable
+private final class PageDrag {
+    var pull: CGFloat = 0
+}
+
+/// Moves the page down with the pull and, upright, shrinks it a little toward the mini player.
+private struct PullOffset: ViewModifier {
+    let drag: PageDrag
+    let shrinks: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(shrinks ? MotionRules.pageScale(pull: drag.pull) : 1, anchor: .top)
+            .offset(y: drag.pull)
+    }
+}
+
+/// Fades what's under the video as the page is pulled down.
+private struct PullFade: ViewModifier {
+    let drag: PageDrag
+
+    func body(content: Content) -> some View {
+        content.opacity(MotionRules.detailsOpacity(pull: drag.pull))
     }
 }

@@ -48,10 +48,13 @@ struct PlaylistScreen: View {
             .onMove { from, to in
                 guard let index = from.first else { return }
                 let target = to > index ? to - 1 : to
-                if target != index { store.move(playlist.id, videoId: videos[index].id, by: target - index) }
+                // The finger already put the row there: no second slide from the list's animation.
+                if target != index { withoutAnimation { store.move(playlist.id, videoId: videos[index].id, by: target - index) } }
             }
         }
         .listStyle(.plain)
+        // Removed or moved from the menu: the rows slide into place instead of jumping.
+        .animation(Motion.standard, value: videos.map(\.id))
         .scrollContentBackground(.hidden)
         .background(colors.background)
         .environment(\.defaultMinListRowHeight, 0)

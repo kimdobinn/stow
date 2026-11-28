@@ -41,9 +41,15 @@ struct Chip: View {
             .padding(.horizontal, 14)
             .frame(minHeight: 36)
             .background(selected ? colors.chipSelected : colors.chip, in: Capsule())
+            // The colors cross-fade when picked, even when what the chip shows below changes at
+            // once (withoutAnimation).
+            .transaction(value: selected) { transaction in
+                transaction.animation = Motion.quick
+                transaction.disablesAnimations = false
+            }
             .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableStyle())
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
@@ -82,7 +88,18 @@ struct PillButton: View {
             .background(filled ? colors.accent : colors.chip, in: Capsule())
             .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableStyle())
+    }
+}
+
+/// A button that gives a little under the finger, like YouTube's pills and chips: slightly
+/// smaller and dimmer while pressed, springing back when let go.
+struct PressableStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.95 : 1)
+            .opacity(configuration.isPressed ? 0.85 : 1)
+            .animation(Motion.press, value: configuration.isPressed)
     }
 }
 

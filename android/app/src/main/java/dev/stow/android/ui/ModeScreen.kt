@@ -1,5 +1,6 @@
 package dev.stow.android.ui
 
+import androidx.compose.runtime.remember
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -60,9 +61,11 @@ fun ModeScreen(onMac: () -> Unit, onStandalone: () -> Unit) {
 private fun ModeChoice(icon: ImageVector, title: String, subtitle: String, primary: Boolean, onClick: () -> Unit) {
     val colors = Stow.colors
     val content = if (primary) Color.White else colors.text
+    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(if (primary) colors.accent else colors.chip)
-            .clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onClick).padding(18.dp),
+        Modifier.fillMaxWidth().pressScale(interaction).clip(RoundedCornerShape(18.dp)).background(if (primary) colors.accent else colors.chip)
+            .clickable(interactionSource = interaction, indication = androidx.compose.foundation.LocalIndication.current,
+                       role = androidx.compose.ui.semantics.Role.Button, onClick = onClick).padding(18.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, contentDescription = null, tint = content, modifier = Modifier.size(28.dp))

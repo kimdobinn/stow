@@ -7,6 +7,7 @@ import SwiftUI
 struct HomeScreen: View {
     @Environment(Repository.self) private var repository
     @Environment(Shell.self) private var shell
+    @Environment(UpdateChecker.self) private var updates
     @Environment(\.stowColors) private var colors
     @SceneStorage("home.group") private var groupId = ""
     @State private var showWatched = false
@@ -14,17 +15,21 @@ struct HomeScreen: View {
     var body: some View {
         let groups = repository.groups
         let group = groups.first { $0.id == groupId }
+        let groupVideos = group.map(repository.groupVideos) ?? []
         let actions = shell.actions
         ScrollView {
             LazyVStack(spacing: 0) {
                 UpdateBanner()
                 StandaloneBanners()
                 ChipRow {
-                    Chip(label: "All", selected: group == nil) { groupId = "" }
+                    // Another chip shows its feed at once, as on YouTube (no sliding cards).
+                    Chip(label: "All", selected: group == nil) { withoutAnimation { groupId = "" } }
                     ForEach(groups) { g in
                         Chip(label: g.name, selected: group?.id == g.id) {
-                            groupId = group?.id == g.id ? "" : g.id
-                            showWatched = false
+                            withoutAnimation {
+                                groupId = group?.id == g.id ? "" : g.id
+                                showWatched = false
+                            }
                         }
                         .contextMenu {
                             Button("Edit group", systemImage: "pencil") { shell.open(.group(g.id)) }
@@ -36,11 +41,17 @@ struct HomeScreen: View {
                     .accessibilityLabel("New group")
                 }
                 if let group {
-                    groupFeed(group, actions: actions)
+                    groupFeed(group, videos: groupVideos, actions: actions)
                 } else {
                     allFeed(actions: actions)
                 }
             }
+            // A video marked watched leaves a group's feed and the cards below close the gap;
+            // banners slide in and fold away instead of pushing the feed in one frame.
+            .animation(Motion.standard, value: groupVideos.filter { !$0.watched }.map(\.id))
+            .animation(Motion.standard, value: BannerKey(updates: updates.showsBanner,
+                                                         expired: repository.standalone?.showsExpiredBanner ?? false,
+                                                         signIn: repository.standalone?.showsSignInPrompt ?? false))
             .pullUpToRefresh { await shell.refresh() }
         }
         .background(colors.background)
@@ -87,17 +98,21 @@ struct HomeScreen: View {
             .padding(.vertical, 28)
     }
 
-    @ViewBuilder private func groupFeed(_ group: ChannelGroup, actions: VideoActions) -> some View {
+    /// Which banners are up on top of the feed.
+    private struct BannerKey: Equatable {
+        var updates, expired, signIn: Bool
+    }
+
+    @ViewBuilder private func groupFeed(_ group: ChannelGroup, videos: [VideoItem], actions: VideoActions) -> some View {
         if group.channels.isEmpty {
             EmptyState("“\(group.name)” has no channels yet.")
             Button("Add channels") { shell.open(.group(group.id)) }
                 .font(.body.weight(.medium))
         } else {
-            let videos = repository.groupVideos(group)
             let watched = videos.filter(\.watched)
             ForEach(videos.filter { !$0.watched }) { VideoCard(item: $0, actions: actions) }
             CaughtUp(what: "That's everything new from \(group.name).", watchedCount: watched.count, showingWatched: showWatched) {
-                withAnimation { showWatched.toggle() }
+                withAnimation(Motion.standard) { showWatched.toggle() }
             }
             if showWatched {
                 ForEach(watched) { VideoCard(item: $0, actions: actions) }
@@ -168,7 +183,7 @@ private struct StandaloneBanners: View {
                     Spacer(minLength: 4)
                     Button("Sign in") { shell.signingIn = true }
                         .font(.subheadline.weight(.semibold))
-                    Button("Close", systemImage: "xmark") { withAnimation { standalone.closeExpiredBanner() } }
+                    Button("Close", systemImage: "xmark") { withAnimation(Motion.standard) { standalone.closeExpiredBanner() } }
                         .labelStyle(.iconOnly)
                         .font(.subheadline)
                         .foregroundStyle(colors.secondaryText)
@@ -178,6 +193,7 @@ private struct StandaloneBanners: View {
                 .background(colors.raised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .padding(.horizontal, 16)
                 .padding(.vertical, 6)
+                .motionTransition(.opacity.combined(with: .move(edge: .top)))
             } else if standalone.showsSignInPrompt {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Sign in to YouTube on this phone for Home, Subscriptions and members-only videos.")
@@ -185,7 +201,7 @@ private struct StandaloneBanners: View {
                         .foregroundStyle(colors.text)
                     HStack(spacing: 10) {
                         PillButton(label: "Sign in", filled: true) { shell.signingIn = true }
-                        PillButton(label: "Not now") { withAnimation { standalone.closeSignInPrompt() } }
+                        PillButton(label: "Not now") { withAnimation(Motion.standard) { standalone.closeSignInPrompt() } }
                     }
                 }
                 .padding(16)
@@ -193,6 +209,7 @@ private struct StandaloneBanners: View {
                 .background(colors.raised, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .padding(.horizontal, 16)
                 .padding(.vertical, 6)
+                .motionTransition(.opacity.combined(with: .move(edge: .top)))
             }
         }
     }

@@ -9,9 +9,17 @@ struct PullUpRules {
     /// How far the content is pulled past its end: 0 inside it. A list shorter than the screen
     /// ends at its top.
     static func overscroll(offset: CGFloat, contentHeight: CGFloat, viewHeight: CGFloat, insetTop: CGFloat, insetBottom: CGFloat) -> CGFloat {
-        let end = max(contentHeight + insetBottom - viewHeight, -insetTop)
-        return max(0, offset - end)
+        max(0, pastEnd(offset: offset, contentHeight: contentHeight, viewHeight: viewHeight, insetTop: insetTop, insetBottom: insetBottom))
     }
+
+    /// Where the content is against its end: negative inside the list, positive pulled past it.
+    static func pastEnd(offset: CGFloat, contentHeight: CGFloat, viewHeight: CGFloat, insetTop: CGFloat, insetBottom: CGFloat) -> CGFloat {
+        offset - max(contentHeight + insetBottom - viewHeight, -insetTop)
+    }
+
+    /// Only a drag that starts at the end pulls: one that scrolls the list and then hits the end
+    /// doesn't, so swiping down quickly to the bottom never refreshes by accident.
+    static func startsAtEnd(pastEnd: CGFloat) -> Bool { pastEnd >= -2 }
 
     static func progress(_ overscroll: CGFloat) -> Double { min(1, overscroll / threshold) }
 
@@ -47,14 +55,17 @@ private struct PullUpIndicator: View {
         if model.refreshing || model.overscroll > 0 {
             ZStack {
                 Circle().fill(.regularMaterial).shadow(color: .black.opacity(0.12), radius: 4, y: 1)
+                // Letting go past the threshold hands the ring straight over to the spinner.
                 if model.refreshing {
                     ProgressView()
+                        .transition(.opacity)
                 } else {
                     Circle()
                         .trim(from: 0, to: PullUpRules.progress(model.overscroll))
                         .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
                         .rotationEffect(.degrees(-90))
                         .frame(width: 20, height: 20)
+                        .transition(.opacity)
                 }
             }
             .frame(width: 38, height: 38)
@@ -100,6 +111,16 @@ final class PullUpModel {
         }
     }
 
+    /// This drag began at the end of the list, so it can pull.
+    @ObservationIgnored private var dragStartedAtEnd = false
+
+    private func currentPastEnd() -> CGFloat {
+        guard let scrollView else { return -.greatestFiniteMagnitude }
+        let inset = scrollView.adjustedContentInset
+        return PullUpRules.pastEnd(offset: scrollView.contentOffset.y, contentHeight: scrollView.contentSize.height,
+                                   viewHeight: scrollView.bounds.height, insetTop: inset.top, insetBottom: inset.bottom)
+    }
+
     private func currentOverscroll() -> CGFloat {
         guard let scrollView else { return 0 }
         let inset = scrollView.adjustedContentInset
@@ -109,8 +130,9 @@ final class PullUpModel {
 
     private func offsetChanged() {
         // Only the finger pulls; a fling that bounces off the end doesn't.
-        guard let scrollView, scrollView.isTracking, !refreshing else {
-            if overscroll != 0 { overscroll = 0 }
+        guard let scrollView, scrollView.isTracking, dragStartedAtEnd, !refreshing else {
+            // Let go short: the ring shrinks and fades instead of vanishing.
+            if overscroll != 0 { withAnimation(Motion.quick) { overscroll = 0 } }
             return
         }
         overscroll = currentOverscroll()
@@ -124,28 +146,32 @@ final class PullUpModel {
 
     @objc private func pan(_ gesture: UIPanGestureRecognizer) {
         switch gesture.state {
-        case .began: haptics.prepare()
+        case .began:
+            dragStartedAtEnd = PullUpRules.startsAtEnd(pastEnd: currentPastEnd())
+            if dragStartedAtEnd { haptics.prepare() }
         case .ended:
-            let fire = PullUpRules.fires(overscroll: currentOverscroll(), refreshing: refreshing)
+            let fire = dragStartedAtEnd && PullUpRules.fires(overscroll: currentOverscroll(), refreshing: refreshing)
+            dragStartedAtEnd = false
             armed = false
-            overscroll = 0
+            withAnimation(Motion.quick) { overscroll = 0 }
             if fire { refresh() }
         case .cancelled, .failed:
+            dragStartedAtEnd = false
             armed = false
-            overscroll = 0
+            withAnimation(Motion.quick) { overscroll = 0 }
         default: break
         }
     }
 
     private func refresh() {
         guard let action else { return }
-        withAnimation(.snappy) { refreshing = true }
+        withAnimation(Motion.brisk) { refreshing = true }
         Task { @MainActor in
             await action()
             if let scrollView {
                 scrollView.setContentOffset(CGPoint(x: 0, y: -scrollView.adjustedContentInset.top), animated: true)
             }
-            withAnimation(.snappy) { refreshing = false }
+            withAnimation(Motion.brisk) { refreshing = false }
         }
     }
 }

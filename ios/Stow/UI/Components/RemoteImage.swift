@@ -101,7 +101,8 @@ struct RemoteImage: View {
                     return
                 }
                 guard let loaded = try? await ImagePipeline.shared.image(url, maxPixels: maxPixels) else { return }
-                withAnimation(.easeOut(duration: 0.15)) {
+                // A quick fade over the placeholder; from memory it's there at once (above).
+                withAnimation(Motion.fade) {
                     image = loaded
                     loadedURL = url
                 }

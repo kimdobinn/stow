@@ -1,6 +1,22 @@
 package dev.stow.android.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.draw.drawBehind
+import kotlinx.coroutines.launch
+import kotlin.math.abs
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -94,27 +110,35 @@ fun RemoteScreen(model: RemoteModel, macName: String?, onBack: () -> Unit) {
 
     Column(Modifier.fillMaxSize()) {
         BackTopBar(name?.let { "Alarm on $it" } ?: "Alarm remote", onBack)
-        Box(Modifier.weight(1f)) {
-            when (val state = ui) {
-                RemoteUi.NotPaired -> Message(Icons.Filled.Alarm, "Pair with the Mac first",
-                                              "On the Mac: Stow › Phone › Pair a Phone, then scan the code with this app.")
-                RemoteUi.Searching -> Message(null, "Looking for the Mac…", SAME_WIFI, busy = true)
-                is RemoteUi.Unreachable -> Message(Icons.Outlined.WifiOff, "Can't reach the Mac",
-                                                   state.reason ?: "$SAME_WIFI\nThe remote works while an alarm is running.",
-                                                   action = "Retry" to model::retry)
-                RemoteUi.Ended -> Message(Icons.Filled.Check, "Alarm finished", "Good morning.", action = "Back" to onBack)
-                is RemoteUi.Live -> Live(state.state, model, onChoose = { choosing = true; model.loadChoices() })
+        // Searching, unreachable, live and ended crossfade into each other (live updates themselves don't).
+        AnimatedContent(ui, Modifier.weight(1f), contentKey = { it::class }, transitionSpec = {
+            fadeIn(tween(200)) togetherWith fadeOut(tween(Motion.SHORT))
+        }, label = "remote") { shown ->
+            Box(Modifier.fillMaxSize()) {
+                when (val state = shown) {
+                    RemoteUi.NotPaired -> Message(Icons.Filled.Alarm, "Pair with the Mac first",
+                                                  "On the Mac: Stow › Phone › Pair a Phone, then scan the code with this app.")
+                    RemoteUi.Searching -> Message(null, "Looking for the Mac…", SAME_WIFI, busy = true)
+                    is RemoteUi.Unreachable -> Message(Icons.Outlined.WifiOff, "Can't reach the Mac",
+                                                       state.reason ?: "$SAME_WIFI\nThe remote works while an alarm is running.",
+                                                       action = "Retry" to model::retry)
+                    RemoteUi.Ended -> Message(Icons.Filled.Check, "Alarm finished", "Good morning.", action = "Back" to onBack)
+                    is RemoteUi.Live -> Live(state.state, model, onChoose = { choosing = true; model.loadChoices() })
+                }
             }
         }
-        notice?.let {
-            Text(it, color = Color.White, fontSize = 14.sp, modifier = Modifier.fillMaxWidth().background(Color(0xFF323232))
+        // The notice rises from the bottom and folds away, keeping its text while it goes.
+        val lastNotice = rememberLast(notice)
+        Appear(notice != null, enter = expandVertically(Motion.enter(), expandFrom = Alignment.Top) + fadeIn(tween(Motion.SHORT)),
+               exit = shrinkVertically(Motion.exit(), shrinkTowards = Alignment.Top) + fadeOut(tween(Motion.SHORT))) {
+            Text(lastNotice.orEmpty(), color = Color.White, fontSize = 14.sp, modifier = Modifier.fillMaxWidth().background(Color(0xFF323232))
                 .navigationBarsPadding().padding(horizontal = 16.dp, vertical = 12.dp))
         }
     }
 
     if (choosing) {
         val choices by model.choices.collectAsStateWithLifecycle()
-        ChoicesSheet(choices, onPick = { model.playVideo(it.id); choosing = false }, onDismiss = { choosing = false })
+        ChoicesSheet(choices, onPick = { model.playVideo(it.id) }, onDismiss = { choosing = false })
     }
 }
 
@@ -182,7 +206,7 @@ private fun Live(state: AlarmState, model: RemoteModel, onChoose: () -> Unit) {
             if (state.playlist.isNotEmpty()) {
                 item(key = "up-next") { SectionHeader("Up next") }
                 itemsIndexed(state.playlist, key = { index, video -> "$index-${video.id}" }) { index, video ->
-                    VideoLine(video, current = index == state.index, onClick = { model.playIndex(index) })
+                    VideoLine(video, current = index == state.index, onClick = { model.playIndex(index) }, modifier = itemMotion())
                 }
             }
         }
@@ -193,16 +217,16 @@ private fun Live(state: AlarmState, model: RemoteModel, onChoose: () -> Unit) {
 /** The video's picture: double-tap the left or right half to seek, like the player. */
 @Composable
 private fun Picture(state: AlarmState, onSeek: (Int) -> Unit) {
-    // A run of double-taps on one side: which side, how many seconds, when the last one was.
-    var skip by remember { mutableStateOf<Triple<Boolean, Int, Long>?>(null) }
+    // A run of double-taps on one side.
+    var skip by remember { mutableStateOf<SkipRun?>(null) }
     LaunchedEffect(skip) { if (skip != null) { delay(800); skip = null } }
     BoxWithConstraints(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black).pointerInput(Unit) {
         detectTapGestures(onDoubleTap = { offset ->
             val forward = offset.x > size.width / 2
             onSeek(if (forward) REMOTE_SKIP_SECONDS else -REMOTE_SKIP_SECONDS)
             val now = System.currentTimeMillis()
-            val previous = skip?.takeIf { it.first == forward && now - it.third < 800 }
-            skip = Triple(forward, (previous?.second ?: 0) + REMOTE_SKIP_SECONDS, now)
+            val previous = skip?.takeIf { it.forward == forward && now - it.at < 800 }
+            skip = SkipRun(forward, (previous?.seconds ?: 0) + REMOTE_SKIP_SECONDS, now, offset)
         })
     }) {
         if (!LocalCalm.current) {
@@ -211,22 +235,15 @@ private fun Picture(state: AlarmState, onSeek: (Int) -> Unit) {
         }
         if (state.isLoading) {
             CircularProgressIndicator(Modifier.align(Alignment.Center).size(44.dp), color = Color.White, strokeWidth = 3.dp)
-        } else if (state.isPaused) {
+        }
+        // The paused mark fades and grows in, and fades out when it plays again.
+        Appear(state.isPaused && !state.isLoading, Modifier.align(Alignment.Center),
+               enter = fadeIn(tween(Motion.SHORT)) + scaleIn(tween(Motion.SHORT), initialScale = 0.8f), exit = fadeOut(tween(Motion.SHORT))) {
             Icon(Icons.Filled.Pause, contentDescription = "Paused", tint = Color.White,
-                 modifier = Modifier.align(Alignment.Center).size(52.dp).background(Color.Black.copy(alpha = 0.45f), CircleShape).padding(10.dp))
+                 modifier = Modifier.size(52.dp).background(Color.Black.copy(alpha = 0.45f), CircleShape).padding(10.dp))
         }
-        skip?.let { (forward, seconds, _) ->
-            val shape = if (forward) RoundedCornerShape(topStartPercent = 50, bottomStartPercent = 50)
-                        else RoundedCornerShape(topEndPercent = 50, bottomEndPercent = 50)
-            Box(Modifier.fillMaxHeight().width(maxWidth / 2.4f).align(if (forward) Alignment.CenterEnd else Alignment.CenterStart)
-                    .clip(shape).background(Color.White.copy(alpha = 0.16f)), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(if (forward) "▶▶▶" else "◀◀◀", color = Color.White, fontSize = 12.sp, letterSpacing = (-2).sp)
-                    Spacer(Modifier.height(4.dp))
-                    Text("$seconds seconds", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                }
-            }
-        }
+        // The same double-tap feedback as the player's.
+        SkipOverlay(skip)
     }
 }
 
@@ -251,12 +268,24 @@ private fun Waiting(phase: AlarmPhase) {
 private fun Progress(state: AlarmState, onSeekTo: (Double) -> Unit) {
     val duration = state.duration?.takeIf { it > 0 }
     val fraction = duration?.let { (state.position / it).toFloat().coerceIn(0f, 1f) } ?: 0f
+    // The Mac reports the position once a second: the bar glides evenly between reports (so it
+    // moves like a playing video's) and jumps only for a seek, a pause or a new video.
+    val shown = remember { Animatable(fraction) }
+    LaunchedEffect(fraction, state.isPaused) {
+        val jumpSeconds = abs(fraction - shown.value) * (duration ?: 0.0)
+        if (state.isPaused || jumpSeconds > 2.5) shown.snapTo(fraction)
+        else shown.animateTo(fraction, tween(1000, easing = LinearEasing))
+    }
+    val accent = Stow.colors.accent
     Column(Modifier.padding(horizontal = 16.dp)) {
         Box(Modifier.fillMaxWidth().height(20.dp).pointerInput(duration) {
             detectTapGestures { offset -> duration?.let { onSeekTo((offset.x / size.width).coerceIn(0f, 1f) * it) } }
         }, contentAlignment = Alignment.CenterStart) {
             Box(Modifier.fillMaxWidth().height(3.dp).background(Stow.colors.divider))
-            Box(Modifier.fillMaxWidth(fraction).height(3.dp).background(Stow.colors.accent))
+            // Drawn from the animation, so gliding redraws the bar without recomposing the screen.
+            Box(Modifier.fillMaxWidth().height(3.dp).drawBehind {
+                drawRect(accent, size = size.copy(width = size.width * shown.value.coerceIn(0f, 1f)))
+            })
         }
         Row {
             Text(Format.duration((state.position * 1000).toLong()), fontSize = 12.sp, color = Stow.colors.secondaryText)
@@ -294,16 +323,21 @@ private fun Volume(state: AlarmState, model: RemoteModel) {
 
 @Composable
 private fun Control(icon: ImageVector, label: String, size: androidx.compose.ui.unit.Dp, filled: Boolean = false, onClick: () -> Unit) {
-    Box(Modifier.size(size).clip(CircleShape).background(if (filled) Stow.colors.chipSelected else Stow.colors.chip)
-            .clickable(onClick = onClick), contentAlignment = Alignment.Center) {
-        Icon(icon, contentDescription = label, tint = if (filled) Stow.colors.chipSelectedText else Stow.colors.text,
-             modifier = Modifier.size(size * 0.55f))
+    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    Box(Modifier.size(size).pressScale(interaction).clip(CircleShape).background(if (filled) Stow.colors.chipSelected else Stow.colors.chip)
+            .clickable(interactionSource = interaction, indication = androidx.compose.foundation.LocalIndication.current, onClick = onClick),
+        contentAlignment = Alignment.Center) {
+        SwapIcon(icon, contentDescription = label, tint = if (filled) Stow.colors.chipSelectedText else Stow.colors.text,
+                 modifier = Modifier.size(size * 0.55f))
     }
 }
 
 @Composable
-private fun VideoLine(video: AlarmVideo, current: Boolean, onClick: () -> Unit, subtitle: String = video.channelTitle) {
-    Row(Modifier.fillMaxWidth().background(if (current) Stow.colors.chip else Color.Transparent).clickable(onClick = onClick)
+private fun VideoLine(video: AlarmVideo, current: Boolean, onClick: () -> Unit, subtitle: String = video.channelTitle,
+                      modifier: Modifier = Modifier) {
+    // "Now playing" moves to the next row with a quick fade of the highlight.
+    val highlight by animateColorAsState(if (current) Stow.colors.chip else Color.Transparent, tween(Motion.SHORT), label = "now")
+    Row(modifier.fillMaxWidth().drawBehind { drawRect(highlight) }.clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         if (!LocalCalm.current) {
             AsyncImage(model = video.thumbnailUrl, contentDescription = null, contentScale = ContentScale.Crop,
@@ -323,7 +357,14 @@ private fun VideoLine(video: AlarmVideo, current: Boolean, onClick: () -> Unit, 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChoicesSheet(choices: List<AlarmVideo>?, onPick: (AlarmVideo) -> Unit, onDismiss: () -> Unit) {
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Stow.colors.raised) {
+    val sheet = rememberModalBottomSheetState()
+    val scope = rememberCoroutineScope()
+    // Picking a video slides the sheet down (with its scrim) before it goes, like any other dismiss.
+    fun pick(video: AlarmVideo) {
+        onPick(video)
+        scope.launch { sheet.hide() }.invokeOnCompletion { if (!sheet.isVisible) onDismiss() }
+    }
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, containerColor = Stow.colors.raised) {
         Text("Play something else", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Stow.colors.text,
              modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
         when {
@@ -334,7 +375,7 @@ private fun ChoicesSheet(choices: List<AlarmVideo>?, onPick: (AlarmVideo) -> Uni
             else -> LazyColumn(Modifier.fillMaxWidth()) {
                 itemsIndexed(choices, key = { _, video -> video.id }) { _, video ->
                     val ago = video.publishedAt?.let { runCatching { java.util.Date.from(java.time.Instant.parse(it)) }.getOrNull() }
-                    VideoLine(video, current = false, onClick = { onPick(video) },
+                    VideoLine(video, current = false, onClick = { pick(video) },
                               subtitle = listOfNotNull(video.channelTitle, ago?.let(Format::ago)).joinToString(" · "))
                 }
                 item { Spacer(Modifier.navigationBarsPadding().height(16.dp)) }

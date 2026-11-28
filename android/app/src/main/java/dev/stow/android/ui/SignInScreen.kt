@@ -1,5 +1,9 @@
 package dev.stow.android.ui
 
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.net.Uri
@@ -217,15 +221,17 @@ fun SignInScreen(standalone: Standalone, onImportFile: () -> Unit, onDone: (Stri
                 },
                 modifier = Modifier.fillMaxSize(),
             )
-            if (blocked) {
-                Column(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(12.dp).clip(RoundedCornerShape(14.dp))
+            // The "won't sign in" card drops in, and the checking overlay fades, instead of popping.
+            Appear(blocked, Modifier.align(Alignment.TopCenter),
+                   enter = fadeIn(tween(Motion.SHORT)) + slideInVertically(Motion.enter()) { -it / 2 }, exit = fadeOut(tween(Motion.SHORT))) {
+                Column(Modifier.fillMaxWidth().padding(12.dp).clip(RoundedCornerShape(14.dp))
                            .background(Stow.colors.raised).padding(16.dp)) {
                     Text("Google won't sign in inside apps on this phone. Use a cookies.txt file instead.",
                          style = StowType.subheadline, color = Stow.colors.text)
                     TextButton(onClick = onImportFile) { Text("Use a cookies.txt file", color = Stow.colors.accent, fontWeight = FontWeight.SemiBold) }
                 }
             }
-            if (saving) {
+            Appear(saving, Modifier.fillMaxSize(), enter = fadeIn(tween(Motion.SHORT)), exit = fadeOut(tween(Motion.SHORT))) {
                 Box(Modifier.fillMaxSize().background(Stow.colors.background.copy(alpha = 0.85f)), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         CircularProgressIndicator(color = Stow.colors.accent)

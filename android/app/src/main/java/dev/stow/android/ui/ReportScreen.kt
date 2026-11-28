@@ -1,5 +1,11 @@
 package dev.stow.android.ui
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -43,6 +49,9 @@ fun ReportScreen(
     val finished = thisWeek.flatMap { it.finishedByChannel.entries }.groupBy({ it.key }, { it.value }).mapValues { it.value.sum() }
     val most = (thisWeek.maxOfOrNull { it.seconds } ?: 0).coerceAtLeast(60)
     val channelMax = byChannel.firstOrNull()?.value?.coerceAtLeast(60) ?: 60
+    // The bars grow up (and across) once when the page opens, read in the layer so it only redraws.
+    val grow = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { grow.animateTo(1f, tween(450, easing = Motion.EmphasizedDecelerate)) }
 
     Column(Modifier.fillMaxSize()) {
         BackTopBar("Your week", onBack)
@@ -64,7 +73,8 @@ fun ReportScreen(
                         Column(Modifier.weight(1f).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Bottom) {
                             Text(if (day.seconds >= 60) "${day.seconds / 60}" else "", fontSize = 11.sp, color = Stow.colors.secondaryText)
                             val fraction = (day.seconds.toFloat() / most).coerceIn(0.02f, 1f)
-                            Box(Modifier.fillMaxWidth().fillMaxHeight(fraction * 0.8f).clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
+                            Box(Modifier.fillMaxWidth().fillMaxHeight(fraction * 0.8f)
+                                    .graphicsLayer { scaleY = grow.value; transformOrigin = TransformOrigin(0.5f, 1f) }.clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
                                     .background(if (i == thisWeek.lastIndex) Stow.colors.accent else Stow.colors.secondaryText.copy(alpha = 0.45f)))
                             Spacer(Modifier.height(4.dp))
                             Text(day.date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault()), fontSize = 11.sp, color = Stow.colors.secondaryText)
@@ -76,7 +86,7 @@ fun ReportScreen(
                 if (byChannel.isEmpty()) EmptyState("Nothing watched this week yet.")
             }
             items(byChannel, key = { it.key }) { (channelId, seconds) ->
-                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                Column(itemMotion().fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         ChannelAvatar(LocalChannelAvatars.current[channelId], 28.dp, name = titles[channelId].orEmpty())
                         Spacer(Modifier.width(10.dp))
@@ -85,7 +95,8 @@ fun ReportScreen(
                              fontSize = 13.sp, color = Stow.colors.secondaryText)
                     }
                     Box(Modifier.padding(start = 38.dp, top = 6.dp).fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(Stow.colors.chip)) {
-                        Box(Modifier.fillMaxWidth((seconds.toFloat() / channelMax).coerceIn(0.02f, 1f)).height(4.dp).background(Stow.colors.accent))
+                        Box(Modifier.fillMaxWidth((seconds.toFloat() / channelMax).coerceIn(0.02f, 1f)).height(4.dp)
+                                .graphicsLayer { scaleX = grow.value; transformOrigin = TransformOrigin(0f, 0.5f) }.background(Stow.colors.accent))
                     }
                 }
             }

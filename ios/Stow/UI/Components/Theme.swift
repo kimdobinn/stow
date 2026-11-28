@@ -128,7 +128,8 @@ extension View {
 /// Light, dark or the phone's choice for every window (so sheets, alerts and menus follow too).
 /// SwiftUI's preferredColorScheme doesn't reliably go back to the phone's setting once set.
 enum WindowStyle {
-    static func apply(_ theme: AppTheme) {
+    static func apply(_ theme: AppTheme, crossfade: Bool = false) {
+        if crossfade { self.crossfade() }
         let style: UIUserInterfaceStyle = switch theme {
         case .system: .unspecified
         case .light, .paper: .light
@@ -143,6 +144,23 @@ enum WindowStyle {
             for window in scene.windows {
                 if window.overrideUserInterfaceStyle != style { window.overrideUserInterfaceStyle = style }
                 window.tintColor = tint
+            }
+        }
+    }
+
+    /// Fades from how the app looks now to how it looks after this change, in one go: SwiftUI's
+    /// colors and UIKit's bars and lists would otherwise switch on their own, one animated and
+    /// one not. Call it before the change reaches the screen (from onChange).
+    static func crossfade(duration: TimeInterval = 0.25) {
+        for scene in UIApplication.shared.connectedScenes {
+            guard let window = (scene as? UIWindowScene)?.keyWindow,
+                  let snapshot = window.snapshotView(afterScreenUpdates: false) else { continue }
+            snapshot.isUserInteractionEnabled = false
+            window.addSubview(snapshot)
+            UIView.animate(withDuration: duration, delay: 0, options: [.curveEaseInOut, .allowUserInteraction]) {
+                snapshot.alpha = 0
+            } completion: { _ in
+                snapshot.removeFromSuperview()
             }
         }
     }

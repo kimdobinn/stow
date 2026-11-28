@@ -22,6 +22,14 @@ import Testing
         #expect(PullUpRules.overscroll(offset: -20, contentHeight: 300, viewHeight: 800, insetTop: 100, insetBottom: 100) == 80)
     }
 
+    @Test func onlyADragStartingAtTheEndPulls() {
+        // At the end (1300 of 1300), or a point short of it: pulls.
+        #expect(PullUpRules.startsAtEnd(pastEnd: PullUpRules.pastEnd(offset: 1300, contentHeight: 2000, viewHeight: 800, insetTop: 100, insetBottom: 100)))
+        #expect(PullUpRules.startsAtEnd(pastEnd: -1))
+        // Still scrolling the list: doesn't.
+        #expect(!PullUpRules.startsAtEnd(pastEnd: PullUpRules.pastEnd(offset: 900, contentHeight: 2000, viewHeight: 800, insetTop: 100, insetBottom: 100)))
+    }
+
     @Test func lettingGoRefreshesOnlyPastTheThreshold() {
         #expect(PullUpRules.fires(overscroll: 70, refreshing: false))
         #expect(!PullUpRules.fires(overscroll: 69, refreshing: false))

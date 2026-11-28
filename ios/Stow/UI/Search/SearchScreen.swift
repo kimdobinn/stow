@@ -23,6 +23,8 @@ struct SearchScreen: View {
             }
         }
         .listStyle(.plain)
+        // The results (or the error) fade in over the placeholders.
+        .animation(Motion.fade, value: search.loading)
         .scrollContentBackground(.hidden)
         .background(colors.background)
         .environment(\.defaultMinListRowHeight, 0)
@@ -62,7 +64,9 @@ struct SearchScreen: View {
 
     @ViewBuilder private func results(for submitted: String) -> some View {
         if search.loading {
-            LoadingRow().plainListRow()
+            ForEach(0..<3, id: \.self) { index in
+                PlaceholderVideo(card: true, label: index == 0 ? "Loading" : nil).plainListRow()
+            }
         } else if let error = search.error {
             LoadErrorView(title: "Couldn't search YouTube.", message: error) { run(submitted) }
                 .plainListRow()
@@ -90,7 +94,7 @@ struct SearchScreen: View {
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(colors.secondaryText)
                 Spacer()
-                Button("Clear") { withAnimation { repository.prefs.clearRecentSearches() } }
+                Button("Clear") { withAnimation(Motion.standard) { repository.prefs.clearRecentSearches() } }
                     .font(.footnote.weight(.medium))
                     .buttonStyle(.borderless)
             }
@@ -122,7 +126,7 @@ struct SearchScreen: View {
 
     private func recentRow(_ recent: String) -> some View {
         SuggestionRow(text: recent, history: true, onRemove: {
-            withAnimation { repository.prefs.removeRecentSearch(recent) }
+            withAnimation(Motion.standard) { repository.prefs.removeRecentSearch(recent) }
         }) { run(recent) }
             .swipeActions {
                 Button("Remove", systemImage: "trash", role: .destructive) { repository.prefs.removeRecentSearch(recent) }

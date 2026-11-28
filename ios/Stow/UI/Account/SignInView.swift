@@ -34,9 +34,11 @@ struct SignInScreen: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(colors.background.opacity(0.92))
+                    .transition(.opacity)
                 }
             }
-            .animation(.snappy, value: blocked)
+            .animation(Motion.standard, value: blocked)
+            .animation(Motion.fade, value: verifying)
             .safeAreaInset(edge: .bottom) {
                 Button { useFile() } label: {
                     Text("Trouble signing in? Use a cookies.txt file instead")

@@ -21,7 +21,8 @@ struct SettingsScreen: View {
         List {
             Section("Appearance") {
                 ThemePicker(selected: prefs.theme) { theme in
-                    withAnimation(.snappy) { prefs.theme = theme }
+                    // No SwiftUI animation: the whole screen cross-fades once (WindowStyle.crossfade).
+                    prefs.theme = theme
                 }
                 .listRowInsets(EdgeInsets(top: 12, leading: 8, bottom: 12, trailing: 8))
             }

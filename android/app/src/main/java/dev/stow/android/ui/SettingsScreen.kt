@@ -1,5 +1,8 @@
 package dev.stow.android.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -440,13 +443,19 @@ private fun ThemePicker(selected: AppTheme, onSelect: (AppTheme) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 14.dp)) {
         AppTheme.entries.forEach { theme ->
             val isSelected = theme == selected
+            // The picked theme's frame thickens and takes the accent quickly instead of jumping.
+            val ringWidth by animateDpAsState(if (isSelected) 2.5.dp else 1.dp, tween(Motion.SHORT), label = "theme-ring")
+            val inset by animateDpAsState(if (isSelected) 4.dp else 1.dp, tween(Motion.SHORT), label = "theme-inset")
+            val corner by animateDpAsState(if (isSelected) 8.dp else 11.dp, tween(Motion.SHORT), label = "theme-corner")
+            val ring by animateColorAsState(if (isSelected) Stow.colors.accent else Stow.colors.divider, tween(Motion.SHORT), label = "theme-color")
+            val label by animateColorAsState(if (isSelected) Stow.colors.accent else Stow.colors.text, tween(Motion.SHORT), label = "theme-label")
             Column(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).clickable { onSelect(theme) }.padding(vertical = 4.dp),
                    horizontalAlignment = Alignment.CenterHorizontally) {
                 val shape = RoundedCornerShape(12.dp)
                 Box(Modifier.size(width = 62.dp, height = 92.dp)
-                        .border(if (isSelected) 2.5.dp else 1.dp, if (isSelected) Stow.colors.accent else Stow.colors.divider, shape)
-                        .padding(if (isSelected) 4.dp else 1.dp)
-                        .clip(RoundedCornerShape(if (isSelected) 8.dp else 11.dp))) {
+                        .border(ringWidth, ring, shape)
+                        .padding(inset)
+                        .clip(RoundedCornerShape(corner))) {
                     if (theme == AppTheme.SYSTEM) {
                         Row(Modifier.fillMaxSize()) {
                             MiniScreen(stowColors(AppTheme.LIGHT, false), Modifier.weight(1f))
@@ -458,7 +467,7 @@ private fun ThemePicker(selected: AppTheme, onSelect: (AppTheme) -> Unit) {
                 }
                 Spacer(Modifier.height(8.dp))
                 Text(theme.label, style = StowType.footnote, fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                     color = if (isSelected) Stow.colors.accent else Stow.colors.text)
+                     color = label)
             }
         }
     }

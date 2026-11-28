@@ -1,6 +1,12 @@
 package dev.stow.android.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -86,22 +92,29 @@ fun CommentsCard(video: Video, load: suspend (Video, Boolean) -> CommentsPage) {
             }
         }
         Spacer(Modifier.height(8.dp))
-        when (current) {
-            CommentsState.Loading -> Row(verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = Stow.colors.secondaryText)
-                Spacer(Modifier.width(8.dp))
-                Text("Loading comments…", style = StowType.footnote, color = Stow.colors.secondaryText)
-            }
-            CommentsState.Failed ->
-                Text("Couldn't load the comments. Tap to try again.", style = StowType.footnote, color = Stow.colors.secondaryText)
-            is CommentsState.Loaded -> {
-                val top = current.page.threads.firstOrNull()
-                if (top == null) {
-                    Text("No comments yet, or they're turned off.", style = StowType.footnote, color = Stow.colors.secondaryText)
-                } else Row(verticalAlignment = Alignment.CenterVertically) {
-                    ChannelAvatar(top.authorThumbnail, 24.dp, name = top.author.removePrefix("@"))
-                    Spacer(Modifier.width(10.dp))
-                    Text(top.text, style = StowType.footnote, color = Stow.colors.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        // Loading → the top comment (or the error) fades over, and the card grows smoothly to fit,
+        // so Up next below eases down instead of jumping.
+        AnimatedContent(current, contentKey = { it::class }, transitionSpec = {
+            fadeIn(tween(Motion.SHORT)) togetherWith fadeOut(tween(100)) using
+                SizeTransform(clip = false) { _, _ -> tween(Motion.MEDIUM, easing = Motion.EmphasizedDecelerate) }
+        }, label = "comments") { shown ->
+            when (shown) {
+                CommentsState.Loading -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = Stow.colors.secondaryText)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Loading comments…", style = StowType.footnote, color = Stow.colors.secondaryText)
+                }
+                CommentsState.Failed ->
+                    Text("Couldn't load the comments. Tap to try again.", style = StowType.footnote, color = Stow.colors.secondaryText)
+                is CommentsState.Loaded -> {
+                    val top = shown.page.threads.firstOrNull()
+                    if (top == null) {
+                        Text("No comments yet, or they're turned off.", style = StowType.footnote, color = Stow.colors.secondaryText)
+                    } else Row(verticalAlignment = Alignment.CenterVertically) {
+                        ChannelAvatar(top.authorThumbnail, 24.dp, name = top.author.removePrefix("@"))
+                        Spacer(Modifier.width(10.dp))
+                        Text(top.text, style = StowType.footnote, color = Stow.colors.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
                 }
             }
         }
@@ -137,7 +150,7 @@ private fun CommentsSheet(page: CommentsPage, onRefresh: () -> Unit, onDismiss: 
 @Composable
 private fun CommentThread(thread: Comment) {
     var showReplies by remember(thread.id) { mutableStateOf(false) }
-    Column(Modifier.animateContentSize()) {
+    Column {
         CommentRow(thread, 32)
         if (thread.replies.isNotEmpty()) {
             Row(Modifier.padding(start = 42.dp, top = 6.dp).clip12().clickable { showReplies = !showReplies }
@@ -147,7 +160,8 @@ private fun CommentThread(thread: Comment) {
                 Text(if (thread.replies.size == 1) "1 reply" else "${thread.replies.size} replies", style = StowType.footnote,
                      fontWeight = FontWeight.SemiBold, color = Stow.colors.accent)
             }
-            if (showReplies) {
+            // The thread opens downward and the replies fade in as it grows (and fold away the same way).
+            Appear(showReplies, enter = Motion.ExpandIn, exit = Motion.CollapseOut) {
                 Column(Modifier.padding(start = 42.dp, top = 8.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     thread.replies.forEach { CommentRow(it, 24) }
                 }
@@ -163,7 +177,8 @@ private fun CommentRow(comment: Comment, avatar: Int) {
     Row {
         ChannelAvatar(comment.authorThumbnail, avatar.dp, name = comment.author.removePrefix("@"))
         Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
+        // Read more / Show less grows and shrinks the comment smoothly.
+        Column(Modifier.weight(1f).animateContentSize(tween(Motion.MEDIUM, easing = Motion.Standard))) {
             if (comment.isPinned) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Outlined.PushPin, contentDescription = null, tint = Stow.colors.secondaryText, modifier = Modifier.size(12.dp))

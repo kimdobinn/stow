@@ -83,6 +83,27 @@ import dev.stow.android.ui.SubscriptionsScreen
 import dev.stow.android.ui.VideoActions
 import dev.stow.android.ui.sortedFor
 import androidx.compose.ui.zIndex
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.semantics.dismiss
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.navigation.NavBackStackEntry
+import androidx.navigation.NavGraphBuilder
 import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.graphicsLayer
 import dev.stow.android.ui.ReportScreen
@@ -194,11 +215,24 @@ class MainActivity : ComponentActivity() {
             app.updater.confirmShown(confirm)
         }
         val mode by repository.mode.collectAsStateWithLifecycle()
-        when {
-            mode == AppMode.CHOOSING -> ModeScreen(onMac = repository::chooseMac, onStandalone = repository::chooseStandalone)
-            mode == AppMode.STANDALONE -> Shell()
-            pairState != PairState.Paired -> PairScreen(pairState, onScanned = repository::pair, onStandalone = repository::chooseStandalone)
-            else -> Shell()
+        val screen = when {
+            mode == AppMode.CHOOSING -> Root.MODE
+            mode == AppMode.STANDALONE -> Root.STANDALONE_SHELL
+            pairState != PairState.Paired -> Root.PAIR
+            else -> Root.MAC_SHELL
+        }
+        // Choosing a mode, pairing and the app itself crossfade into each other instead of cutting.
+        // Each mode gets its own Shell (a fresh start, as before), and one mode's Shell never fades
+        // into the other's: the old one would keep running for the fade in a mode it doesn't belong to.
+        AnimatedContent(screen, transitionSpec = {
+            if (initialState.isShell && targetState.isShell) EnterTransition.None togetherWith ExitTransition.None
+            else fadeIn(tween(dev.stow.android.ui.Motion.MEDIUM)) togetherWith fadeOut(tween(dev.stow.android.ui.Motion.MEDIUM))
+        }, label = "root") { shown ->
+            when (shown) {
+                Root.MODE -> ModeScreen(onMac = repository::chooseMac, onStandalone = repository::chooseStandalone)
+                Root.PAIR -> PairScreen(pairState, onScanned = repository::pair, onStandalone = repository::chooseStandalone)
+                Root.MAC_SHELL, Root.STANDALONE_SHELL -> Shell()
+            }
         }
         pendingPair?.let { link ->
             androidx.compose.material3.AlertDialog(
@@ -383,12 +417,29 @@ class MainActivity : ComponentActivity() {
         Box(Modifier.fillMaxSize().then(gray)) {
         Column(Modifier.fillMaxSize()) {
             Box(Modifier.weight(1f)) {
-                androidx.compose.material3.SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).zIndex(1f)) { data ->
-                    androidx.compose.material3.Snackbar(data, containerColor = androidx.compose.ui.graphics.Color(0xFF323232),
-                        contentColor = androidx.compose.ui.graphics.Color.White, shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
-                }
-                NavHost(nav, startDestination = "home") {
-                    composable("home") {
+                Snackbars(snackbar, Modifier.align(Alignment.BottomCenter).zIndex(1f))
+                // Like YouTube: switching tabs is instant; a pushed screen (a channel, Settings, Search)
+                // slides in from the right over the last one, which drifts left a little, and back
+                // reverses it, following the back gesture on Android 14 and later.
+                NavHost(nav, startDestination = "home",
+                        enterTransition = {
+                            if (isToTab()) EnterTransition.None
+                            else slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Start, dev.stow.android.ui.Motion.enter(PUSH_MS))
+                        },
+                        exitTransition = {
+                            if (isToTab()) ExitTransition.None
+                            else slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.Start, dev.stow.android.ui.Motion.enter(PUSH_MS)) { it / 4 }
+                        },
+                        // Back uses an even curve, so a back gesture moves the screens as far as the finger has gone.
+                        popEnterTransition = {
+                            if (isTabSwitch()) EnterTransition.None
+                            else slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.End, tween(PUSH_MS, easing = dev.stow.android.ui.Motion.Standard)) { it / 4 }
+                        },
+                        popExitTransition = {
+                            if (isTabSwitch()) ExitTransition.None
+                            else slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.End, tween(PUSH_MS, easing = dev.stow.android.ui.Motion.Standard))
+                        }) {
+                    screen("home") {
                         HomeScreen(recommended, everything, groups, avatars, actions, todaySeconds = todaySeconds,
                                    onReport = { nav.navigate("report") },
                                    onSearch = { nav.navigate("search") }, onSettings = { nav.navigate("settings") },
@@ -399,7 +450,7 @@ class MainActivity : ComponentActivity() {
                                    onHideUpdate = { update?.let { repository.prefs.dismissUpdate(it.version) } },
                                    standalone = standaloneHome)
                     }
-                    composable("subscriptions") {
+                    screen("subscriptions") {
                         SubscriptionsScreen(subscriptionsFeed, subscribedChannels, actions,
                                             onAllChannels = { nav.navigate(if (standaloneMode) "channels-manage" else "channels") },
                                             onSearch = { nav.navigate("search") }, onSettings = { nav.navigate("settings") },
@@ -408,15 +459,15 @@ class MainActivity : ComponentActivity() {
                                                 if (followedIds.isEmpty()) "Follow channels to see their new videos here." else "No videos yet. Pull down to check your channels."
                                             } else "No videos yet. Pull down to ask the Mac for new ones.")
                     }
-                    composable("groups") {
+                    screen("groups") {
                         dev.stow.android.ui.GroupsScreen(groups, groupActions, onOpen = { nav.navigate("group/$it") }, onBack = { nav.popBackStack() })
                     }
-                    composable("group/{id}") { entry ->
+                    screen("group/{id}") { entry ->
                         val group = groups.firstOrNull { it.id == entry.arguments?.getString("id") }
                         dev.stow.android.ui.GroupScreen(group, knownChannels.map { dev.stow.android.data.GroupChannel(it.id, it.title) },
                                                         avatars, groupActions, onBack = { nav.popBackStack() })
                     }
-                    composable("downloads") {
+                    screen("downloads") {
                         DownloadsScreen(
                             all = downloads, channels = channels, playlists = playlists, byId = itemsById,
                             sort = sort, groupByChannel = group, storageText = storage, actions = actions,
@@ -431,11 +482,11 @@ class MainActivity : ComponentActivity() {
                             },
                         )
                     }
-                    composable("channels") {
+                    screen("channels") {
                         val counts = everything.groupingBy { it.video.channelId }.eachCount()
                         ChannelsScreen(subscribedChannels, counts, onOpen = { nav.navigate("channel/$it") }, onBack = { nav.popBackStack() })
                     }
-                    composable("channel/{id}") { entry ->
+                    screen("channel/{id}") { entry ->
                         val id = entry.arguments?.getString("id")
                         val channel = channels.firstOrNull { it.id == id }
                         val page = id?.let { channelPages[it] }
@@ -488,7 +539,7 @@ class MainActivity : ComponentActivity() {
                                       ) else null,
                                       onRefresh = if (standaloneMode) refresh else null)
                     }
-                    composable("playlist/{id}") { entry ->
+                    screen("playlist/{id}") { entry ->
                         val playlist = playlists.firstOrNull { it.id == entry.arguments?.getString("id") }
                         val videos = playlist?.videoIds?.mapNotNull { itemsById[it] }.orEmpty()
                         PlaylistScreen(
@@ -512,7 +563,7 @@ class MainActivity : ComponentActivity() {
                             onBack = { nav.popBackStack() },
                         )
                     }
-                    composable("search") {
+                    screen("search") {
                         val recentSearches by repository.prefs.recentSearches.collectAsStateWithLifecycle()
                         SearchScreen(everything, itemsById, recentSearches, actions,
                                      onSearch = { withContext(Dispatchers.IO) { repository.searchYouTube(it) } },
@@ -520,19 +571,19 @@ class MainActivity : ComponentActivity() {
                                      onPlay = { list, item -> play(list, item) },
                                      onBack = { nav.popBackStack() })
                     }
-                    composable("settings") {
+                    screen("settings") {
                         SettingsScreen(repository, updater, wifiOnly, onReport = { nav.navigate("report") },
                                        onRemote = { nav.navigate("remote") }, onGroups = { nav.navigate("groups") },
                                        onUpdate = { showUpdate = true }, onBack = { nav.popBackStack() },
                                        onSignIn = { nav.navigate("account-signin") }, onManageChannels = { nav.navigate("channels-manage") },
                                        onImport = { nav.navigate("import") }, notify = ::notify)
                     }
-                    composable("account-signin") {
+                    screen("account-signin") {
                         dev.stow.android.ui.SignInScreen(engine, onImportFile = { cookiesImport?.start?.invoke() },
                                                          onDone = { message -> notify(message); nav.popBackStack() },
                                                          onCancel = { nav.popBackStack() })
                     }
-                    composable("channels-manage") {
+                    screen("channels-manage") {
                         val errors = checkStatus.channelErrors
                         dev.stow.android.ui.ManageChannelsScreen(
                             channels, errors, signedIn = account.state == dev.stow.android.standalone.AccountState.SIGNED_IN,
@@ -540,7 +591,7 @@ class MainActivity : ComponentActivity() {
                             onGroups = { grouping = it }, onAdd = { addingChannel = true }, onImport = { nav.navigate("import") },
                             onBack = { nav.popBackStack() })
                     }
-                    composable("import") {
+                    screen("import") {
                         dev.stow.android.ui.ImportChannelsScreen(
                             followedIds, load = engine::loadSubscriptions,
                             onAdd = { picked ->
@@ -550,18 +601,30 @@ class MainActivity : ComponentActivity() {
                             },
                             onSignIn = { nav.navigate("account-signin") }, onBack = { nav.popBackStack() })
                     }
-                    composable("remote") { RemoteScreen(remote, alarm?.macName, onBack = { nav.popBackStack() }) }
-                    composable("report") {
+                    screen("remote") { RemoteScreen(remote, alarm?.macName, onBack = { nav.popBackStack() }) }
+                    screen("report") {
                         val week = remember(statsVersion) { repository.stats.week() }
                         val lastWeek = remember(statsVersion) { repository.stats.week(java.time.LocalDate.now().minusDays(7)) }
                         ReportScreen(week, lastWeek, channels, onBack = { nav.popBackStack() })
                     }
                 }
             }
-            if (!fullScreen) {
-                // Room for the mini player, which is drawn over everything (it grows into the watch page).
-                if (current != null) Spacer(Modifier.height(dev.stow.android.ui.MiniPlayerHeight))
-                Box(Modifier.onSizeChanged { bottomBarHeight = with(density) { it.height.toDp() } }) { BottomBar(tabs, route, nav) }
+            // The remote and the sign-in page take the whole screen: the tabs slide down out of the way
+            // (and back up after), instead of vanishing.
+            androidx.compose.animation.AnimatedVisibility(!fullScreen,
+                enter = slideInVertically(dev.stow.android.ui.Motion.enter()) { it } + expandVertically(dev.stow.android.ui.Motion.enter()),
+                exit = slideOutVertically(dev.stow.android.ui.Motion.exit()) { it } + shrinkVertically(dev.stow.android.ui.Motion.exit())) {
+                Column {
+                    // Room for the mini player, which is drawn over everything (it grows into the watch page);
+                    // the lists above ease up or down as it comes and goes rather than jumping.
+                    val miniSpace by animateDpAsState(if (current != null) dev.stow.android.ui.MiniPlayerHeight else 0.dp,
+                                                      dev.stow.android.ui.Motion.enter(), label = "mini-space")
+                    Spacer(Modifier.height(miniSpace))
+                    // The tabs sink out of view as the watch page grows over them, and rise as it shrinks.
+                    // A layer translation, so the measured height (where the mini player sits) stays put.
+                    Box(Modifier.onSizeChanged { bottomBarHeight = with(density) { it.height.toDp() } }
+                            .graphicsLayer { translationY = sheet.progress.value * size.height }) { BottomBar(tabs, route, nav) }
+                }
             }
         }
         val playing = current?.let { itemsById[it] }
@@ -638,7 +701,63 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Where the screens' own snackbars show: they rise from the bottom and fade away, like YouTube's. */
+    @Composable
+    private fun Snackbars(state: androidx.compose.material3.SnackbarHostState, modifier: Modifier) {
+        val data = state.currentSnackbarData
+        // The same timing SnackbarHost gives (a short one, longer with accessibility timeouts).
+        val accessibility = androidx.compose.ui.platform.LocalAccessibilityManager.current
+        LaunchedEffect(data) {
+            if (data == null) return@LaunchedEffect
+            val millis = when (data.visuals.duration) {
+                androidx.compose.material3.SnackbarDuration.Indefinite -> return@LaunchedEffect
+                androidx.compose.material3.SnackbarDuration.Long -> 10_000L
+                androidx.compose.material3.SnackbarDuration.Short -> 4_000L
+            }
+            kotlinx.coroutines.delay(accessibility?.calculateRecommendedTimeoutMillis(
+                millis, containsIcons = true, containsText = true, containsControls = data.visuals.actionLabel != null) ?: millis)
+            data.dismiss()
+        }
+        AnimatedContent(data, modifier, contentAlignment = Alignment.BottomCenter, transitionSpec = {
+            (slideInVertically(dev.stow.android.ui.Motion.enter()) { it } + fadeIn(tween(dev.stow.android.ui.Motion.SHORT))) togetherWith
+                (fadeOut(tween(dev.stow.android.ui.Motion.SHORT)) + slideOutVertically(dev.stow.android.ui.Motion.exit()) { it / 2 }) using
+                SizeTransform(clip = false)
+        }, label = "snackbar") { shown ->
+            if (shown != null) {
+                // Read out and dismissable by accessibility services, as SnackbarHost's are.
+                androidx.compose.material3.Snackbar(shown, containerColor = Color(0xFF323232),
+                    contentColor = Color.White, shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.semantics {
+                        liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite
+                        dismiss { shown.dismiss(); true }
+                    })
+            }
+        }
+    }
+
     companion object {
+        /** How long a pushed screen takes to slide in. */
+        private const val PUSH_MS = dev.stow.android.ui.Motion.LONG
+        private val TAB_ROUTES = setOf("home", "subscriptions", "downloads")
+
+        /** Between two tabs (not into or out of a pushed screen): YouTube switches those at once. */
+        private fun AnimatedContentTransitionScope<NavBackStackEntry>.isTabSwitch() =
+            initialState.destination.route in TAB_ROUTES && targetState.destination.route in TAB_ROUTES
+
+        /**
+         * Going forward to a tab only happens from the tab bar, and that's instant even from a pushed
+         * screen (Settings, a channel), as in YouTube; going back to a tab still slides.
+         */
+        private fun AnimatedContentTransitionScope<NavBackStackEntry>.isToTab() =
+            targetState.destination.route in TAB_ROUTES
+
+        /**
+         * A screen in the app's navigation, on its own background: pushed screens slide over the
+         * one before, which mustn't show through.
+         */
+        private fun NavGraphBuilder.screen(route: String, content: @Composable (NavBackStackEntry) -> Unit) =
+            composable(route) { entry -> Box(Modifier.fillMaxSize().background(Stow.colors.background)) { content(entry) } }
+
         /** The alarm notification's tap: opens the remote. */
         const val ACTION_OPEN_REMOTE = "dev.stow.android.OPEN_REMOTE"
         /** The "YouTube signed you out" notification's tap: opens Settings. */
@@ -649,13 +768,20 @@ class MainActivity : ComponentActivity() {
         const val LONG_VIDEO_MS = 20 * 60 * 1000L
     }
 
+    private enum class Root {
+        MODE, PAIR, MAC_SHELL, STANDALONE_SHELL;
+        val isShell: Boolean get() = this == MAC_SHELL || this == STANDALONE_SHELL
+    }
+
     private data class Tab(val route: String, val label: String, val selected: ImageVector, val unselected: ImageVector)
 
     @Composable
     private fun BottomBar(tabs: List<Tab>, route: String?, nav: NavHostController) {
         // A floating capsule, as in iOS: filled symbols, the selected tab in the accent on a soft highlight.
-        val behind = if (route in setOf("settings", "groups", "group/{id}")) Stow.colors.groupedBackground else Stow.colors.background
-        Box(Modifier.fillMaxWidth().background(behind).navigationBarsPadding()
+        // Follows the screen sliding in, rather than switching colour the moment it starts.
+        val behind by animateColorAsState(if (route in setOf("settings", "groups", "group/{id}")) Stow.colors.groupedBackground else Stow.colors.background,
+                                          tween(PUSH_MS), label = "behind")
+        Box(Modifier.fillMaxWidth().drawBehind { drawRect(behind) }.navigationBarsPadding()
                 .padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 8.dp)) {
             Row(Modifier.fillMaxWidth().height(62.dp)
                     .shadow(10.dp, RoundedCornerShape(31.dp), ambientColor = Color.Black.copy(alpha = 0.18f), spotColor = Color.Black.copy(alpha = 0.18f))
@@ -664,10 +790,14 @@ class MainActivity : ComponentActivity() {
                     .padding(4.dp)) {
                 tabs.forEach { tab ->
                     val selected = route == tab.route
-                    val tint = if (selected) Stow.colors.accent else Stow.colors.text
+                    // The highlight and colour move to the new tab quickly; the screen itself switches at once.
+                    val tint by animateColorAsState(if (selected) Stow.colors.accent else Stow.colors.text,
+                                                    tween(dev.stow.android.ui.Motion.SHORT), label = "tab")
+                    val highlight by animateColorAsState(if (selected) Stow.colors.chip else Color.Transparent,
+                                                         tween(dev.stow.android.ui.Motion.SHORT), label = "tab-highlight")
                     Column(
                         Modifier.weight(1f).fillMaxSize().clip(RoundedCornerShape(27.dp))
-                            .background(if (selected) Stow.colors.chip else Color.Transparent)
+                            .drawBehind { drawRect(highlight) }
                             .selectable(selected, role = androidx.compose.ui.semantics.Role.Tab) {
                                 nav.navigate(tab.route) {
                                     popUpTo("home") { saveState = true }

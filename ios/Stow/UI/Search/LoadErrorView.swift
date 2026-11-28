@@ -55,6 +55,63 @@ struct LoadingRow: View {
     }
 }
 
+/// A grey stand-in for a video still on its way, like YouTube's while a list loads: the shape of
+/// a row (or a card) pulsing gently, so the real ones fade in over something instead of jumping
+/// into an empty screen. Still with Reduce Motion. `label` makes it the one VoiceOver reads.
+struct PlaceholderVideo: View {
+    var card = false
+    var label: String?
+    @Environment(\.stowColors) private var colors
+    @Environment(\.calm) private var calm
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Group {
+            if card {
+                VStack(alignment: .leading, spacing: 12) {
+                    if !calm { thumbnail(cornerRadius: 14).padding(.top, 8) }
+                    HStack(alignment: .top, spacing: 12) {
+                        Circle().fill(colors.chip).frame(width: 36, height: 36)
+                        lines
+                    }
+                    .padding(.bottom, calm ? 12 : 20)
+                }
+                .padding(.horizontal, 16)
+            } else {
+                HStack(alignment: .top, spacing: 12) {
+                    if !calm { thumbnail(cornerRadius: 10).frame(width: 156) }
+                    lines.padding(.top, 2)
+                }
+                .padding(.leading, 16)
+                .padding(.trailing, 44)
+                .padding(.vertical, 8)
+            }
+        }
+        .phaseAnimator(reduceMotion ? [false] : [false, true]) { content, dimmed in
+            content.opacity(dimmed ? 0.5 : 1)
+        } animation: { _ in
+            .easeInOut(duration: 0.9)
+        }
+        .accessibilityElement()
+        .accessibilityLabel(label ?? "")
+        .accessibilityHidden(label == nil)
+    }
+
+    private func thumbnail(cornerRadius: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(colors.chip)
+            .aspectRatio(16 / 9, contentMode: .fit)
+    }
+
+    private var lines: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            RoundedRectangle(cornerRadius: 4).fill(colors.chip).frame(height: 14)
+            RoundedRectangle(cornerRadius: 4).fill(colors.chip).frame(width: 120, height: 12)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 enum ErrorText {
     /// The first line of an error, as yt-dlp words it ("This video is unavailable"), else a hint.
     static func short(_ error: Error) -> String {

@@ -116,6 +116,8 @@ struct GroupScreen: View {
             }
             .listRowBackground(colors.raised)
         }
+        // A channel taken out with its minus button folds away like a swiped one.
+        .animation(Motion.standard, value: group.channels.map(\.id))
         .scrollContentBackground(.hidden)
         .background(colors.groupedBackground)
         .navigationTitle(group.name)

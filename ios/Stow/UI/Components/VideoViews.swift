@@ -124,7 +124,7 @@ struct DownloadDisc: View {
         .buttonStyle(.plain)
         .disabled(state == .done)
         .accessibilityLabel(label)
-        .animation(.spring(duration: 0.25), value: state)
+        .animation(Motion.brisk, value: state)
     }
 
     @ViewBuilder private var disc: some View {
@@ -176,7 +176,8 @@ private struct DownloadRing: View {
                     .trim(from: 0, to: max(fraction, 0.02))
                     .stroke(StowGradient.angular, style: StrokeStyle(lineWidth: 3, lineCap: .round))
                     .rotationEffect(.degrees(-90))
-                    .animation(.easeOut(duration: 0.4), value: fraction)
+                    .animation(Motion.progress, value: fraction)
+                    .transition(.opacity)
             } else {
                 TimelineView(.animation) { context in
                     let turn = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.1) / 1.1 * 360
@@ -185,8 +186,11 @@ private struct DownloadRing: View {
                         .stroke(StowGradient.angular, style: StrokeStyle(lineWidth: 3, lineCap: .round))
                         .rotationEffect(.degrees(turn))
                 }
+                .transition(.opacity)
             }
         }
+        // The turning arc fades into the filling one when the first percent comes in.
+        .animation(Motion.fade, value: fraction == nil)
     }
 }
 
@@ -211,19 +215,23 @@ struct DownloadStatus: View {
             .lineLimit(1)
         case .downloading, .queued:
             let percent = item.local?.progress ?? 0
+            let started = item.state == .downloading && percent > 0
             HStack(spacing: 6) {
-                if item.state == .downloading && percent > 0 {
+                if started {
                     ProgressRing(fraction: Double(percent) / 100, color: colors.accent, track: colors.chip)
                         .frame(width: 12, height: 12)
+                        .transition(.opacity)
                 } else {
                     ProgressView().controlSize(.mini).tint(colors.secondaryText)
                         .frame(width: 12, height: 12)
+                        .transition(.opacity)
                 }
                 Text(item.state == .downloading ? "Downloading · \(percent)%" : DownloadText.waiting(item, hold: hold))
                     .font(.caption.weight(.medium))
                     .foregroundStyle(colors.accent)
                     .lineLimit(1)
             }
+            .animation(Motion.fade, value: started)
         case .failed:
             Label("Download failed", systemImage: "exclamationmark.circle")
                 .labelStyle(StatusLabelStyle())
@@ -256,6 +264,7 @@ struct ProgressRing: View {
             Circle().stroke(track, lineWidth: 2)
             Circle().trim(from: 0, to: fraction).stroke(color, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                 .rotationEffect(.degrees(-90))
+                .animation(Motion.progress, value: fraction)
         }
     }
 }
@@ -359,6 +368,8 @@ struct VideoCard: View {
                     if calm && item.progress > 0.01 { WatchedLine(fraction: item.progress) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                // A download starting or ending eases its status line in or out.
+                .animation(Motion.fade, value: item.state)
                 if calm { DownloadDisc(item: item, actions: actions, onMedia: false, size: 34).padding(.top, -6) }
                 VideoMoreButton(item: item, actions: actions).padding(.top, -10)
             }
@@ -410,6 +421,7 @@ struct VideoRow: View {
                 HStack(alignment: .top, spacing: 0) {
                     if calm && selecting {
                         SelectionMark(selected: selection!.selected).padding(.top, 2).padding(.trailing, 12)
+                            .transition(SelectionMark.transition)
                     }
                     if !calm {
                         thumbnail.frame(width: 156).padding(.trailing, 12)
@@ -422,7 +434,10 @@ struct VideoRow: View {
         .padding(.leading, 16)
         .padding(.trailing, 4)
         .padding(.vertical, 8)
-        .background(selection?.selected == true ? colors.accent.opacity(0.10) : .clear)
+        .background {
+            let picked = selection?.selected == true
+            Rectangle().fill(picked ? colors.accent.opacity(0.10) : .clear).animation(Motion.quick, value: picked)
+        }
         .contentShape(Rectangle())
         .onTapGesture {
             if selecting { selection!.toggle() } else { actions.play(item) }
@@ -439,7 +454,7 @@ extension VideoRow {
     fileprivate var thumbnail: some View {
         Thumbnail(item: item, cornerRadius: 10)
             .overlay(alignment: .topLeading) {
-                if selecting { SelectionMark(selected: selection!.selected, onImage: true).padding(6) }
+                if selecting { SelectionMark(selected: selection!.selected, onImage: true).padding(6).transition(SelectionMark.transition) }
             }
     }
 
@@ -459,6 +474,7 @@ extension VideoRow {
         }
         .padding(.top, 1)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(Motion.fade, value: item.state)
     }
 
     @ViewBuilder fileprivate var trailing: some View {
@@ -499,8 +515,12 @@ struct SelectionMark: View {
             .overlay { Circle().strokeBorder(selected ? colors.accent : onImage ? .white : colors.secondaryText, lineWidth: 2) }
             .overlay { if selected { Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundStyle(.white) } }
             .frame(width: 24, height: 24)
+            .animation(Motion.quick, value: selected)
             .accessibilityLabel(selected ? "Selected" : "Not selected")
     }
+
+    /// Coming in with selection mode: a small pop from nothing, like Photos.
+    static let transition = AnyTransition.scale(scale: 0.6).combined(with: .opacity)
 }
 
 /// In calm mode, how far you got shows as a thin line under the text.

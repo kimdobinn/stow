@@ -1,6 +1,26 @@
 package dev.stow.android.ui
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.StartOffset
+import androidx.compose.animation.core.keyframes
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.BoxWithConstraintsScope
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -160,8 +180,11 @@ fun DownloadDisc(item: VideoItem, actions: VideoActions, modifier: Modifier = Mo
             if (click != null) Modifier.clip(CircleShape).clickable(onClickLabel = label, role = Role.Button, onClick = click) else Modifier
         ).semantics { contentDescription = label },
         contentAlignment = Alignment.Center) {
-        AnimatedContent(state, transitionSpec = {
-            (fadeIn(tween(180)) + scaleIn(tween(220), initialScale = 0.7f)) togetherWith fadeOut(tween(120))
+        // A quick crossfade with a slight grow, like YouTube's download button; the size change to
+        // the smaller "done" disc animates around the centre instead of jumping.
+        AnimatedContent(state, contentAlignment = Alignment.Center, transitionSpec = {
+            (fadeIn(tween(Motion.SHORT)) + scaleIn(Motion.enter(200), initialScale = 0.85f)) togetherWith
+                fadeOut(tween(100)) using SizeTransform(clip = false)
         }, label = "disc") { shown ->
             val discSize = if (shown == DiscState.DONE) size * 0.78f else size
             Box(
@@ -195,7 +218,9 @@ private enum class DiscState { IDLE, LOADING, FAILED, DONE }
 /** The ring around the stop square: how much is down, or a turning arc while it waits to start. */
 @Composable
 private fun DownloadRing(fraction: Float?, track: Color, modifier: Modifier) {
-    val shown by animateFloatAsState(fraction ?: 0f, tween(400), label = "ring")
+    // A spring, not a tween: each new value from the download carries on at the speed it had,
+    // so the ring fills steadily instead of easing in and out at every update.
+    val shown by animateFloatAsState(fraction ?: 0f, Motion.Progress, label = "ring")
     val turn = if (fraction == null) {
         val spin = rememberInfiniteTransition(label = "wait")
         spin.animateFloat(0f, 360f, infiniteRepeatable(tween(1100, easing = LinearEasing)), label = "spin").value
@@ -227,7 +252,8 @@ fun DownloadStatus(item: VideoItem) {
         DownloadState.DOWNLOADING, DownloadState.QUEUED -> Row(verticalAlignment = Alignment.CenterVertically) {
             val percent = local?.progress ?: 0
             if (item.state == DownloadState.DOWNLOADING && percent > 0) {
-                CircularProgressIndicator(progress = { percent / 100f }, modifier = Modifier.size(12.dp), strokeWidth = 2.dp,
+                val shown by animateFloatAsState(percent / 100f, Motion.Progress, label = "status")
+                CircularProgressIndicator(progress = { shown }, modifier = Modifier.size(12.dp), strokeWidth = 2.dp,
                                           color = Stow.colors.accent, trackColor = Stow.colors.chip)
             } else {
                 CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 2.dp, color = color)
@@ -322,10 +348,10 @@ fun VideoActions.open(item: VideoItem) = play(item)
 /** Home and Subscriptions: a rounded thumbnail with the download disc, the channel and title below. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun VideoCard(item: VideoItem, avatarUrl: String?, actions: VideoActions) {
+fun VideoCard(item: VideoItem, avatarUrl: String?, actions: VideoActions, modifier: Modifier = Modifier) {
     var menu by remember { mutableStateOf(false) }
     val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
-    Column(Modifier.fillMaxWidth().combinedClickable(onClick = { actions.open(item) }, onLongClick = {
+    Column(modifier.fillMaxWidth().combinedClickable(onClick = { actions.open(item) }, onLongClick = {
         haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
         menu = true
     }).padding(horizontal = 16.dp)) {
@@ -363,13 +389,19 @@ fun VideoCard(item: VideoItem, avatarUrl: String?, actions: VideoActions) {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun VideoRow(item: VideoItem, actions: VideoActions, showChannel: Boolean = true, trailing: (@Composable () -> Unit)? = null,
-             selection: RowSelection? = null) {
+             selection: RowSelection? = null, modifier: Modifier = Modifier) {
     var menu by remember { mutableStateOf(false) }
     val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
     val selecting = selection?.active == true
+    // A picked row's tint comes and goes quickly instead of blinking; drawn, so it doesn't recompose the row.
+    // Only lists you can pick from (Downloads) pay for the animations; every other list's rows stay plain.
+    val rowTint = if (selection != null) {
+        animateColorAsState(if (selection.selected) Stow.colors.accent.copy(alpha = 0.10f) else Color.Transparent,
+                            tween(Motion.SHORT), label = "picked")
+    } else null
     Row(
-        Modifier.fillMaxWidth()
-            .background(if (selection?.selected == true) Stow.colors.accent.copy(alpha = 0.10f) else Color.Transparent)
+        modifier.fillMaxWidth()
+            .then(if (rowTint != null) Modifier.drawBehind { drawRect(rowTint.value) } else Modifier)
             .combinedClickable(onClick = { if (selecting) selection!!.onToggle() else actions.open(item) }, onLongClick = {
                 haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
                 if (selection != null) selection.onToggle() else menu = true
@@ -377,12 +409,20 @@ fun VideoRow(item: VideoItem, actions: VideoActions, showChannel: Boolean = true
             .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
     ) {
         val calm = LocalCalm.current
-        if (calm && selecting) {
-            SelectionMark(selection!!.selected, Modifier.padding(top = 2.dp, end = 12.dp))
+        // Starting to pick: the round checks fade and grow in on every row (and go the same way).
+        if (calm && selection != null) {
+            Appear(selecting, enter = fadeIn(tween(Motion.SHORT)) + expandHorizontally(Motion.enter(200)),
+                               exit = fadeOut(tween(100)) + shrinkHorizontally(Motion.exit(150))) {
+                SelectionMark(selection?.selected == true, Modifier.padding(top = 2.dp, end = 12.dp))
+            }
         }
         if (!calm) {
             Thumbnail(item, Modifier.width(156.dp), rounded = 10.dp) {
-                if (selecting) SelectionMark(selection!!.selected, Modifier.align(Alignment.TopStart).padding(6.dp), onImage = true)
+                if (selection != null) Appear(selecting, Modifier.align(Alignment.TopStart).padding(6.dp),
+                                   enter = fadeIn(tween(Motion.SHORT)) + scaleIn(tween(Motion.SHORT), initialScale = 0.6f),
+                                   exit = fadeOut(tween(100)) + scaleOut(tween(100), targetScale = 0.6f)) {
+                    SelectionMark(selection?.selected == true, onImage = true)
+                }
             }
             Spacer(Modifier.width(12.dp))
         }
@@ -418,13 +458,16 @@ data class RowSelection(val active: Boolean, val selected: Boolean, val onToggle
 @Composable
 fun SelectionMark(selected: Boolean, modifier: Modifier = Modifier, onImage: Boolean = false) {
     val outline = if (onImage) Color.White else Stow.colors.secondaryText
+    val fill by animateColorAsState(if (selected) Stow.colors.accent else if (onImage) Color.Black.copy(alpha = 0.25f) else Color.Transparent,
+                                    tween(120), label = "mark")
+    val ring by animateColorAsState(if (selected) Stow.colors.accent else outline, tween(120), label = "mark-ring")
     Box(
-        modifier.size(24.dp).clip(CircleShape)
-            .background(if (selected) Stow.colors.accent else if (onImage) Color.Black.copy(alpha = 0.25f) else Color.Transparent)
-            .border(2.dp, if (selected) Stow.colors.accent else outline, CircleShape),
+        modifier.size(24.dp).clip(CircleShape).background(fill).border(2.dp, ring, CircleShape),
         contentAlignment = Alignment.Center,
     ) {
-        if (selected) Icon(Icons.Rounded.Check, contentDescription = "Selected", tint = Color.White, modifier = Modifier.size(16.dp))
+        Appear(selected, enter = fadeIn(tween(120)) + scaleIn(tween(120), initialScale = 0.6f), exit = fadeOut(tween(100))) {
+            Icon(Icons.Rounded.Check, contentDescription = "Selected", tint = Color.White, modifier = Modifier.size(16.dp))
+        }
     }
 }
 
@@ -450,15 +493,20 @@ private fun WatchedLine(fraction: Float) {
 fun Chip(label: String, selected: Boolean, onClick: () -> Unit, leading: (@Composable () -> Unit)? = null,
          onLongClick: (() -> Unit)? = null) {
     val colors = Stow.colors
+    // Selection changes colour quickly, with no slide, like YouTube's chips.
+    val fill by animateColorAsState(if (selected) colors.chipSelected else colors.chip, tween(Motion.SHORT), label = "chip")
+    val text by animateColorAsState(if (selected) colors.chipSelectedText else colors.text, tween(Motion.SHORT), label = "chip-text")
+    val interaction = remember { MutableInteractionSource() }
     Row(
-        Modifier.heightIn(min = 36.dp).clip(CircleShape).background(if (selected) colors.chipSelected else colors.chip)
-            .combinedClickable(role = Role.Tab, onClick = onClick, onLongClick = onLongClick).padding(horizontal = 14.dp, vertical = 7.dp),
+        Modifier.heightIn(min = 36.dp).pressScale(interaction).clip(CircleShape).drawBehind { drawRect(fill) }
+            .combinedClickable(interactionSource = interaction, indication = LocalIndication.current, role = Role.Tab,
+                               onClick = onClick, onLongClick = onLongClick)
+            .padding(horizontal = 14.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         leading?.let { it(); if (label.isNotEmpty()) Spacer(Modifier.width(6.dp)) }
         if (label.isNotEmpty()) {
-            Text(label, style = StowType.subheadline, fontWeight = FontWeight.SemiBold,
-                 color = if (selected) colors.chipSelectedText else colors.text, maxLines = 1)
+            Text(label, style = StowType.subheadline, fontWeight = FontWeight.SemiBold, color = text, maxLines = 1)
         }
     }
 }
@@ -490,9 +538,11 @@ fun StowSwitch(checked: Boolean, onChange: (Boolean) -> Unit) {
 fun PillButton(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector?, onClick: () -> Unit, filled: Boolean = false) {
     val colors = Stow.colors
     val content = if (filled) Color.White else colors.text
+    val interaction = remember { MutableInteractionSource() }
     Row(
-        Modifier.heightIn(min = 40.dp).clip(CircleShape).background(if (filled) colors.accent else colors.chip)
-            .clickable(role = Role.Button, onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
+        Modifier.heightIn(min = 40.dp).pressScale(interaction).clip(CircleShape).background(if (filled) colors.accent else colors.chip)
+            .clickable(interactionSource = interaction, indication = LocalIndication.current, role = Role.Button, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (icon != null) {
@@ -525,4 +575,158 @@ fun EmptyState(text: String, padding: PaddingValues = PaddingValues(32.dp)) {
  */
 fun LazyListScope.topAnchor() {
     item(key = "top-anchor", contentType = "top-anchor") { Spacer(Modifier.fillMaxWidth().height(1.dp)) }
+}
+
+/** An icon that changes with a quick crossfade and a slight grow (play ↔ pause), instead of swapping in one frame. */
+@Composable
+fun SwapIcon(icon: ImageVector, contentDescription: String?, tint: Color, modifier: Modifier = Modifier) {
+    AnimatedContent(icon, modifier, contentAlignment = Alignment.Center, transitionSpec = {
+        (fadeIn(tween(Motion.SHORT)) + scaleIn(tween(Motion.SHORT), initialScale = 0.8f)) togetherWith
+            (fadeOut(tween(100)) + scaleOut(tween(100), targetScale = 0.8f))
+    }, label = "icon") { shown ->
+        Icon(shown, contentDescription = contentDescription, tint = tint, modifier = Modifier.fillMaxSize())
+    }
+}
+
+/** A run of double-taps on one side of a video: which side, the running total, when the last tap was, and where it landed. */
+data class SkipRun(val forward: Boolean, val seconds: Int, val at: Long, val tap: Offset)
+
+/**
+ * YouTube's double-tap seek: a grey half-moon on the tapped side, a ripple spreading from the
+ * finger on every tap, three chevrons lighting up in turn and the running total. It fades in at
+ * once and fades out a moment after the last tap (when `run` goes back to null).
+ */
+@Composable
+fun BoxWithConstraintsScope.SkipOverlay(run: SkipRun?) {
+    // The last run, so the fading-out overlay keeps its side and count.
+    val shown = rememberLast(run)
+    val ripple = remember { Animatable(1f) }
+    LaunchedEffect(run?.at) {
+        if (run != null) {
+            ripple.snapTo(0f)
+            ripple.animateTo(1f, tween(400, easing = Motion.Standard))
+        }
+    }
+    val forward = shown?.forward ?: true
+    val arcWidth = maxWidth / 2.4f
+    val fullWidthPx = constraints.maxWidth.toFloat()
+    Appear(run != null, Modifier.align(if (forward) Alignment.CenterEnd else Alignment.CenterStart).fillMaxHeight().width(arcWidth),
+           enter = fadeIn(tween(100)), exit = fadeOut(tween(250, easing = Motion.EmphasizedAccelerate))) {
+        val shape = if (forward) RoundedCornerShape(topStartPercent = 50, bottomStartPercent = 50)
+                    else RoundedCornerShape(topEndPercent = 50, bottomEndPercent = 50)
+        Box(Modifier.fillMaxSize().clip(shape).background(Color.White.copy(alpha = 0.16f)).drawBehind {
+                // Drawn from the animation's value, so the ripple redraws without recomposing.
+                val p = ripple.value
+                val tap = shown?.tap ?: return@drawBehind
+                if (p >= 1f) return@drawBehind
+                val left = if (forward) fullWidthPx - size.width else 0f
+                drawCircle(Color.White.copy(alpha = 0.25f * (1f - p)), radius = size.maxDimension * p,
+                           center = Offset(tap.x - left, tap.y))
+            }, contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                SeekChevrons(forward)
+                Spacer(Modifier.height(4.dp))
+                Text("${shown?.seconds ?: 0} seconds", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+    }
+}
+
+/** Three chevrons lighting up one after another, pointing the way the video goes (YouTube's seek and 2x). */
+@Composable
+fun SeekChevrons(forward: Boolean, size: Dp = 18.dp, tint: Color = Color.White) {
+    val pulse = rememberInfiniteTransition(label = "chevrons")
+    // Mirrored for going back: the arrows point left and light up right to left.
+    Row(Modifier.graphicsLayer { if (!forward) scaleX = -1f }, verticalAlignment = Alignment.CenterVertically) {
+        repeat(3) { i ->
+            val alpha = pulse.animateFloat(
+                0.3f, 0.3f,
+                infiniteRepeatable(keyframes { durationMillis = 750; 0.3f at 0; 1f at 150; 0.3f at 450 },
+                                   RepeatMode.Restart, StartOffset(i * 150)),
+                label = "chevron",
+            )
+            // Overlapping a little, like YouTube's.
+            Box(Modifier.width(size * 0.62f), contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.PlayArrow, contentDescription = null, tint = tint,
+                     modifier = Modifier.requiredSize(size).graphicsLayer { this.alpha = alpha.value })
+            }
+        }
+    }
+}
+
+/** A gently pulsing alpha for loading placeholders. */
+@Composable
+private fun placeholderPulse(): androidx.compose.runtime.State<Float> =
+    rememberInfiniteTransition(label = "placeholder")
+        .animateFloat(0.55f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "pulse")
+
+/** A grey stand-in for a VideoRow while the real ones load, so the list doesn't jump when they come. */
+@Composable
+fun PlaceholderRow(modifier: Modifier = Modifier) {
+    val pulse = placeholderPulse()
+    val chip = Stow.colors.chip
+    Row(modifier.fillMaxWidth().graphicsLayer { alpha = pulse.value }.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp)) {
+        if (!LocalCalm.current) {
+            Box(Modifier.width(156.dp).aspectRatio(16f / 9f).clip(RoundedCornerShape(10.dp)).background(chip))
+            Spacer(Modifier.width(12.dp))
+        }
+        Column(Modifier.weight(1f).padding(top = 2.dp)) {
+            PlaceholderBar(0.92f, 14.dp)
+            Spacer(Modifier.height(6.dp))
+            PlaceholderBar(0.7f, 14.dp)
+            Spacer(Modifier.height(8.dp))
+            PlaceholderBar(0.45f, 11.dp)
+        }
+    }
+}
+
+/** A grey stand-in for a VideoCard (Home, Subscriptions, search results) while they load. */
+@Composable
+fun PlaceholderCard(modifier: Modifier = Modifier) {
+    val pulse = placeholderPulse()
+    val chip = Stow.colors.chip
+    Column(modifier.fillMaxWidth().graphicsLayer { alpha = pulse.value }.padding(horizontal = 16.dp)) {
+        val calm = LocalCalm.current
+        if (!calm) Box(Modifier.fillMaxWidth().padding(top = 8.dp).aspectRatio(16f / 9f).clip(RoundedCornerShape(14.dp)).background(chip))
+        Row(Modifier.padding(top = 12.dp, bottom = if (calm) 12.dp else 20.dp)) {
+            Box(Modifier.size(36.dp).clip(CircleShape).background(chip))
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f).padding(top = 2.dp)) {
+                PlaceholderBar(0.9f, 15.dp)
+                Spacer(Modifier.height(8.dp))
+                PlaceholderBar(0.55f, 12.dp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlaceholderBar(fraction: Float, height: Dp) {
+    Box(Modifier.fillMaxWidth(fraction).height(height).clip(RoundedCornerShape(4.dp)).background(Stow.colors.chip))
+}
+
+/**
+ * One row of an inset rounded card (Settings-style lists), drawn per row so each row can be its own
+ * list item and slide when the list is reordered: the first rounds its top, the last its bottom.
+ */
+fun groupedRowShape(first: Boolean, last: Boolean, radius: Dp): RoundedCornerShape {
+    val top = if (first) radius else 0.dp
+    val bottom = if (last) radius else 0.dp
+    return RoundedCornerShape(topStart = top, topEnd = top, bottomStart = bottom, bottomEnd = bottom)
+}
+
+/** A grey stand-in for a channel row (Import from YouTube) while the list loads. */
+@Composable
+fun PlaceholderChannelRow(modifier: Modifier = Modifier) {
+    val pulse = placeholderPulse()
+    Row(modifier.fillMaxWidth().graphicsLayer { alpha = pulse.value }.padding(horizontal = 24.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(36.dp).clip(CircleShape).background(Stow.colors.chip))
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            PlaceholderBar(0.6f, 14.dp)
+            Spacer(Modifier.height(6.dp))
+            PlaceholderBar(0.35f, 11.dp)
+        }
+    }
 }

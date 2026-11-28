@@ -62,6 +62,27 @@ class PullUpTest {
         assertFalse(pulls > 0)
     }
 
+    @Test fun lettingGoWhileMovingBackDownSettlesAtRest() {
+        dragUp(150f)
+        // The finger is already heading back down: its speed carries the spinner home.
+        assertEquals(Velocity(0f, 800f), runBlocking(clock) { pull.onPreFling(Velocity(0f, 800f)) })
+        assertEquals(0f, pull.drag)
+        assertEquals(0, pulls)
+    }
+
+    @Test fun aDragThatScrollsTheListToItsEndDoesntPull() {
+        // The list scrolls 600 px, reaches its end, and the finger keeps going 300 px.
+        pull.onPostScroll(Offset(0f, -600f), Offset(0f, -300f), NestedScrollSource.UserInput)
+        assertEquals(Offset.Zero, dragUp(300f))
+        assertEquals(0f, pull.drag)
+        release()
+        assertEquals(0, pulls)
+        // The next drag starts at the end, so it pulls.
+        dragUp(250f)
+        release()
+        assertEquals(1, pulls)
+    }
+
     @Test fun scrollingTheListItselfIsUntouched() {
         // Leftover only comes at the end; a normal scroll down the list has none.
         assertEquals(Offset.Zero, pull.onPostScroll(Offset(0f, -40f), Offset.Zero, NestedScrollSource.UserInput))

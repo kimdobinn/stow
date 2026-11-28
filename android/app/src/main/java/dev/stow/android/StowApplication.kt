@@ -3,6 +3,10 @@ package dev.stow.android
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import coil3.ImageLoader
+import coil3.PlatformContext
+import coil3.SingletonImageLoader
+import coil3.request.crossfade
 import dev.stow.android.data.Repository
 import dev.stow.android.player.PlayerConnection
 import dev.stow.android.remote.AlarmNotification
@@ -20,7 +24,7 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import dev.stow.android.standalone.CheckWorker
 import dev.stow.android.standalone.Trigger
 
-class StowApplication : Application() {
+class StowApplication : Application(), SingletonImageLoader.Factory {
     lateinit var repository: Repository
         private set
     /** Created on first use (it binds to the playback service). */
@@ -58,6 +62,14 @@ class StowApplication : Application() {
             YtDlp.updateIfDue(this@StowApplication, repository.prefs)
         }
     }
+
+    /**
+     * Every picture in the app (thumbnails, channel avatars, playlist covers) fades in over its
+     * grey placeholder when it loads, like YouTube's, instead of popping in. Coil skips the fade
+     * for pictures already in memory, so scrolling back up shows them at once.
+     */
+    override fun newImageLoader(context: PlatformContext): ImageLoader =
+        ImageLoader.Builder(context).crossfade(dev.stow.android.ui.Motion.SHORT).build()
 
     companion object {
         const val CHANNEL_DOWNLOADS = "downloads"

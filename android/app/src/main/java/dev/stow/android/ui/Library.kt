@@ -1,5 +1,13 @@
 package dev.stow.android.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -111,21 +119,28 @@ fun DownloadsScreen(
     androidx.activity.compose.BackHandler(enabled = selecting) { stopSelecting() }
 
     Column(Modifier.fillMaxSize()) {
-        if (selecting) {
-            SelectionBar(
-                count = pickedItems.size,
-                allPicked = downloaded.isNotEmpty() && downloaded.all { it.id in picked },
-                onAll = { all -> toggle(downloaded.map { it.id }, all) },
-                onDelete = { confirmDelete = true },
-                onClose = ::stopSelecting,
-            )
-        } else {
-            LargeTitleBar("Downloads", onSearch, onSettings)
+        // Starting to pick crossfades the title into the selection bar (and back).
+        AnimatedContent(selecting, transitionSpec = {
+            fadeIn(tween(Motion.SHORT)) togetherWith fadeOut(tween(100)) using SizeTransform(clip = false)
+        }, label = "title") { picking ->
+            if (picking) {
+                SelectionBar(
+                    count = pickedItems.size,
+                    allPicked = downloaded.isNotEmpty() && downloaded.all { it.id in picked },
+                    onAll = { all -> toggle(downloaded.map { it.id }, all) },
+                    onDelete = { confirmDelete = true },
+                    onClose = ::stopSelecting,
+                )
+            } else {
+                LargeTitleBar("Downloads", onSearch, onSettings)
+            }
         }
+        // Every row has a key and moves: picking folds the playlists and downloading sections away,
+        // a finished download slides from Downloading to Downloaded, deleted ones collapse.
         LazyColumn(Modifier.fillMaxSize()) {
-            if (!selecting) item { SectionHeader("Playlists") }
-            if (!selecting) item {
-                LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (!selecting) item(key = "playlists-header") { SectionHeader("Playlists", itemMotion()) }
+            if (!selecting) item(key = "playlists") {
+                LazyRow(itemMotion(), contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     item { NewPlaylistCard { newPlaylist = true } }
                     items(playlists, key = { it.id }) { playlist ->
                         PlaylistCard(playlist, playlist.videoIds.firstNotNullOfOrNull { byId[it] }) { onOpenPlaylist(playlist.id) }
@@ -133,11 +148,11 @@ fun DownloadsScreen(
                 }
             }
             if (downloading.isNotEmpty() && !selecting) {
-                item { SectionHeader("Downloading · ${downloading.size}") }
-                items(downloading, key = { "d-" + it.id }) { VideoRow(it, actions) }
+                item(key = "downloading-header") { SectionHeader("Downloading · ${downloading.size}", itemMotion()) }
+                items(downloading, key = { "d-" + it.id }) { VideoRow(it, actions, modifier = itemMotion()) }
             }
-            item {
-                SectionHeader("Downloaded · ${all.count { it.isPlayable }}") {
+            item(key = "downloaded-header") {
+                SectionHeader("Downloaded · ${all.count { it.isPlayable }}", itemMotion()) {
                     Box {
                         TextButton(onClick = { sortMenu = true }) {
                             Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = null, tint = Stow.colors.text, modifier = Modifier.size(18.dp))
@@ -162,24 +177,24 @@ fun DownloadsScreen(
                     }
                 }
             }
-            item {
-                ChipRow { WatchFilter.entries.forEach { f -> Chip(f.label, filter == f, onClick = { filter = f }) } }
+            item(key = "filters") {
+                Box(itemMotion()) { ChipRow { WatchFilter.entries.forEach { f -> Chip(f.label, filter == f, onClick = { filter = f }) } } }
             }
             if (downloaded.isEmpty()) {
-                item { EmptyState(if (all.any { it.isPlayable }) "Nothing matches this filter." else "No downloads yet. Tap any video to download it.") }
+                item(key = "empty") { Box(itemMotion()) { EmptyState(if (all.any { it.isPlayable }) "Nothing matches this filter." else "No downloads yet. Tap any video to download it.") } }
             } else if (groupByChannel) {
                 downloaded.groupBy { it.video.channelId }.entries
                     .sortedBy { (_, list) -> list.first().video.channelTitle.lowercase() }
                     .forEach { (channelId, list) ->
                         item(key = "g-$channelId") {
                             val allInGroup = list.all { it.id in picked }
-                            Row(Modifier.fillMaxWidth()
+                            Row(itemMotion().fillMaxWidth()
                                     .clickable { if (selecting) toggle(list.map { it.id }, !allInGroup) else actions.openChannel(channelId) }
                                     .padding(horizontal = 12.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically) {
-                                if (selecting) {
-                                    SelectionMark(allInGroup)
-                                    Spacer(Modifier.width(10.dp))
+                                Appear(selecting, enter = fadeIn(tween(Motion.SHORT)) + expandHorizontally(Motion.enter(200)),
+                                       exit = fadeOut(tween(100)) + shrinkHorizontally(Motion.exit(150))) {
+                                    SelectionMark(allInGroup, Modifier.padding(end = 10.dp))
                                 }
                                 ChannelAvatar(avatars[channelId], 28.dp, name = list.first().video.channelTitle)
                                 Spacer(Modifier.width(10.dp))
@@ -188,14 +203,14 @@ fun DownloadsScreen(
                                 Text("${list.size}", fontSize = 13.sp, color = Stow.colors.secondaryText)
                             }
                         }
-                        items(list, key = { "v-" + it.id }) { VideoRow(it, actions, showChannel = false, selection = selection(it)) }
+                        items(list, key = { "v-" + it.id }) { VideoRow(it, actions, showChannel = false, selection = selection(it), modifier = itemMotion()) }
                     }
             } else {
-                items(downloaded, key = { "v-" + it.id }) { VideoRow(it, actions, selection = selection(it)) }
+                items(downloaded, key = { "v-" + it.id }) { VideoRow(it, actions, selection = selection(it), modifier = itemMotion()) }
             }
-            item {
+            item(key = "storage") {
                 Text(storageText, fontSize = 12.sp, color = Stow.colors.secondaryText,
-                     modifier = Modifier.fillMaxWidth().padding(16.dp))
+                     modifier = itemMotion().fillMaxWidth().padding(16.dp))
             }
         }
     }
@@ -293,7 +308,7 @@ fun PlaylistScreen(
         }
         val totalMs = videos.sumOf { it.durationMs }
         LazyColumn(Modifier.fillMaxSize()) {
-            item {
+            item(key = "header") {
                 Column(Modifier.padding(16.dp)) {
                     videos.firstOrNull()?.let { Thumbnail(it, Modifier.fillMaxWidth(), rounded = 12.dp) }
                     Spacer(Modifier.height(12.dp))
@@ -307,8 +322,9 @@ fun PlaylistScreen(
                     }
                 }
             }
-            if (videos.isEmpty()) item { EmptyState("Add videos with ⋮ › Save to playlist.") }
-            items(videos, key = { it.id }) { VideoRow(it, actions) }
+            if (videos.isEmpty()) item(key = "empty") { Box(itemMotion()) { EmptyState("Add videos with ⋮ › Save to playlist.") } }
+            // Move up / down and Remove slide the rows into their new places.
+            items(videos, key = { it.id }) { VideoRow(it, actions, modifier = itemMotion()) }
         }
     }
     if (rename && playlist != null) NameDialog("Rename playlist", playlist.name, onDismiss = { rename = false }) { onRename(it); rename = false }

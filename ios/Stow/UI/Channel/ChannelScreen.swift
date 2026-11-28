@@ -50,6 +50,7 @@ struct ChannelScreen: View {
                 VStack {
                     if loading {
                         LoadingRow(text: "Getting the latest videos from YouTube…")
+                        ForEach(0..<4, id: \.self) { _ in PlaceholderVideo() }
                     } else if let loadError {
                         LoadErrorView(title: "Couldn't get this channel's videos from YouTube.", message: loadError) { attempt += 1 }
                     } else {
@@ -57,6 +58,7 @@ struct ChannelScreen: View {
                     }
                     Spacer()
                 }
+                .animation(Motion.fade, value: loading)
                 .padding(.top, 24)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -95,6 +97,9 @@ struct ChannelScreen: View {
                 }
                 if loading {
                     LoadingRow(text: "Getting the latest videos from YouTube…")
+                    if shown.isEmpty {
+                        ForEach(0..<4, id: \.self) { _ in PlaceholderVideo() }
+                    }
                 } else if let loadError {
                     LoadErrorView(title: "Couldn't get this channel's videos from YouTube.", message: loadError) { attempt += 1 }
                 }
@@ -103,6 +108,8 @@ struct ChannelScreen: View {
                 }
                 ForEach(shown) { VideoRow(item: $0, actions: actions, showChannel: false) }
             }
+            // YouTube's videos fade in over the placeholders when they come.
+            .animation(Motion.fade, value: loading)
             .padding(.bottom, 16)
         }
     }

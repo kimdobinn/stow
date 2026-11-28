@@ -1,5 +1,9 @@
 package dev.stow.android.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -96,9 +100,11 @@ fun ManageChannelsScreen(
                     Text("Stow checks these for new videos. The order here is the order everywhere.",
                          style = StowType.footnote, color = Stow.colors.secondaryText, modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp))
                 }
-                item {
-                    Column(Modifier.padding(horizontal = 16.dp).clip(RoundedCornerShape(14.dp)).background(Stow.colors.raised)) {
-                        channels.forEachIndexed { index, channel ->
+                // Each channel is its own row of the card, so Move up / down and Remove slide the rows.
+                itemsIndexed(channels, key = { _, channel -> channel.id }) { index, channel ->
+                    Column(itemMotion().padding(horizontal = 16.dp)
+                               .clip(groupedRowShape(first = index == 0, last = index == channels.lastIndex, radius = 14.dp))
+                               .background(Stow.colors.raised)) {
                             var menu by remember { mutableStateOf(false) }
                             Row(Modifier.fillMaxWidth().combinedClickable(onClick = { onOpen(channel.id) }, onLongClick = { menu = true })
                                     .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
@@ -125,10 +131,9 @@ fun ManageChannelsScreen(
                                 }
                             }
                             if (index < channels.lastIndex) HorizontalDivider(Modifier.padding(start = 68.dp), thickness = 0.5.dp, color = Stow.colors.divider)
-                        }
                     }
                 }
-                item { Spacer(Modifier.height(32.dp)) }
+                item(key = "end") { Spacer(itemMotion().height(32.dp)) }
             }
         }
     }
@@ -236,9 +241,8 @@ fun ImportChannelsScreen(
                      maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
                 TextButton(onClick = { attempt++ }) { Text("Try Again", color = Stow.colors.accent) }
             }
-            channels == null -> Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = Stow.colors.accent, strokeWidth = 3.dp, modifier = Modifier.size(32.dp))
-            }
+            // Grey rows shaped like the channels while YouTube answers.
+            channels == null -> Column(Modifier.padding(top = 8.dp)) { repeat(6) { PlaceholderChannelRow() } }
             all.isEmpty() -> EmptyState("No subscriptions on this YouTube account.")
             else -> {
                 Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(50)).background(Stow.colors.chip)
@@ -257,7 +261,7 @@ fun ImportChannelsScreen(
                 LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
                     items(shown, key = { it.id }) { channel ->
                         val added = selection.isAdded(channel.id, followed)
-                        Row(Modifier.fillMaxWidth().clickable(enabled = !added) { selection = selection.toggle(channel.id, followed) }
+                        Row(itemMotion().fillMaxWidth().clickable(enabled = !added) { selection = selection.toggle(channel.id, followed) }
                                 .padding(horizontal = 12.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = added || selection.isPicked(channel.id), enabled = !added,
@@ -276,12 +280,14 @@ fun ImportChannelsScreen(
                         .padding(horizontal = 16.dp, vertical = 10.dp), contentAlignment = Alignment.Center) {
                     val count = selection.count
                     val enabled = count > 0
+                    // Turns accent with the first pick (and back) quickly instead of switching.
+                    val fill by animateColorAsState(if (enabled) Stow.colors.accent else Stow.colors.chip, tween(Motion.SHORT), label = "add")
+                    val label by animateColorAsState(if (enabled) Color.White else Stow.colors.secondaryText, tween(Motion.SHORT), label = "add-text")
                     Row(Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(24.dp))
-                            .background(if (enabled) Stow.colors.accent else Stow.colors.chip)
+                            .drawBehind { drawRect(fill) }
                             .clickable(enabled = enabled) { onAdd(selection.chosen(all)) },
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = androidx.compose.foundation.layout.Arrangement.Center) {
-                        Text(if (count == 1) "Add 1 channel" else "Add $count channels", style = StowType.headline,
-                             color = if (enabled) Color.White else Stow.colors.secondaryText)
+                        Text(if (count == 1) "Add 1 channel" else "Add $count channels", style = StowType.headline, color = label)
                     }
                 }
             }

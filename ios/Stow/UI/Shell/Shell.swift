@@ -143,11 +143,12 @@ final class Shell {
 
     func notify(_ message: String) {
         toastTask?.cancel()
-        withAnimation(.snappy) { toast = Toast(message: message) }
+        // Slides up and slows into place; fades away where it is (see ToastHost).
+        withAnimation(Motion.enter) { toast = Toast(message: message) }
         toastTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(3))
             guard !Task.isCancelled else { return }
-            withAnimation(.easeOut) { self?.toast = nil }
+            withAnimation(Motion.exit) { self?.toast = nil }
         }
     }
 

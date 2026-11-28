@@ -23,7 +23,9 @@ struct SubscriptionsScreen: View {
                             HStack(spacing: 4) {
                                 ForEach(channels) { channel in
                                     ChannelBubble(channel: channel, selected: selected == channel.id, dimmed: !selected.isEmpty && selected != channel.id) {
-                                        withAnimation(.snappy) { selected = selected == channel.id ? "" : channel.id }
+                                        // That channel's videos show at once, as on YouTube (no sliding
+                                        // cards); the bubble's ring fades (ChannelBubble).
+                                        withoutAnimation { selected = selected == channel.id ? "" : channel.id }
                                     }
                                 }
                             }
@@ -96,6 +98,16 @@ private struct ChannelBubble: View {
             }
             .frame(width: 72)
             .padding(.vertical, 4)
+            // The ring and the dimming fade quickly, even though the feed below switches at once
+            // (withoutAnimation), like a Chip.
+            .transaction(value: selected) { transaction in
+                transaction.animation = Motion.quick
+                transaction.disablesAnimations = false
+            }
+            .transaction(value: dimmed) { transaction in
+                transaction.animation = Motion.quick
+                transaction.disablesAnimations = false
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
