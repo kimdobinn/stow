@@ -19,6 +19,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "0.2.0",
+          "buildVersion": "3",
+          "date": "2026-11-28",
+          "localizedDescription": "- Stow can now work without the Mac: on first launch choose \"Use on its own\" (or switch in Settings). The phone follows channels and checks for new videos itself, with no Firebase.\n- Optional YouTube sign-in on the phone for Home, Subscriptions, members-only videos, importing your subscriptions and watched sync.\n- In standalone mode, new videos show up when you open Stow or when iOS gives it background time.",
+          "downloadURL": "https://github.com/kimdobinn/stow/releases/download/ios-v0.2.0/Stow-0.2.0.ipa",
+          "size": 16046302,
+          "minOSVersion": "17.0"
+        },
+        {
           "version": "0.1.1",
           "buildVersion": "2",
           "date": "2026-11-27",
