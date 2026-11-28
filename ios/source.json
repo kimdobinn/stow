@@ -19,6 +19,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "0.2.1",
+          "buildVersion": "4",
+          "date": "2026-11-28",
+          "localizedDescription": "- Pull up at the end of Home or Subscriptions to check for new videos, the same as pulling down at the top.\n- Animations reworked to feel like the YouTube app: the player follows your finger and settles at its speed, and sheets, messages, player controls, thumbnails and lists move quickly and smoothly.",
+          "downloadURL": "https://github.com/kimdobinn/stow/releases/download/ios-v0.2.1/Stow-0.2.1.ipa",
+          "size": 16154948,
+          "minOSVersion": "17.0"
+        },
+        {
           "version": "0.2.0",
           "buildVersion": "3",
           "date": "2026-11-28",
