@@ -30,6 +30,13 @@ import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -114,18 +121,37 @@ fun BackTopBar(title: String, onBack: () -> Unit, actions: @Composable () -> Uni
     }
 }
 
-/** Pull down: asks the Mac to check every channel and YouTube's feeds now, and waits for it. */
+/**
+ * Pull down at the top, or pull up at the end of the list: with the Mac, asks it to check every
+ * channel and YouTube's feeds now and waits for it; on its own, the phone checks them. After a
+ * pull at the end, the list goes back to the top, where the fresh batch is.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun Refreshable(onRefresh: suspend () -> Unit = {}, content: @Composable () -> Unit) {
+fun Refreshable(onRefresh: suspend () -> Unit = {}, content: @Composable (LazyListState) -> Unit) {
     var refreshing by remember { mutableStateOf(false) }
+    var fromEnd by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    val haptics = LocalHapticFeedback.current
+    val restPx = with(LocalDensity.current) { 96.dp.toPx() }
+    val pullUp = remember(restPx) {
+        PullUp(threshold = restPx, busy = { refreshing }, onPull = { fromEnd = true; refreshing = true })
+    }
+    pullUp.onArmed = { haptics.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate) }
     LaunchedEffect(refreshing) {
         if (refreshing) {
             onRefresh()
+            if (fromEnd) listState.animateScrollToItem(0)
             refreshing = false
+            fromEnd = false
         }
     }
-    PullToRefreshBox(isRefreshing = refreshing, onRefresh = { refreshing = true }, modifier = Modifier.fillMaxSize()) { content() }
+    PullToRefreshBox(isRefreshing = refreshing && !fromEnd, onRefresh = { refreshing = true }, modifier = Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().clipToBounds().nestedScroll(pullUp)) {
+            content(listState)
+            PullUpIndicator(pullUp, refreshing && fromEnd, restPx)
+        }
+    }
 }
 
 /**
@@ -164,8 +190,8 @@ fun HomeScreen(
             Chip(if (groups.isEmpty()) "New group" else "", false, onClick = onNewGroup,
                  leading = { Icon(Icons.Filled.Add, contentDescription = "New group", tint = Stow.colors.text, modifier = Modifier.size(18.dp)) })
         }
-        Refreshable(onRefresh) {
-            LazyColumn(Modifier.fillMaxSize()) {
+        Refreshable(onRefresh) { listState ->
+            LazyColumn(Modifier.fillMaxSize(), state = listState) {
                 topAnchor()
                 if (group == null) {
                     // YouTube's recommendations; your channels' newest until the Mac has shared them.
@@ -186,14 +212,12 @@ fun HomeScreen(
                     }
                     items(videos, key = { "all-" + it.id }) { VideoCard(it, avatars[it.video.channelId], actions) }
                     item(key = "end") {
-                        Text(when {
-                                 standalone != null && videos.isEmpty() -> "Nothing here yet. Pull down to check your channels."
-                                 standalone != null -> "That's everything for now. Pull down to check for new videos."
-                                 videos.isEmpty() -> "Nothing here yet. Pull down to ask the Mac for videos."
-                                 else -> "That's everything for now. Pull down for a fresh batch."
-                             },
-                             style = StowType.footnote, color = Stow.colors.secondaryText, textAlign = TextAlign.Center,
-                             modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 28.dp))
+                        EndNote(when {
+                                    standalone != null && videos.isEmpty() -> "Nothing here yet. Pull down to check your channels."
+                                    standalone != null -> "That's everything for now. Pull up to check for new videos."
+                                    videos.isEmpty() -> "Nothing here yet. Pull down to ask the Mac for videos."
+                                    else -> "That's everything for now. Pull up for a fresh batch."
+                                })
                     }
                 } else {
                     val videos = Feeds.group(group, everything)
@@ -328,6 +352,7 @@ fun SubscriptionsScreen(
     feed: List<VideoItem>, channels: List<SubscriptionChannel>, actions: VideoActions,
     onAllChannels: () -> Unit, onSearch: () -> Unit, onSettings: () -> Unit, onRefresh: suspend () -> Unit,
     emptyText: String = "No videos yet. Pull down to ask the Mac for new ones.",
+    endText: String = "That's everything for now. Pull up for new videos.",
 ) {
     var selected by rememberSaveable { mutableStateOf<String?>(null) }
     val avatars = channels.associate { it.id to it.avatarUrl }
@@ -359,14 +384,22 @@ fun SubscriptionsScreen(
                 TextButton(onClick = { actions.openChannel(id) }) { Text("View channel", color = Color3D()) }
             }
         }
-        Refreshable(onRefresh) {
-            LazyColumn(Modifier.fillMaxSize()) {
+        Refreshable(onRefresh) { listState ->
+            LazyColumn(Modifier.fillMaxSize(), state = listState) {
                 topAnchor()
                 if (shown.isEmpty()) item { EmptyState(emptyText) }
                 items(shown, key = { it.id }) { VideoCard(it, avatars[it.video.channelId], actions) }
+                if (shown.isNotEmpty()) item(key = "end") { EndNote(endText) }
             }
         }
     }
+}
+
+/** The line at the end of a feed. */
+@Composable
+private fun EndNote(text: String) {
+    Text(text, style = StowType.footnote, color = Stow.colors.secondaryText, textAlign = TextAlign.Center,
+         modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 28.dp))
 }
 
 /** Links and text buttons: the accent. */
@@ -446,7 +479,7 @@ fun ChannelScreen(
             }
             return
         }
-        val list: @Composable () -> Unit = { LazyColumn(Modifier.fillMaxSize()) {
+        val list: @Composable (androidx.compose.foundation.lazy.LazyListState?) -> Unit = { listState -> LazyColumn(Modifier.fillMaxSize(), state = listState ?: rememberLazyListState()) {
             item {
                 Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     ChannelAvatar(channel?.avatarUrl ?: page?.avatarUrl ?: avatarUrl ?: LocalChannelAvatars.current[videos.firstOrNull()?.video?.channelId], 72.dp, name = title)
@@ -489,7 +522,7 @@ fun ChannelScreen(
             if (sorted.isEmpty() && !loading) item { EmptyState(if (tab == ChannelTab.LIVE) "No past live streams." else "No recent videos.") }
             items(sorted, key = { it.id }) { item -> VideoRow(item, actions, showChannel = false) }
         } }
-        if (onRefresh != null) Refreshable(onRefresh) { list() } else list()
+        if (onRefresh != null) Refreshable(onRefresh) { list(it) } else list(null)
     }
 }
 

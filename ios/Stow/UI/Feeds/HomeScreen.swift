@@ -41,6 +41,7 @@ struct HomeScreen: View {
                     allFeed(actions: actions)
                 }
             }
+            .pullUpToRefresh { await shell.refresh() }
         }
         .background(colors.background)
         .refreshable { await shell.refresh() }
@@ -57,7 +58,7 @@ struct HomeScreen: View {
                 StandaloneEmptyHome()
             } else {
                 ForEach(videos) { VideoCard(item: $0, actions: actions) }
-                Text(videos.isEmpty ? "Nothing new yet. Pull down to check your channels." : "That's everything for now. Pull down for a fresh batch.")
+                Text(videos.isEmpty ? "Nothing new yet. Pull down to check your channels." : "That's everything for now. Pull up to check for new videos.")
                     .font(.footnote)
                     .foregroundStyle(colors.secondaryText)
                     .multilineTextAlignment(.center)
@@ -77,7 +78,7 @@ struct HomeScreen: View {
                 .padding(.vertical, 4)
         }
         ForEach(videos) { VideoCard(item: $0, actions: actions) }
-        Text(videos.isEmpty ? "Nothing here yet. Pull down to ask the Mac for videos." : "That's everything for now. Pull down for a fresh batch.")
+        Text(videos.isEmpty ? "Nothing here yet. Pull down to ask the Mac for videos." : "That's everything for now. Pull up for a fresh batch.")
             .font(.footnote)
             .foregroundStyle(colors.secondaryText)
             .multilineTextAlignment(.center)

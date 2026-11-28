@@ -53,7 +53,17 @@ struct SubscriptionsScreen: View {
                                                               : "No videos yet. Pull down to ask the Mac for new ones.")
                 }
                 ForEach(shown) { VideoCard(item: $0, actions: actions) }
+                if !shown.isEmpty {
+                    Text("That's everything for now. Pull up for new videos.")
+                        .font(.footnote)
+                        .foregroundStyle(colors.secondaryText)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 28)
+                }
             }
+            .pullUpToRefresh { await shell.refresh() }
         }
         .background(colors.background)
         .refreshable { await shell.refresh() }
