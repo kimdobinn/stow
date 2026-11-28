@@ -79,6 +79,13 @@
   the pairing key and is only used for members-only videos.
 - The phone downloads with its own copy of yt-dlp, so videos never pass through the Mac or Firebase.
 
+**Or without the Mac.** On first launch the phone apps ask: *Use with my Mac* or *Use on its own*
+(switch any time in Settings). On its own, the phone follows channels and checks them itself
+(RSS, and yt-dlp for past streams), with no Firebase at all. Signing in to YouTube on the phone is
+optional and adds Home, Subscriptions, members-only videos, importing your subscriptions and
+watched sync. The alarm stays on the Mac. On iPhone, background checks run only when iOS allows,
+so new videos show up when you open the app or when iOS gives it time.
+
 ## Getting started
 
 **Mac** (macOS 26, Xcode 26)
@@ -109,7 +116,7 @@ cd android
 ./gradlew :app:assembleDebug
 ```
 
-Release builds also need your own signing key in `android/keystore/`. Install the APK, then pair it from **Phone › Pair a Phone** on the Mac. More in
+Release builds also need your own signing key in `android/keystore/`. Install the APK, then pair it from **Phone › Pair a Phone** on the Mac, or pick **Use on its own** (no Mac or Firebase needed; the build still wants a `google-services.json`, which can be a placeholder). More in
 [android/README.md](android/README.md).
 
 ### Installing and updating the phone app with Obtainium

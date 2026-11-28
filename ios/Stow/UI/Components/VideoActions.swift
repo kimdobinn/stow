@@ -20,6 +20,12 @@ struct VideoActions {
     var move: ((VideoItem, Int) -> Void)?
     /// Puts the video's channel in your channel groups.
     var addToGroup: ((VideoItem) -> Void)?
+    /// Standalone only: follows the video's channel ("Follow <channel>" in the menu).
+    var follow: ((VideoItem) -> Void)?
+    /// Whether a channel is followed (the Follow item shows only when it isn't).
+    var isFollowing: (String) -> Bool = { _ in false }
+    /// Standalone: any video can be marked (un)watched, not only ones the Mac sent.
+    var marksAnyWatched = false
 
     /// Does nothing (previews).
     static let none = VideoActions(play: { _ in }, download: { _ in }, delete: { _ in }, setWatched: { _, _ in },

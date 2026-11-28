@@ -1,20 +1,32 @@
 import StowKit
 import SwiftUI
 
-/// Not paired: the pair screen. Paired (or in demo mode): the app. When the Mac unpairs this
-/// phone, the repository says so and the pair screen comes back with the reason.
+/// First launch: the Welcome screen (with the Mac, or on its own). With the Mac: the pair screen
+/// until paired, then the app; when the Mac unpairs this phone, the repository says so and the pair
+/// screen comes back with the reason. On its own (or in demo mode): the app.
 struct RootView: View {
     @Environment(Repository.self) private var repository
 
+    enum Screen: Hashable { case welcome, pair, app }
+
+    static func screen(mode: AppMode, paired: Bool) -> Screen {
+        switch mode {
+        case .choosing: .welcome
+        case .mac: paired ? .app : .pair
+        case .standalone: .app
+        }
+    }
+
     var body: some View {
+        let screen = Self.screen(mode: repository.mode, paired: repository.pairState == .paired)
         Group {
-            if repository.pairState == .paired {
-                MainView()
-            } else {
-                PairScreen()
+            switch screen {
+            case .welcome: ModeChooser()
+            case .pair: PairScreen()
+            case .app: MainView()
             }
         }
-        .animation(.default, value: repository.pairState == .paired)
+        .animation(.default, value: screen)
         .stowTheme(repository.prefs, avatars: repository.avatars)
         .onChange(of: repository.prefs.theme, initial: true) { _, theme in
             WindowStyle.apply(theme)
@@ -63,6 +75,24 @@ struct MainView: View {
         .sheet(item: $shell.update) { update in
             UpdateSheet(update: update).sheetTheme(repository)
         }
+        .sheet(isPresented: $shell.addingChannel) {
+            AddChannelSheet().sheetTheme(repository)
+        }
+        .fullScreenCover(isPresented: $shell.signingIn) {
+            SignInScreen().sheetTheme(repository)
+        }
+        .modifier(CookiesImporter())
+        .alert("Pair with this Mac?", isPresented: Binding(get: { shell.pairingLink != nil }, set: { if !$0 { shell.pairingLink = nil } })) {
+            Button("Cancel", role: .cancel) { shell.pairingLink = nil }
+            Button("Pair") {
+                guard let link = shell.pairingLink else { return }
+                shell.pairingLink = nil
+                shell.closePlayer()
+                Task { await repository.pair(link) }
+            }
+        } message: {
+            Text("Stow stops working on its own; your channels on this phone are kept for later.")
+        }
         // The watch page and mini player (UI/Player), over the tabs so the sheets above still show.
         .playerHost()
         .nameAlert("New group", isPresented: $shell.namingNewGroup, confirm: "Create") { name in
@@ -88,6 +118,9 @@ struct RouteView: View {
         case .settings: SettingsScreen()
         case .report: ReportScreen()
         case .ytdlp: YtDlpDebugView()
+        case .account: AccountScreen()
+        case .channelsManage: ManageChannelsScreen()
+        case .importChannels: ImportChannelsScreen()
         }
     }
 }

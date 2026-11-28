@@ -26,6 +26,12 @@ enum Route: Hashable {
     case report
     /// The yt-dlp self-test, for checking a build.
     case ytdlp
+    /// Standalone: the YouTube sign-in (UI/Account).
+    case account
+    /// Standalone: the followed channels, to order and remove (UI/Channels).
+    case channelsManage
+    /// Standalone: pick channels from the account's YouTube subscriptions.
+    case importChannels
 }
 
 /// What to play: a video and the list it plays within (the rest is up next).
@@ -71,6 +77,14 @@ final class Shell {
     var saving: VideoItem?
     /// The update sheet (release notes, "Update in SideStore") is open for this release.
     var update: AppUpdate?
+    /// Standalone: the web login to YouTube is open.
+    var signingIn = false
+    /// Standalone: the cookies.txt picker is open.
+    var importingCookies = false
+    /// Standalone: "Add a channel" (URL, @handle or channel ID) is open.
+    var addingChannel = false
+    /// Standalone: a stow://pair link waits for "Pair with this Mac?".
+    var pairingLink: String?
 
     @ObservationIgnored private var toastTask: Task<Void, Never>?
 
@@ -179,8 +193,27 @@ final class Shell {
             notify: { [weak self] in self?.notify($0) },
             addToGroup: { [weak self] item in
                 self?.grouping = GroupChannel(id: item.video.channelId, title: item.video.channelTitle)
-            }
+            },
+            follow: repository.mode == .standalone ? { [weak self] item in self?.follow(item.video.channelId, title: item.video.channelTitle) } : nil,
+            isFollowing: { [weak self] in self?.repository.followedIds.contains($0) ?? false },
+            marksAnyWatched: repository.mode == .standalone
         )
+    }
+
+    /// Standalone: follows a channel (from a video's menu or its page) and checks it.
+    func follow(_ channelId: String, title: String, avatarURL: String? = nil) {
+        guard !channelId.isEmpty, let standalone = repository.standalone else { return }
+        if standalone.follow(ChannelInfo(id: channelId, title: title, avatarURL: avatarURL)) {
+            notify("Following \(title)")
+        }
+    }
+
+    /// Standalone: unfollows (downloads stay).
+    func unfollow(_ channelId: String) {
+        guard let standalone = repository.standalone else { return }
+        let title = standalone.channels.first { $0.id == channelId }?.title ?? repository.channelTitle(channelId)
+        standalone.unfollow(channelId)
+        notify("Removed \(title)")
     }
 
     /// Long videos (past streams especially) can be gigabytes: their size is shown first.
@@ -200,31 +233,49 @@ final class Shell {
         notify(item.isPlayable ? "Deleted from downloads" : "Download canceled")
     }
 
-    /// Pull to refresh: asks the Mac to check every channel and YouTube's feeds now, and waits for it.
-    func refreshFromMac() async {
-        switch await repository.refreshFromMac() {
-        case .done: notify("Up to date")
-        case .noAnswer: notify("The Mac didn't answer. Is Stow running on it?")
-        case .failed: notify("Couldn't reach the Mac's Firebase. Check the connection.")
+    /// Pull to refresh: with the Mac, asks it to check every channel and YouTube's feeds now and
+    /// waits for it; on its own, the phone checks them.
+    func refresh() async {
+        notify(Self.refreshMessage(await repository.pullToRefresh(), mode: repository.mode))
+    }
+
+    static func refreshMessage(_ result: RefreshResult, mode: AppMode) -> String {
+        switch result {
+        case .done: "Up to date"
+        case .noAnswer: "The Mac didn't answer. Is Stow running on it?"
+        case .failed: mode == .standalone ? "Couldn't reach YouTube. Check the connection." : "Couldn't reach the Mac's Firebase. Check the connection."
+        case .youtubeFailed: "Couldn't reach YouTube. Check the connection."
+        case .slowedDown: "YouTube asked Stow to slow down. It'll try again later."
         }
     }
 
     // Groups
 
     var groupActions: GroupActions {
-        GroupActions(repository: repository)
+        GroupActions(repository: repository, notify: { [weak self] in self?.notify($0) })
     }
 }
 
 /// What the group screens can do (the Repository's group functions).
+/// In standalone mode a group holds only followed channels: adding one that isn't followed
+/// follows it ("Following … too"), as the Mac does.
 @MainActor
 struct GroupActions {
     let repository: Repository
+    var notify: (String) -> Void = { _ in }
 
     @discardableResult
-    func create(_ name: String, with channel: GroupChannel? = nil) -> ChannelGroup { repository.createGroup(name, with: channel) }
+    func create(_ name: String, with channel: GroupChannel? = nil) -> ChannelGroup {
+        let (group, followed) = repository.createGroupFollowing(name, with: channel)
+        if followed, let channel { notify("Added to \(group.name). Following \(channel.title) too") }
+        return group
+    }
     func rename(_ id: String, to name: String) { repository.renameGroup(id, to: name) }
     func delete(_ id: String) { repository.deleteGroup(id) }
-    func set(_ groupId: String, channel: GroupChannel, included: Bool) { repository.setInGroup(groupId, channel: channel, included: included) }
+    /// True when the phone started following the channel (the caller's toast says so).
+    @discardableResult
+    func set(_ groupId: String, channel: GroupChannel, included: Bool) -> Bool {
+        repository.setInGroup(groupId, channel: channel, included: included)
+    }
     func move(_ id: String, by offset: Int) { repository.moveGroup(id, by: offset) }
 }

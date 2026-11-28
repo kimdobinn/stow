@@ -19,7 +19,7 @@ import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 
-/** Downloads one video with yt-dlp as a foreground job, reporting progress to the Mac. */
+/** Downloads one video with yt-dlp as a foreground job, reporting progress to the Mac when paired. */
 class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     private val repository = (context.applicationContext as StowApplication).repository
     private val notificationId = (inputData.getString(KEY_ID) ?: "").hashCode()
@@ -35,11 +35,15 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
 
         setForeground(foregroundInfo(video.title, 0))
         repository.local.update(id) { (it ?: LocalVideo(id, DownloadState.QUEUED)).copy(state = DownloadState.DOWNLOADING, progress = 0, error = null) }
-        runCatching { repository.remote.reportDownload(id, "downloading") }
+        repository.reportDownload(id, "downloading")
 
         // Cookies only for members-only videos: sharing the session from a second IP more than
         // needed risks YouTube rotating it on the Mac too.
         val cookies = if (video.isMembersOnly) repository.cookiesFile() else null
+        if (video.isMembersOnly && cookies == null && repository.isStandalone) {
+            repository.local.update(id) { it?.copy(state = DownloadState.FAILED, error = MEMBERS_SIGNED_OUT) }
+            return Result.failure()
+        }
         try {
             var lastShown = 0L
             val file = YtDlp.download(applicationContext, video, cookies, repository.prefs.downloadFormatSort) { percent ->
@@ -55,7 +59,7 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
                     state = DownloadState.DOWNLOADED, progress = 100, error = null, filePath = file.absolutePath,
                     sizeBytes = file.length(), durationMs = durationMs(file), downloadedAt = System.currentTimeMillis())
             }
-            runCatching { repository.remote.reportDownload(id, "downloaded") }
+            repository.reportDownload(id, "downloaded")
             // Its comments too, to read offline (best effort).
             runCatching { repository.comments(video, fresh = true) }
             return Result.success()
@@ -69,13 +73,20 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
             throw e
         } catch (e: Exception) {
             val message = e.message ?: e.javaClass.simpleName
+            // Standalone: YouTube no longer takes this phone's sign-in.
+            if (video.isMembersOnly && repository.isStandalone &&
+                dev.stow.android.standalone.YouTubeFailure.classify(message) == dev.stow.android.standalone.YouTubeFailure.Kind.AUTH) {
+                repository.standalone.markExpired()
+                repository.local.update(id) { it?.copy(state = DownloadState.FAILED, error = AUTH_EXPIRED) }
+                return Result.failure()
+            }
             Log.w("Stow", "Download $id failed (attempt $runAttemptCount): $message")
             if (runAttemptCount < MAX_RETRIES) {
                 repository.local.update(id) { it?.copy(state = DownloadState.QUEUED, error = message) }
                 return Result.retry()
             }
             repository.local.update(id) { it?.copy(state = DownloadState.FAILED, error = message) }
-            runCatching { repository.remote.reportDownload(id, "failed", message) }
+            repository.reportDownload(id, "failed", message)
             return Result.failure()
         } finally {
             cookies?.delete()
@@ -112,5 +123,7 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
         const val KEY_ID = "id"
         const val TAG = "download"
         const val MAX_RETRIES = 3
+        const val MEMBERS_SIGNED_OUT = "Members-only. Sign in to YouTube in Settings."
+        const val AUTH_EXPIRED = "YouTube signed you out. Sign in again in Settings."
     }
 }

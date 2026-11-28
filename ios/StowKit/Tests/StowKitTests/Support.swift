@@ -24,6 +24,9 @@ final class StubServer: @unchecked Sendable {
 
     typealias Handler = (Request) -> (status: Int, body: String)
 
+    /// A status that fails the request as if the phone were offline (no HTTP answer at all).
+    static let offline = -1
+
     let id = UUID().uuidString
     private let lock = NSLock()
     private var handler: Handler
@@ -82,6 +85,10 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
         }
         let (status, text) = server.respond(to: .init(method: request.httpMethod ?? "GET", url: url,
                                                       headers: request.allHTTPHeaderFields ?? [:], body: body))
+        if status == StubServer.offline {
+            client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
+            return
+        }
         let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1",
                                        headerFields: ["Content-Type": "application/json"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
@@ -188,4 +195,45 @@ final class FakeYouTube: YouTubeTool, @unchecked Sendable {
     func cancel(videoId: String) { lock.withLock { cancelCalls.append(videoId) } }
 
     func release() { lock.withLock { holdDownloads = false } }
+
+    // Standalone mode's listings
+
+    /// By URL (":ytrec", "https://www.youtube.com/channel/UC…/streams", …).
+    var flat: [String: String] = [:]
+    /// By URL: the call throws this message.
+    var flatErrors: [String: String] = [:]
+    /// Calls with cookies say the cookies were rejected.
+    var rejectCookies = false
+    var markError: String?
+    private(set) var flatCalls: [(url: String, count: Int, cookies: Bool)] = []
+    private(set) var marked: [String] = []
+
+    func flatListing(_ url: String, count: Int, cookies: URL?) async throws -> FlatListing {
+        try lock.withLock {
+            flatCalls.append((url, count, cookies != nil))
+            if let message = flatErrors[url] { throw StowError.server(message) }
+            return FlatListing(json: flat[url] ?? #"{"entries":[]}"#, cookiesRejected: cookies != nil && rejectCookies)
+        }
+    }
+
+    func markWatched(videoId: String, cookies: URL) async throws {
+        try lock.withLock {
+            if let markError { throw StowError.server(markError) }
+            marked.append(videoId)
+        }
+    }
+
+    func setFlat(_ url: String, _ json: String) { lock.withLock { flat[url] = json } }
+    func setRejectCookies(_ on: Bool) { lock.withLock { rejectCookies = on } }
+    var flatURLs: [String] { lock.withLock { flatCalls.map(\.url) } }
+}
+
+/// Fails loudly on any request to Firebase's hosts (standalone mode must never make one): the
+/// requests are recorded, answered 500, and tests check none came.
+let firebaseHosts: Set<String> = ["firestore.googleapis.com", "identitytoolkit.googleapis.com",
+                                  "securetoken.googleapis.com", "fcm.googleapis.com"]
+
+extension StubServer {
+    /// Requests that went to Firebase.
+    var firebaseRequests: [Request] { requests.filter { firebaseHosts.contains($0.url.host() ?? "") } }
 }

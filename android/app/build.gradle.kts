@@ -23,8 +23,8 @@ android {
         applicationId = "dev.stow.android"
         minSdk = 31
         targetSdk = 36
-        versionCode = 14
-        versionName = "0.8.2"
+        versionCode = 15
+        versionName = "0.9.0"
         // The Galaxy S24+ (and the Apple-silicon emulator) are 64-bit ARM; skipping the other
         // ABIs keeps yt-dlp's bundled Python and ffmpeg out of the APK four times over.
         ndk { abiFilters += "arm64-v8a" }
@@ -94,6 +94,8 @@ dependencies {
     implementation(libs.code.scanner)
     implementation(libs.youtubedl.library)
     implementation(libs.youtubedl.ffmpeg)
+    // The sign-in web view: no X-Requested-With header, and cookies with their real attributes.
+    implementation(libs.androidx.webkit)
     testImplementation(libs.junit)
     // The real org.json (Android's is a stub in unit tests).
     testImplementation(libs.json)

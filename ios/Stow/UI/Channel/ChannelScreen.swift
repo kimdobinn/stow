@@ -14,6 +14,17 @@ struct ChannelScreen: View {
     @State private var loading = false
     @State private var loadError: String?
     @State private var attempt = 0
+    /// The last name and picture seen: after unfollowing, they stay while YouTube's page loads.
+    @State private var knownTitle = ""
+    @State private var knownAvatar: String?
+
+    /// What the page loads: again on a retry, and when the channel stops being followed (removed
+    /// from this page), so it shows YouTube's videos and the Follow pill like any other channel.
+    private struct LoadKey: Equatable {
+        var attempt: Int
+        /// Standalone only (nil with the Mac, whose channels come and go with its polls).
+        var followed: Bool?
+    }
 
     enum ChannelTab: CaseIterable {
         case videos, live
@@ -29,9 +40,12 @@ struct ChannelScreen: View {
     var body: some View {
         let channel = repository.channel(channelId)
         let videos = repository.channelVideos(channelId)
-        let title = repository.channelTitle(channelId)
+        let current = repository.channelTitle(channelId)
+        let title = current.isEmpty ? knownTitle : current
+        // Standalone, a channel whose name is known shows its header (and Follow) while loading.
+        let showsHeader = channel != nil || !videos.isEmpty || (repository.mode == .standalone && !title.isEmpty)
         Group {
-            if channel == nil && videos.isEmpty {
+            if !showsHeader {
                 // Nothing to show until YouTube answers.
                 VStack {
                     if loading {
@@ -52,7 +66,9 @@ struct ChannelScreen: View {
         .background(colors.background)
         .navigationTitle(title.isEmpty ? "Channel" : title)
         .navigationBarTitleDisplayMode(.inline)
-        .task(id: attempt) { await load(followed: channel != nil) }
+        .onChange(of: current, initial: true) { _, name in if !name.isEmpty { knownTitle = name } }
+        .onChange(of: channel?.avatarURL ?? repository.avatars[channelId], initial: true) { _, url in if let url { knownAvatar = url } }
+        .task(id: LoadKey(attempt: attempt, followed: repository.mode == .standalone ? channel != nil : nil)) { await load(followed: channel != nil) }
     }
 
     private func page(channel: Channel?, videos: [VideoItem], title: String) -> some View {
@@ -63,7 +79,7 @@ struct ChannelScreen: View {
         return ScrollView {
             LazyVStack(spacing: 0) {
                 header(channel: channel, count: videos.count, title: title)
-                if channel == nil {
+                if channel == nil && repository.mode != .standalone {
                     FootnoteText(repository.channelPages[channelId] != nil
                                  ? "Not followed on the Mac yet. Add it to a group and the Mac follows it."
                                  : "Not followed on the Mac yet: these are its videos from your YouTube feeds and searches. Add it to a group and the Mac follows it.")
@@ -93,7 +109,7 @@ struct ChannelScreen: View {
 
     private func header(channel: Channel?, count: Int, title: String) -> some View {
         let groupNames = repository.groups.filter { $0.channels.contains { $0.id == channelId } }.map(\.name)
-        let avatar = channel?.avatarURL ?? repository.avatars[channelId]
+        let avatar = channel?.avatarURL ?? repository.avatars[channelId] ?? knownAvatar
         let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
                                                    : AnyLayout(HStackLayout(spacing: 16))
         return layout {
@@ -107,15 +123,43 @@ struct ChannelScreen: View {
                     .font(.footnote)
                     .foregroundStyle(colors.secondaryText)
                     .lineLimit(2)
-                PillButton(label: groupNames.isEmpty ? "Add to group" : groupNames.joined(separator: ", "),
-                           systemImage: groupNames.isEmpty ? "plus" : "checkmark") {
-                    shell.grouping = GroupChannel(id: channelId, title: title)
+                HStack(spacing: 8) {
+                    if repository.mode == .standalone {
+                        followButton(title: title, avatar: avatar)
+                    }
+                    PillButton(label: groupNames.isEmpty ? "Add to group" : groupNames.joined(separator: ", "),
+                               systemImage: groupNames.isEmpty ? "plus" : "checkmark") {
+                        shell.grouping = GroupChannel(id: channelId, title: title)
+                    }
                 }
                 .padding(.top, 6)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(16)
+    }
+
+    /// Standalone: "Follow" (filled) for a channel not followed; "Following" opens a menu to remove it.
+    @ViewBuilder private func followButton(title: String, avatar: String?) -> some View {
+        if repository.followedIds.contains(channelId) {
+            Menu {
+                Button("Remove channel", systemImage: "minus.circle", role: .destructive) { shell.unfollow(channelId) }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark")
+                    Text("Following").lineLimit(1)
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(colors.text)
+                .padding(.horizontal, 16)
+                .frame(minHeight: 40)
+                .background(colors.chip, in: Capsule())
+            }
+        } else {
+            PillButton(label: "Follow", systemImage: "plus", filled: true) {
+                shell.follow(channelId, title: title, avatarURL: avatar)
+            }
+        }
     }
 
     /// Not followed on the Mac: its latest videos from YouTube (kept half an hour).

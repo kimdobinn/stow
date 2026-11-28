@@ -30,6 +30,14 @@ nonisolated protocol YtDlpService: Sendable {
     /// The video's top comments: `{"comments": [...], "comment_count": n}` (about 5-10 s), as Android.
     func comments(videoID: String, cookies: URL?) async throws -> Data
 
+    /// Any flat listing: `--flat-playlist -J --playlist-end <count> <url>` (count 0: the page's own
+    /// fields), with the cookies when given. A run that only warned about the cookies comes back
+    /// with `cookiesRejected` set (standalone mode: channel tabs, playlists, :ytrec, :ytsubs, :ythistory).
+    func flatListing(url: String, count: Int, cookies: URL?) async throws -> YtDlpFlatListing
+
+    /// `--simulate --mark-watched` with the cookies: YouTube records a view. Rejected cookies throw.
+    func markWatched(videoID: String, cookies: URL) async throws
+
     /// Where AVPlayer can stream the video from (a few seconds).
     func stream(videoID: String, cookies: URL?) async throws -> YtDlpStream
 
@@ -48,6 +56,22 @@ nonisolated extension YtDlpService {
                   progress: @escaping @Sendable (YtDlpProgress) -> Void) async throws -> URL {
         let plan = try await downloadPlan(videoID: videoID, maxHeight: maxHeight, cookies: cookies)
         return try await download(plan, to: file, cookies: cookies, progress: progress)
+    }
+}
+
+/// A flat listing's JSON and whether YouTube took the cookies.
+nonisolated struct YtDlpFlatListing: Sendable, Equatable {
+    var json: Data
+    var cookiesRejected: Bool
+
+    /// The `flat` op's answer: `{"info": {…}, "cookiesRejected": bool}`.
+    static func parse(_ data: Data) throws -> YtDlpFlatListing {
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let info = object["info"], !(info is NSNull) else {
+            throw YtDlpError.failed("unexpected answer from yt-dlp")
+        }
+        return YtDlpFlatListing(json: try JSONSerialization.data(withJSONObject: info),
+                                cookiesRejected: object["cookiesRejected"] as? Bool ?? false)
     }
 }
 

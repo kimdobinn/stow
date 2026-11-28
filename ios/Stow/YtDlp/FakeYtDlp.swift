@@ -8,6 +8,9 @@ nonisolated struct FakeYtDlp: YtDlpService {
     var commentsJSON = Data(#"{"comments":[{"id":"c1","parent":"root","text":"Still a classic.","author":"@viewer","like_count":12,"timestamp":1700000000}],"comment_count":1}"#.utf8)
     var streamURL = URL(string: "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_16x9/bipbop_16x9_variant.m3u8")!
     var plannedBytes: Int64? = 48_000_000
+    /// The `flat` op's answer, by URL (else `searchJSON`), and whether it says the cookies were rejected.
+    var flatJSON: [String: Data] = [:]
+    var cookiesRejected = false
     var failure: YtDlpError?
 
     init() {}
@@ -29,6 +32,19 @@ nonisolated struct FakeYtDlp: YtDlpService {
     }
 
     func comments(videoID: String, cookies: URL?) async throws -> Data { try check(); return commentsJSON }
+
+    func flatListing(url: String, count: Int, cookies: URL?) async throws -> YtDlpFlatListing {
+        try check()
+        // Through the op's own answer shape, so the parsing is what the real one goes through.
+        let info = try JSONSerialization.jsonObject(with: flatJSON[url] ?? searchJSON)
+        let answer = try JSONSerialization.data(withJSONObject: ["info": info, "cookiesRejected": cookies != nil && cookiesRejected])
+        return try YtDlpFlatListing.parse(answer)
+    }
+
+    func markWatched(videoID: String, cookies: URL) async throws {
+        try check()
+        if cookiesRejected { throw YtDlpError.failed("The provided YouTube account cookies are no longer valid") }
+    }
 
     func stream(videoID: String, cookies: URL?) async throws -> YtDlpStream {
         try check()

@@ -62,10 +62,10 @@ public struct FirestoreClient: Sendable {
     let auth: FirebaseAuth
     let http: HTTPClient
 
-    public init(projectId: String, auth: FirebaseAuth, session: URLSession) {
+    public init(projectId: String, auth: FirebaseAuth, session: URLSession, firebaseGuard: FirebaseGuard? = nil) {
         self.projectId = projectId
         self.auth = auth
-        self.http = HTTPClient(session: session)
+        self.http = HTTPClient(session: session, firebaseGuard: firebaseGuard)
     }
 
     var root: String { "projects/\(projectId)/databases/(default)/documents" }

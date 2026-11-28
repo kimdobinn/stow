@@ -290,7 +290,8 @@ final class FakeVideoServer: @unchecked Sendable {
             }
         }
         let repository = Repository(config: testConfig, youtube: FakeYouTube(), defaults: freshDefaults(), directory: temporaryDirectory(),
-                                    tokenStore: InMemoryTokenStore(), network: FixedNetwork(.offline), session: server.session)
+                                    tokenStore: InMemoryTokenStore(), network: FixedNetwork(.offline), session: server.session,
+                                    cookieVault: InMemoryCookieVault())
         await repository.pair("stow://pair?p=stow-test&c=\(String(repeating: "c", count: 43))&k=\(key.base64URLEncodedString)")
         #expect(repository.pairState == .unpaired(message: "This pairing code was already used. On the Mac, open Pair a Phone again and scan the new code."))
     }
@@ -306,7 +307,8 @@ final class FakeVideoServer: @unchecked Sendable {
             }
         }
         let repository = Repository(config: testConfig, youtube: FakeYouTube(), defaults: freshDefaults(), directory: temporaryDirectory(),
-                                    tokenStore: InMemoryTokenStore(), network: FixedNetwork(.offline), session: server.session)
+                                    tokenStore: InMemoryTokenStore(), network: FixedNetwork(.offline), session: server.session,
+                                    cookieVault: InMemoryCookieVault())
         await repository.pair("stow://pair?p=stow-test&c=\(String(repeating: "c", count: 43))&k=\(key.base64URLEncodedString)")
         #expect(repository.pairState == .paired)
     }

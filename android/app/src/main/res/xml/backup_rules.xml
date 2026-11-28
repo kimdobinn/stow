@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The YouTube sign-in (files/youtube/) never leaves the phone: its key is in the AndroidKeyStore,
+     which isn't backed up, so a restored copy couldn't be read anyway. -->
+<full-backup-content>
+    <exclude domain="file" path="youtube/" />
+</full-backup-content>

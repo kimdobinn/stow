@@ -15,6 +15,7 @@ codeScanner = "16.1.0"
 youtubedl = "0.18.1"
 coroutinesPlayServices = "1.10.2"
 junit = "4.13.2"
+webkit = "1.12.1"
 
 [libraries]
 core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -45,6 +46,7 @@ json = { module = "org.json:json", version = "20240303" }
 youtubedl-library = { module = "io.github.junkfood02.youtubedl-android:library", version.ref = "youtubedl" }
 youtubedl-ffmpeg = { module = "io.github.junkfood02.youtubedl-android:ffmpeg", version.ref = "youtubedl" }
 junit = { module = "junit:junit", version.ref = "junit" }
+androidx-webkit = { module = "androidx.webkit:webkit", version.ref = "webkit" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

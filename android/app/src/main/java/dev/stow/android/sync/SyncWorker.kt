@@ -22,17 +22,25 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         val repository = app.repository
         // At most once a day, so the dot on the settings button is there before you open the app.
         app.updater.checkIfDue()
-        if (!repository.isPaired || repository.demo) return Result.success()
+        // Only a paired phone in Mac mode has anything to read (standalone never touches Firebase).
+        // Switched to standalone (or unpaired) while this ran: it stops there, its answer unused.
+        val era = repository.modeEra
+        if (repository.mode.value != dev.stow.android.standalone.AppMode.MAC || !repository.stillPaired(era) || repository.demo) return Result.success()
         return try {
             val videos = repository.remote.fetchVideos()
+            if (!repository.stillPaired(era)) return Result.success()
             android.util.Log.i("Stow", "Sync: ${videos.size} videos from the Mac")
             repository.onSentVideos(videos)
             Result.success()
         } catch (e: Remote.NotPaired) {
-            if (!repository.remote.isMember()) repository.unpair("The Mac unpaired this phone.")
+            if (repository.stillPaired(era) && !repository.remote.isMember() && repository.stillPaired(era)) {
+                repository.unpair("The Mac unpaired this phone.")
+            }
             Result.success()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
-            Result.retry()
+            if (repository.stillPaired(era)) Result.retry() else Result.success()
         }
     }
 
@@ -46,6 +54,11 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                 .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
                 .build()
             WorkManager.getInstance(context).enqueueUniqueWork("sync-now", ExistingWorkPolicy.REPLACE, request)
+        }
+
+        /** Leaving Mac mode: a sync waiting or under way stops (it would read Firebase). The hourly one stays; it only checks for updates outside Mac mode. */
+        fun stopNow(context: Context) {
+            WorkManager.getInstance(context).cancelUniqueWork("sync-now")
         }
 
         fun schedule(context: Context) {

@@ -274,12 +274,15 @@ struct VideoMenuItems: View {
                    systemImage: item.state == .failed ? "arrow.clockwise" : "arrow.down.circle") { actions.download(item) }
         }
         Button("Save to playlist", systemImage: "text.badge.plus") { actions.saveToPlaylist(item) }
-        if item.sent != nil {
+        if item.sent != nil || actions.marksAnyWatched {
             Button(item.watched ? "Mark as unwatched" : "Mark as watched",
                    systemImage: item.watched ? "eye.slash" : "eye") { actions.setWatched(item, !item.watched) }
         }
         if !item.video.channelId.isEmpty {
             Button("Go to channel", systemImage: "person.crop.square") { actions.openChannel(item.video.channelId) }
+            if let follow = actions.follow, !actions.isFollowing(item.video.channelId) {
+                Button("Follow \(item.video.channelTitle.isEmpty ? "channel" : item.video.channelTitle)", systemImage: "plus.circle") { follow(item) }
+            }
             if let add = actions.addToGroup {
                 Button("Add channel to a group", systemImage: "square.stack") { add(item) }
             }

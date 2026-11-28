@@ -106,7 +106,8 @@ struct GroupScreen: View {
             } header: {
                 Text("Channels")
             } footer: {
-                Text("Any video's ⋯ menu can add its channel too. Channels the Mac doesn't follow yet get added there (with Morning off).")
+                Text(repository.mode == .standalone ? "Any video's ⋯ menu can add its channel too. Channels you don't follow yet get followed."
+                                                    : "Any video's ⋯ menu can add its channel too. Channels the Mac doesn't follow yet get added there (with Morning off).")
             }
             .listRowBackground(colors.raised)
             Section {
@@ -153,7 +154,9 @@ private struct AddChannelsSheet: View {
             List(known) { channel in
                 let isIn = included.contains(channel.id)
                 Button {
-                    shell.groupActions.set(groupId, channel: GroupChannel(id: channel.id, title: channel.title), included: !isIn)
+                    if shell.groupActions.set(groupId, channel: GroupChannel(id: channel.id, title: channel.title), included: !isIn) {
+                        shell.notify("Following \(channel.title) too")
+                    }
                 } label: {
                     HStack(spacing: 12) {
                         ChannelAvatar(url: channel.avatarURL ?? repository.avatars[channel.id], name: channel.title, size: 32)
@@ -170,7 +173,10 @@ private struct AddChannelsSheet: View {
             .scrollContentBackground(.hidden)
             .background(colors.groupedBackground)
             .overlay {
-                if known.isEmpty { EmptyState("No channels yet: they come from the Mac and your YouTube feeds.") }
+                if known.isEmpty {
+                    EmptyState(repository.mode == .standalone ? "No channels yet: follow some, or sign in to YouTube for your feeds."
+                                                              : "No channels yet: they come from the Mac and your YouTube feeds.")
+                }
             }
             .navigationTitle("Add to \(group?.name ?? "group")")
             .navigationBarTitleDisplayMode(.inline)
@@ -198,8 +204,9 @@ struct GroupPickerSheet: View {
                     ForEach(repository.groups) { group in
                         let isIn = group.channelIds.contains(channel.id)
                         Button {
-                            actions.set(group.id, channel: channel, included: !isIn)
-                            shell.notify(isIn ? "Removed from \(group.name)" : "Added to \(group.name)")
+                            let followed = actions.set(group.id, channel: channel, included: !isIn)
+                            shell.notify(isIn ? "Removed from \(group.name)"
+                                         : followed ? "Added to \(group.name). Following \(channel.title) too" : "Added to \(group.name)")
                         } label: {
                             HStack {
                                 Image(systemName: isIn ? "checkmark.circle.fill" : "circle")
@@ -220,7 +227,8 @@ struct GroupPickerSheet: View {
                         Label("New group", systemImage: "plus")
                     }
                 } footer: {
-                    Text("Home can show just a group's channels. The Mac adds any channel it doesn't follow yet.")
+                    Text(repository.mode == .standalone ? "Home can show just a group's channels. Stow follows any channel it doesn't follow yet."
+                                                        : "Home can show just a group's channels. The Mac adds any channel it doesn't follow yet.")
                 }
                 .listRowBackground(colors.raised)
             }
@@ -232,8 +240,10 @@ struct GroupPickerSheet: View {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
             .nameAlert("New group", isPresented: $creating, confirm: "Create") { name in
+                let followedBefore = repository.mode != .standalone || repository.followedIds.contains(channel.id)
                 actions.create(name, with: channel)
-                shell.notify("Added to \(name)")
+                // Otherwise create's own toast says it's followed too.
+                if followedBefore { shell.notify("Added to \(name)") }
             }
         }
         .presentationDetents([.medium, .large])

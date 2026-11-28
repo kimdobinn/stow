@@ -67,6 +67,8 @@ data class LocalVideo(
     val sentAt: Long = 0,
     val downloadedAt: Long = 0,
     val updatedAt: Long = System.currentTimeMillis(),
+    /** What was downloaded, so it stays listed without the Mac (or after its channel goes). */
+    val video: Video? = null,
 )
 
 /** A video as the app shows it: what it is, whether it was sent, and what the phone has. */
@@ -155,7 +157,8 @@ data class YouTubeFeeds(
 }
 
 /** A channel's latest uploads and past streams, loaded on the phone for channels the Mac doesn't follow. */
-data class ChannelPage(val title: String, val avatarUrl: String?, val videoIds: List<String>, val streamIds: List<String>, val loadedAt: Long)
+data class ChannelPage(val title: String, val avatarUrl: String?, val videoIds: List<String>, val streamIds: List<String>, val loadedAt: Long,
+                       val handle: String? = null)
 
 /**
  * YouTube lists from yt-dlp's `--flat-playlist -J` answer: search results (`ytsearchN:`) or a
@@ -173,6 +176,13 @@ object YouTubeListing {
     fun channelTitle(json: String): String? =
         JSONObject(json).let { o -> (o.optString("channel").takeIf { it.isNotEmpty() && it != "null" } ?: o.optString("uploader").takeIf { it.isNotEmpty() && it != "null" }) }
 
+    /** The channel's @handle, on a channel tab (yt-dlp's uploader_id, or the end of uploader_url). */
+    fun channelHandle(json: String): String? {
+        val o = JSONObject(json)
+        o.optString("uploader_id").takeIf { it.startsWith("@") }?.let { return it }
+        return o.optString("uploader_url").substringAfterLast("/").takeIf { it.startsWith("@") && it.length > 1 }
+    }
+
     /**
      * Videos only, in YouTube's order: no Shorts, and no live or upcoming streams (only finished
      * ones). A channel tab's videos don't name their channel; they get the tab's.
@@ -184,26 +194,75 @@ object YouTubeListing {
         val pageChannel = channelTitle(json).orEmpty().takeIf { pageChannelId.isNotEmpty() }.orEmpty()
         return (0 until entries.length()).mapNotNull { i ->
             val o = entries.optJSONObject(i) ?: return@mapNotNull null
-            val id = o.optString("id").takeIf { it.length == 11 } ?: return@mapNotNull null
             if ("/shorts/" in o.optString("url")) return@mapNotNull null
-            val live = o.optString("live_status").takeIf { it.isNotEmpty() && it != "null" }
-            if (live == "is_live" || live == "is_upcoming" || live == "post_live") return@mapNotNull null
-            val thumbnails = o.optJSONArray("thumbnails")
-            val thumbnail = thumbnails?.let { t ->
-                (0 until t.length()).mapNotNull { t.optJSONObject(it) }.maxByOrNull { it.optInt("width") }?.optString("url")
-            }?.takeIf { it.isNotEmpty() } ?: "https://i.ytimg.com/vi/$id/hqdefault.jpg"
-            Video(
-                id = id,
-                channelId = o.optString("channel_id").takeIf { it.isNotEmpty() && it != "null" } ?: pageChannelId,
-                channelTitle = o.optString("channel").takeIf { it.isNotEmpty() && it != "null" }
-                    ?: o.optString("uploader").takeIf { it.isNotEmpty() && it != "null" } ?: pageChannel,
-                title = o.optString("title").takeIf { it.isNotEmpty() && it != "null" } ?: id,
-                publishedAt = if (o.has("timestamp") && !o.isNull("timestamp")) java.util.Date((o.optDouble("timestamp") * 1000).toLong()) else null,
-                thumbnailUrl = thumbnail,
-                isMembersOnly = o.optString("availability") == "subscriber_only",
-                liveStatus = live,
-                durationSeconds = if (o.has("duration") && !o.isNull("duration")) o.optDouble("duration").toLong() else null,
-            ).takeUnless { it.isShort }
+            val video = entry(o, pageChannelId, pageChannel) ?: return@mapNotNull null
+            if (video.liveStatus == "is_live" || video.liveStatus == "is_upcoming" || video.liveStatus == "post_live") return@mapNotNull null
+            video.takeUnless { it.isShort }
         }
+    }
+
+    /** One video's own answer (`-J` on a watch URL), Shorts and streams included: what a download is of. */
+    fun video(json: String): Video? = runCatching {
+        // A video's own answer lists every size, and the widest (maxresdefault) often doesn't exist.
+        entry(JSONObject(json), "", "")?.let { it.copy(thumbnailUrl = "https://i.ytimg.com/vi/${it.id}/hqdefault.jpg") }
+    }.getOrNull()
+
+    private fun entry(o: JSONObject, pageChannelId: String, pageChannel: String): Video? {
+        val id = o.optString("id").takeIf { it.length == 11 } ?: return null
+        val live = o.optString("live_status").takeIf { it.isNotEmpty() && it != "null" }
+        val thumbnails = o.optJSONArray("thumbnails")
+        val thumbnail = thumbnails?.let { t ->
+            (0 until t.length()).mapNotNull { t.optJSONObject(it) }.maxByOrNull { it.optInt("width") }?.optString("url")
+        }?.takeIf { it.isNotEmpty() } ?: "https://i.ytimg.com/vi/$id/hqdefault.jpg"
+        return Video(
+            id = id,
+            channelId = o.optString("channel_id").takeIf { it.isNotEmpty() && it != "null" } ?: pageChannelId,
+            channelTitle = o.optString("channel").takeIf { it.isNotEmpty() && it != "null" }
+                ?: o.optString("uploader").takeIf { it.isNotEmpty() && it != "null" } ?: pageChannel,
+            title = o.optString("title").takeIf { it.isNotEmpty() && it != "null" } ?: id,
+            publishedAt = if (o.has("timestamp") && !o.isNull("timestamp")) java.util.Date((o.optDouble("timestamp") * 1000).toLong()) else null,
+            thumbnailUrl = thumbnail,
+            isMembersOnly = o.optString("availability") == "subscriber_only",
+            liveStatus = live,
+            durationSeconds = if (o.has("duration") && !o.isNull("duration")) o.optDouble("duration").toLong() else null,
+        )
+    }
+}
+
+/**
+ * A [Video] as JSON, in the field names both phones use (standalone.json, and a download's video
+ * in videos.json): dates in epoch milliseconds, duration in seconds.
+ */
+object VideoJson {
+    fun encode(video: Video): JSONObject = JSONObject().apply {
+        put("id", video.id)
+        put("channelId", video.channelId)
+        put("channelTitle", video.channelTitle)
+        put("title", video.title)
+        put("publishedAt", video.publishedAt?.time ?: JSONObject.NULL)
+        put("thumbnailURL", video.thumbnailUrl ?: JSONObject.NULL)
+        put("isMembersOnly", video.isMembersOnly)
+        put("liveStatus", if (video.isPastStream) "wasLive" else video.liveStatus ?: "none")
+        put("duration", video.durationSeconds ?: JSONObject.NULL)
+    }
+
+    fun decode(o: JSONObject): Video? {
+        val id = o.optString("id").takeIf { it.isNotEmpty() } ?: return null
+        fun string(key: String) = o.optString(key).takeIf { o.has(key) && !o.isNull(key) }
+        return Video(
+            id = id,
+            channelId = string("channelId").orEmpty(),
+            channelTitle = string("channelTitle").orEmpty(),
+            title = string("title") ?: id,
+            publishedAt = if (o.has("publishedAt") && !o.isNull("publishedAt")) Date(o.optLong("publishedAt")) else null,
+            thumbnailUrl = string("thumbnailURL"),
+            isMembersOnly = o.optBoolean("isMembersOnly"),
+            liveStatus = when (val live = string("liveStatus")) {
+                null, "none", "unknown" -> null
+                "was_live" -> "wasLive"
+                else -> live
+            },
+            durationSeconds = if (o.has("duration") && !o.isNull("duration")) o.optDouble("duration").toLong() else null,
+        )
     }
 }

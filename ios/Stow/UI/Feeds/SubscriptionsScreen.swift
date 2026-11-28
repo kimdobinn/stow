@@ -30,7 +30,7 @@ struct SubscriptionsScreen: View {
                             .padding(.horizontal, 8)
                             .padding(.vertical, 8)
                         }
-                        Button("All") { shell.open(.channels) }
+                        Button("All") { shell.open(repository.mode == .standalone ? .channelsManage : .channels) }
                             .font(.body.weight(.medium))
                             .padding(.horizontal, 14)
                             .accessibilityLabel("All channels")
@@ -49,13 +49,14 @@ struct SubscriptionsScreen: View {
                     .padding(.vertical, 6)
                 }
                 if shown.isEmpty {
-                    EmptyState("No videos yet. Pull down to ask the Mac for new ones.")
+                    EmptyState(repository.mode == .standalone ? "No videos yet. Follow channels, or pull down to check them."
+                                                              : "No videos yet. Pull down to ask the Mac for new ones.")
                 }
                 ForEach(shown) { VideoCard(item: $0, actions: actions) }
             }
         }
         .background(colors.background)
-        .refreshable { await shell.refreshFromMac() }
+        .refreshable { await shell.refresh() }
         .navigationTitle("Subscriptions")
         .toolbar { TabToolbar(shell: shell) }
         .onChange(of: channels.map(\.id)) { _, ids in
@@ -121,7 +122,10 @@ struct ChannelsScreen: View {
         .scrollContentBackground(.hidden)
         .background(colors.background)
         .overlay {
-            if repository.subscribedChannels.isEmpty { EmptyState("No channels yet: they come from the Mac and your YouTube feeds.") }
+            if repository.subscribedChannels.isEmpty {
+                EmptyState(repository.mode == .standalone ? "No channels yet: follow some, or sign in to YouTube for your feeds."
+                                                          : "No channels yet: they come from the Mac and your YouTube feeds.")
+            }
         }
         .navigationTitle("All channels")
         .navigationBarTitleDisplayMode(.inline)

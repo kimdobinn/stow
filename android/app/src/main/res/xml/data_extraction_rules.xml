@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The YouTube sign-in (files/youtube/) stays out of cloud backups and device transfers. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="youtube/" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="youtube/" />
+    </device-transfer>
+</data-extraction-rules>

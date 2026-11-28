@@ -4,6 +4,10 @@ The iPhone version of Stow's phone app. It does what the Android app does: it pa
 by QR code, shows the Mac's channels, YouTube's Home and Subscriptions, searches and channel pages,
 and downloads what the Mac sends, or what you pick on the phone, so you can watch it offline.
 
+It also works without the Mac: on first launch it asks "How do you want to use Stow?", and **Use on
+its own** makes the phone follow channels and check them for new videos itself, with no Firebase
+at all (see [Standalone mode](#standalone-mode)).
+
 It is a native SwiftUI app (iOS 17 and later, iPhone only, bundle id `dev.stow.ios`), meant to be
 sideloaded with SideStore or AltStore on a free Apple ID. The Android app in `android/` is the
 reference: this one ports its behaviour, not its code.
@@ -75,11 +79,53 @@ For trying the app in the simulator without a Mac or Firebase:
 | `-theme system\|light\|dark\|paper`, `-calm YES`, `-grayscale YES`, `-downloadQuality p480` | Settings for this launch only. |
 | `-updates-url <url>` | Debug builds only: the update check reads this releases list instead of GitHub's, at every launch (a fake one served from the Mac). |
 | `-ytdlp-selftest [-ytdlp-selftest-exit] [-ytdlp-nojs] [-ytdlp-debug]` | Runs yt-dlp's self-test against public videos and prints `SELFTEST PASS/FAIL` lines. |
+| `-standalone` | Debug builds: standalone mode, unless paired (then it logs "-standalone ignored: paired" and never unpairs). A file named `standalone` in Application Support does the same. `-demo` wins over it. |
+| `-choose-mode` | Debug builds: forgets the mode when not paired, so the Welcome screen shows. |
+| `-standalone-reset` | Debug builds: deletes standalone.json and the Keychain's YouTube cookies before start. |
+| `-channels <ref>,<ref>` | Debug builds, standalone: follows each (UC id, @handle or URL) at launch, skipping followed ones, and checks them. |
+| `-cookies <path>` | Debug builds, standalone: imports that cookies.txt (a path in the app's data container, e.g. `Library/Application Support/test-cookies.txt`) without asking YouTube first, so fake cookies get stored. |
+
+`-open` also takes `account`, `channels-manage`, `import`, `add-channel` and `signin` (standalone mode's screens).
 
 ```sh
 xcrun simctl launch <simulator> dev.stow.ios -demo -open search -search "big buck bunny"
-log stream --level debug --predicate 'subsystem == "dev.stow.ios"'   # categories: repository, downloads, player
+log stream --level debug --predicate 'subsystem == "dev.stow.ios"'   # categories: repository, downloads, player, standalone, sign-in
+
+# Standalone mode with NASA followed, from scratch
+xcrun simctl launch <simulator> dev.stow.ios -standalone -standalone-reset -channels UCLA_DiR1FfKNvjuUpBHmylQ
 ```
+
+## Standalone mode
+
+"Use on its own" (the Welcome screen, Settings › Mac › "Use on its own", or the pair screen's "Use
+on its own instead") makes the phone do the Mac's jobs. The spec both phones follow is the same
+(Android 0.9.0, iPhone 0.2.0); what the iPhone does:
+
+- **Mode.** `appMode` in UserDefaults (`mac` or `standalone`), worked out at launch from the
+  preferences only (`AppMode.resolve`): an install paired before 0.2.0 becomes `mac` and stays
+  paired. In standalone the Repository has no `Remote` at all, and its `FirebaseGuard` refuses
+  (and in debug builds asserts on) any Firebase request.
+- **Channels** live in `Application Support/standalone.json` (one schema with Android; unknown keys
+  are kept), with each channel's 30 newest videos. Follow from a channel page, a video's ⋯ menu,
+  Settings › Channels (a URL, @handle, channel ID or video link) or, signed in, Import from YouTube
+  (nothing is picked for you). Groups are stored there too; a group's channels are followed.
+- **Checks** (`StandaloneEngine`, `CheckPlan`): uploads from the `UULF` RSS feed over plain HTTP
+  (if YouTube's playlist feeds keep answering 5xx, the Videos tab through yt-dlp, whose dates are
+  approximate: kept in the tab's order, and never replacing a date already known), past streams
+  from the Live tab every 6 hours, members-only videos hourly when signed in. At launch, back on
+  screen and every minute while open when 14 minutes have passed since the last check started (a
+  check that couldn't reach YouTube doesn't count), on pull-to-refresh, and in the background
+  refresh task (only the RSS round and a due watched sync: iOS gives it about 30 s). HTTP 429 or
+  5xx backs automatic checks off (30 minutes, doubling to 4 hours). A Live tab listed without each
+  entry's `live_status` isn't counted as read.
+- **YouTube sign-in is optional**: Google's login in a non-persistent web view with Mobile
+  Safari's user agent, or a cookies.txt file. The cookies live only in the Keychain
+  (`dev.stow.ios.youtube`, this device only). Signed in, the phone reads YouTube's Home and
+  Subscriptions, members-only videos and syncs watched with YouTube's history; when YouTube stops
+  taking the cookies, a notification and a Home banner say so once.
+- **Nothing downloads by itself**, as with the Mac since auto-download went: downloads are what you tap.
+- Switching to the Mac signs the phone out of YouTube and keeps standalone.json for later;
+  switching back from the Mac can copy the Mac's channels, recent videos and groups.
 
 ## How it's built
 
@@ -94,6 +140,8 @@ ios/
       Firebase/          anonymous auth and Firestore over REST (no Firebase SDK); Remote = Stow's layout
       Store/             Prefs (UserDefaults), LocalStore (downloads), playlists, watch stats
       Sync/              Repository (the app's state), DownloadManager, YouTubeTool protocol, DemoData
+      Standalone/        standalone mode: the engine, check plan, RSS, channel resolver, subscriptions import
+      Account/           Netscape cookies.txt, the Keychain cookie vault, the sign-in's state
     Tests/StowKitTests/  stubbed Firestore (URLProtocol), fake YouTube, fixtures
   Stow/
     App/                 @main, AppServices (wiring), background tasks, YtDlpTool (StowKit ↔ yt-dlp), launch arguments
@@ -170,6 +218,12 @@ ios/
   fake YouTube: polling and merging, unpairing, pairing (including a reused QR code), downloads
   with retries, Wi-Fi rules and pauses, and the phone's own requests (a failed request filed on a
   later poll, a deleted one staying deleted, downloads still listed after a relaunch).
+- **Standalone mode** (in `swift test`): the mode migration, cookies.txt format and parse, the
+  channel resolver's inputs, the channel page, RSS, past streams, members and access parsers,
+  the subscriptions walker and SAPISIDHASH, failure classes, the check plan, the merge rules,
+  standalone.json, the import picker, and the Repository end to end on a stubbed youtube.com and a
+  fake yt-dlp with Firebase's hosts as a tripwire (follow, pull, backoff, groups, downloads,
+  expiry and sign-out, mode switches both ways).
 - **The app** (`xcodebuild … test`): the Python bridge (threads, cancellation, progress),
   yt-dlp's output parsing, merging H.264 and AAC into an .mp4, the Shell's navigation and
   playback rules on a demo Repository, the player on generated files (resume, autoplay, speed,

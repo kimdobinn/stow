@@ -95,11 +95,36 @@ class Prefs(context: Context) {
     /** Videos marked watched on the phone that were never sent to it (streamed). */
     private val _watchedHere = MutableStateFlow(prefs.getStringSet(KEY_WATCHED_HERE, emptySet()).orEmpty().toSet())
     val watchedHere: StateFlow<Set<String>> = _watchedHere.asStateFlow()
+    @Synchronized
     fun setWatchedHere(id: String, watched: Boolean) {
         val updated = if (watched) _watchedHere.value + id else _watchedHere.value - id
         prefs.edit().putStringSet(KEY_WATCHED_HERE, updated).apply()
         _watchedHere.value = updated
     }
+
+    /** Several at once (YouTube's history, the Mac's watched videos when switching to standalone). */
+    @Synchronized
+    fun addWatchedHere(ids: Collection<String>) {
+        if (ids.all { it in _watchedHere.value }) return
+        val updated = _watchedHere.value + ids
+        prefs.edit().putStringSet(KEY_WATCHED_HERE, updated).apply()
+        _watchedHere.value = updated
+    }
+
+    /** "mac" or "standalone" (see standalone/AppMode); null until chosen. */
+    var appMode: String?
+        get() = prefs.getString(KEY_APP_MODE, null)
+        set(value) { prefs.edit().apply { if (value == null) remove(KEY_APP_MODE) else putString(KEY_APP_MODE, value) }.commit() }
+
+    private val _signInPrompt = flag(KEY_SIGN_IN_PROMPT, false)
+    /** Home's "Sign in to YouTube on this phone" card, after switching from the Mac. */
+    val signInPrompt: StateFlow<Boolean> = _signInPrompt.asStateFlow()
+    fun setSignInPrompt(on: Boolean) = set(_signInPrompt, KEY_SIGN_IN_PROMPT, on)
+
+    private val _expiredBannerDismissed = flag(KEY_EXPIRED_DISMISSED, false)
+    /** Home's "YouTube signed you out" banner was closed (until the next time it happens). */
+    val expiredBannerDismissed: StateFlow<Boolean> = _expiredBannerDismissed.asStateFlow()
+    fun setExpiredBannerDismissed(on: Boolean) = set(_expiredBannerDismissed, KEY_EXPIRED_DISMISSED, on)
 
         /** The Firebase project the Mac paired this phone with, once paired. */
     val pairedProject: String? get() = prefs.getString(KEY_PROJECT, null)
@@ -189,6 +214,9 @@ class Prefs(context: Context) {
         const val KEY_ALARM_MAC = "alarmMac"
         const val KEY_ALARM_AT = "alarmAt"
         const val KEY_ALARM_ENDED = "alarmEndedSentAt"
+        const val KEY_APP_MODE = "appMode"
+        const val KEY_SIGN_IN_PROMPT = "signInPrompt"
+        const val KEY_EXPIRED_DISMISSED = "expiredBannerDismissed"
     }
 }
 

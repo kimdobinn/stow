@@ -266,6 +266,11 @@ data class VideoActions(
     val move: ((VideoItem, Int) -> Unit)? = null,
     /** Puts the video's channel in your channel groups. */
     val addToGroup: ((VideoItem) -> Unit)? = null,
+    /** Standalone: follows the video's channel (offered for channels not in `followed`). */
+    val follow: ((VideoItem) -> Unit)? = null,
+    val followed: Set<String> = emptySet(),
+    /** Standalone: any video can be marked watched (otherwise only ones the Mac sent). */
+    val markAnyWatched: Boolean = false,
 )
 
 @Composable
@@ -280,11 +285,20 @@ fun VideoMenu(item: VideoItem, actions: VideoActions, expanded: Boolean, onDismi
                                      onClick = act { actions.download(item) })
         }
         DropdownMenuItem(text = { Text("Save to playlist") }, onClick = act { actions.saveToPlaylist(item) })
-        if (item.sent != null) {
+        if (item.sent != null || actions.markAnyWatched) {
             DropdownMenuItem(text = { Text(if (item.watched) "Mark as unwatched" else "Mark as watched") },
                              onClick = act { actions.setWatched(item, !item.watched) })
         }
-        DropdownMenuItem(text = { Text("Go to channel") }, onClick = act { actions.openChannel(item.video.channelId) })
+        if (item.video.channelId.isNotEmpty()) {
+            DropdownMenuItem(text = { Text("Go to channel") }, onClick = act { actions.openChannel(item.video.channelId) })
+        }
+        actions.follow?.let { follow ->
+            val channel = item.video.channelId
+            if (channel.isNotEmpty() && channel !in actions.followed) {
+                DropdownMenuItem(text = { Text("Follow ${item.video.channelTitle.ifEmpty { "channel" }}", maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis) }, onClick = act { follow(item) })
+            }
+        }
         actions.addToGroup?.let { add ->
             if (item.video.channelId.isNotEmpty()) DropdownMenuItem(text = { Text("Add channel to a group") }, onClick = act { add(item) })
         }

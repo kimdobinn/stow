@@ -107,9 +107,9 @@ public actor FirebaseAuth {
     /// Renew this long before the ID token runs out (an hour after it was issued).
     static let refreshMargin: TimeInterval = 5 * 60
 
-    public init(config: FirebaseConfig, session: URLSession, store: TokenStore) {
+    public init(config: FirebaseConfig, session: URLSession, store: TokenStore, firebaseGuard: FirebaseGuard? = nil) {
         self.config = config
-        self.http = HTTPClient(session: session)
+        self.http = HTTPClient(session: session, firebaseGuard: firebaseGuard)
         self.store = store
         self.tokens = store.load()
     }
@@ -204,12 +204,65 @@ extension CharacterSet {
     static let urlUnreserved = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
 }
 
+/// Firebase only in Mac mode: the Repository closes the guard when the app leaves it, and any
+/// request still on its way is refused.
+///
+/// Each time it closes, the Remotes made before are retired. A retired Remote's request (work it
+/// started in Mac mode and is finishing: a pull waiting for the Mac, a pairing's poll) is refused
+/// quietly with `CancellationError`. Any other request while closed comes from code that reached
+/// Firebase outside Mac mode: refused, and in debug builds an assertion fails.
+public final class FirebaseGuard: @unchecked Sendable {
+    private let lock = NSLock()
+    private var mode: AppMode
+    /// Bumped each time the guard closes.
+    private var era = 0
+
+    public init(mode: AppMode = .mac) {
+        self.mode = mode
+    }
+
+    public func set(_ mode: AppMode) {
+        lock.withLock {
+            if self.mode == .mac, mode != .mac { era += 1 }
+            self.mode = mode
+        }
+    }
+
+    public var isOpen: Bool { lock.withLock { mode == .mac } }
+
+    /// For a client made now: the era it belongs to while open, nil while closed.
+    var openEra: Int? { lock.withLock { mode == .mac ? era : nil } }
+
+    /// Throws `CancellationError` for a retired client (`era` from before the guard last closed),
+    /// and `.notPaired` (failing an assertion in debug builds) for any other request outside Mac mode.
+    public func check(era opened: Int? = nil) throws {
+        let (open, current) = lock.withLock { (mode == .mac, era) }
+        if let opened, opened != current { throw CancellationError() }
+        guard open else {
+            #if DEBUG
+            assertionFailure("FIREBASE TOUCHED in standalone")
+            #endif
+            throw StowError.notPaired
+        }
+    }
+}
+
 /// URLSession for Google's APIs.
 struct HTTPClient: Sendable {
     let session: URLSession
+    var firebaseGuard: FirebaseGuard?
+    /// The guard's era when this client was made (nil: made while closed, or no guard).
+    let era: Int?
+
+    init(session: URLSession, firebaseGuard: FirebaseGuard? = nil) {
+        self.session = session
+        self.firebaseGuard = firebaseGuard
+        era = firebaseGuard?.openEra
+    }
 
     /// Throws `.network` only for transport failures; HTTP errors come back as the status.
     func send(_ request: URLRequest) async throws -> (data: Data, status: Int) {
+        try firebaseGuard?.check(era: era)
         do {
             let (data, response) = try await session.data(for: request)
             return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)

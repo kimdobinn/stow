@@ -61,6 +61,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import dev.stow.android.data.PairState
+import dev.stow.android.standalone.AppMode
+import dev.stow.android.ui.ModeScreen
 import dev.stow.android.data.VideoItem
 import dev.stow.android.remote.RemoteModel
 import dev.stow.android.ui.ChannelScreen
@@ -133,15 +135,36 @@ class MainActivity : ComponentActivity() {
         handle(intent)
     }
 
-    /** stow://pair?… opened from the phone's camera app, or the alarm notification. */
+    /** A pairing link that arrived in standalone mode, waiting for "Pair with this Mac?". */
+    private var pendingPair by mutableStateOf<String?>(null)
+
+    /** stow://pair?… opened from the phone's camera app, the alarm notification, or the sign-in notification. */
     private fun handle(intent: Intent?) {
         if (intent?.action == ACTION_OPEN_REMOTE) {
-            openRoute = "remote"
+            if (repository.mode.value == AppMode.MAC) openRoute = "remote"
             // Not again when the activity is recreated with the same intent.
             intent.action = null
         }
+        if (intent?.action == ACTION_OPEN_SETTINGS) {
+            openRoute = "settings"
+            intent.action = null
+        }
+        // Debug builds: `--es stow.route settings|account|channels|import|search` opens that screen.
+        if (BuildConfig.DEBUG) intent?.getStringExtra(EXTRA_ROUTE)?.let { route ->
+            openRoute = when (route) {
+                "settings", "account" -> "settings"
+                "channels" -> "channels-manage"
+                "import" -> "import"
+                "search" -> "search"
+                else -> null
+            }
+            intent.removeExtra(EXTRA_ROUTE)
+        }
         val data = intent?.data ?: return
-        if (data.scheme == "stow" && data.host == "pair") repository.pair(data.toString())
+        if (data.scheme == "stow" && data.host == "pair") {
+            intent.data = null
+            if (repository.mode.value == AppMode.STANDALONE) pendingPair = data.toString() else repository.pair(data.toString())
+        }
     }
 
     /** On the alarm remote, the volume keys turn the Mac's speaker up and down instead of the phone's. */
@@ -170,10 +193,23 @@ class MainActivity : ComponentActivity() {
             runCatching { startActivity(confirm.intent) }
             app.updater.confirmShown(confirm)
         }
-        if (pairState != PairState.Paired) {
-            PairScreen(pairState, onScanned = repository::pair)
-        } else {
-            Shell()
+        val mode by repository.mode.collectAsStateWithLifecycle()
+        when {
+            mode == AppMode.CHOOSING -> ModeScreen(onMac = repository::chooseMac, onStandalone = repository::chooseStandalone)
+            mode == AppMode.STANDALONE -> Shell()
+            pairState != PairState.Paired -> PairScreen(pairState, onScanned = repository::pair, onStandalone = repository::chooseStandalone)
+            else -> Shell()
+        }
+        pendingPair?.let { link ->
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { pendingPair = null },
+                title = { Text("Pair with this Mac?") },
+                text = { Text("Stow stops working on its own; your channels on this phone are kept for later.") },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = { pendingPair = null; repository.pair(link) }) { Text("Pair") }
+                },
+                dismissButton = { androidx.compose.material3.TextButton(onClick = { pendingPair = null }) { Text("Cancel") } },
+            )
         }
     }
 
@@ -190,6 +226,8 @@ class MainActivity : ComponentActivity() {
         val current by player.current.collectAsStateWithLifecycle()
         val queue by player.queue.collectAsStateWithLifecycle()
         val route = nav.currentBackStackEntryAsState().value?.destination?.route
+        val mode by repository.mode.collectAsStateWithLifecycle()
+        val standaloneMode = mode == AppMode.STANDALONE
         // Cleared when Shell goes (e.g. the Mac unpaired this phone), so the volume keys work again.
         DisposableEffect(route) {
             shownRoute = route
@@ -222,6 +260,8 @@ class MainActivity : ComponentActivity() {
         }
 
         val all = itemsById.values.filterNot { it.onlyInYouTubeFeeds }
+        // Downloads also include videos from searches and YouTube's feeds (standalone never "sends" them).
+        val downloads = itemsById.values.filter { !it.onlyInYouTubeFeeds || it.state != null }
         val youtubeFeeds by repository.youtubeFeeds.collectAsStateWithLifecycle()
         val groups by repository.groups.collectAsStateWithLifecycle()
         val feed = all.sortedByDescending { it.video.publishedAt?.time ?: it.sent?.sentAt?.time ?: 0 }
@@ -242,15 +282,28 @@ class MainActivity : ComponentActivity() {
         var sizing by remember { mutableStateOf<VideoItem?>(null) }
         val groupActions = dev.stow.android.ui.GroupActions(
             create = repository::createGroup, rename = repository::renameGroup, delete = repository::deleteGroup,
-            setChannel = repository::setInGroup, move = repository::moveGroup,
+            setChannel = repository::setInGroup, move = repository::moveGroup, standalone = standaloneMode,
         )
+        val engine = repository.standalone
+        val followedIds by engine.followedIds.collectAsStateWithLifecycle()
+        val account by engine.account.collectAsStateWithLifecycle()
+        val checkStatus by engine.checkStatus.collectAsStateWithLifecycle()
+        val signInPrompt by repository.prefs.signInPrompt.collectAsStateWithLifecycle()
+        val expiredDismissed by repository.prefs.expiredBannerDismissed.collectAsStateWithLifecycle()
+        var addingChannel by remember { mutableStateOf(false) }
+        LaunchedEffect(Unit) { repository.messages.collect { notify(it) } }
         val refresh: suspend () -> Unit = {
-            when (repository.refreshFromMac()) {
+            when (repository.refresh()) {
                 dev.stow.android.data.Repository.RefreshResult.DONE -> notify("Up to date")
                 dev.stow.android.data.Repository.RefreshResult.NO_ANSWER -> notify("The Mac didn't answer. Is Stow running on it?")
                 dev.stow.android.data.Repository.RefreshResult.FAILED -> notify("Couldn't reach the Mac's Firebase. Check the connection.")
+                dev.stow.android.data.Repository.RefreshResult.YOUTUBE_FAILED -> notify("Couldn't reach YouTube. Check the connection.")
+                dev.stow.android.data.Repository.RefreshResult.SLOWED_DOWN -> notify("YouTube asked Stow to slow down. It'll try again later.")
             }
         }
+        val cookiesImport = if (standaloneMode) dev.stow.android.ui.rememberCookiesImport(engine, ::notify) {
+            if (route == "account-signin") nav.popBackStack()
+        } else null
         LaunchedEffect(all.count { it.isPlayable }) {
             storage = withContext(Dispatchers.IO) { "${Format.bytes(repository.storageUsedBytes())} used on this phone" }
         }
@@ -271,7 +324,7 @@ class MainActivity : ComponentActivity() {
                 // A video that isn't downloaded streams on its own.
                 val context = when {
                     !item.isPlayable -> listOf(item)
-                    route == "downloads" -> all.filter { it.isPlayable }.sortedFor(sort)
+                    route == "downloads" -> downloads.filter { it.isPlayable }.sortedFor(sort)
                     else -> feed.filter { it.isPlayable }
                 }
                 play(context, item)
@@ -295,17 +348,31 @@ class MainActivity : ComponentActivity() {
                 notify(if (watched) "Marked as watched" else "Marked as unwatched")
             },
             saveToPlaylist = { saving = it },
-            openChannel = { id -> nav.navigate("channel/$id") },
+            openChannel = { id -> if (id.isNotEmpty()) nav.navigate("channel/$id") },
             notify = ::notify,
             addToGroup = { item -> grouping = dev.stow.android.data.GroupChannel(item.video.channelId, item.video.channelTitle) },
+            follow = if (standaloneMode) ({ item -> repository.follow(item.video.channelId, item.video.channelTitle, avatars[item.video.channelId]) }) else null,
+            followed = followedIds,
+            markAnyWatched = standaloneMode,
         )
+        val standaloneHome = if (standaloneMode) dev.stow.android.ui.StandaloneHome(
+            signedIn = account.state == dev.stow.android.standalone.AccountState.SIGNED_IN,
+            expiredBanner = account.state == dev.stow.android.standalone.AccountState.EXPIRED && !expiredDismissed,
+            signInPrompt = signInPrompt,
+            followsNone = followedIds.isEmpty(),
+            onSignIn = { repository.prefs.setSignInPrompt(false); nav.navigate("account-signin") },
+            onDismissExpired = { repository.prefs.setExpiredBannerDismissed(true) },
+            onDismissPrompt = { repository.prefs.setSignInPrompt(false) },
+            onAddChannel = { addingChannel = true },
+            onImport = { nav.navigate("import") },
+        ) else null
 
         val tabs = listOf(
             Tab("home", "Home", Icons.Filled.Home, Icons.Outlined.Home),
             Tab("subscriptions", "Subscriptions", Icons.Filled.Subscriptions, Icons.Outlined.Subscriptions),
             Tab("downloads", "Downloads", Icons.Filled.Download, Icons.Outlined.Download),
         )
-        val fullScreen = route == "remote"
+        val fullScreen = route == "remote" || route == "account-signin"
 
         val gray = if (grayscale) Modifier.graphicsLayer {
             renderEffect = android.graphics.RenderEffect.createColorFilterEffect(
@@ -327,14 +394,19 @@ class MainActivity : ComponentActivity() {
                                    onSearch = { nav.navigate("search") }, onSettings = { nav.navigate("settings") },
                                    onRefresh = refresh, onNewGroup = { newGroup = true },
                                    onEditGroup = { nav.navigate("group/$it") },
-                                   alarmMac = alarm?.takeIf { it.isRecent() }?.macName, onRemote = { nav.navigate("remote") },
+                                   alarmMac = alarm?.takeIf { it.isRecent() && !standaloneMode }?.macName, onRemote = { nav.navigate("remote") },
                                    update = update?.version?.takeIf { it != dismissedUpdate }, onUpdate = { showUpdate = true },
-                                   onHideUpdate = { update?.let { repository.prefs.dismissUpdate(it.version) } })
+                                   onHideUpdate = { update?.let { repository.prefs.dismissUpdate(it.version) } },
+                                   standalone = standaloneHome)
                     }
                     composable("subscriptions") {
-                        SubscriptionsScreen(subscriptionsFeed, subscribedChannels, actions, onAllChannels = { nav.navigate("channels") },
+                        SubscriptionsScreen(subscriptionsFeed, subscribedChannels, actions,
+                                            onAllChannels = { nav.navigate(if (standaloneMode) "channels-manage" else "channels") },
                                             onSearch = { nav.navigate("search") }, onSettings = { nav.navigate("settings") },
-                                            onRefresh = refresh)
+                                            onRefresh = refresh,
+                                            emptyText = if (standaloneMode) {
+                                                if (followedIds.isEmpty()) "Follow channels to see their new videos here." else "No videos yet. Pull down to check your channels."
+                                            } else "No videos yet. Pull down to ask the Mac for new ones.")
                     }
                     composable("groups") {
                         dev.stow.android.ui.GroupsScreen(groups, groupActions, onOpen = { nav.navigate("group/$it") }, onBack = { nav.popBackStack() })
@@ -346,7 +418,7 @@ class MainActivity : ComponentActivity() {
                     }
                     composable("downloads") {
                         DownloadsScreen(
-                            all = all, channels = channels, playlists = playlists, byId = itemsById,
+                            all = downloads, channels = channels, playlists = playlists, byId = itemsById,
                             sort = sort, groupByChannel = group, storageText = storage, actions = actions,
                             onSort = repository.prefs::setDownloadSort, onGroup = repository.prefs::setGroupByChannel,
                             onOpenPlaylist = { nav.navigate("playlist/$it") },
@@ -370,9 +442,14 @@ class MainActivity : ComponentActivity() {
                         var loading by remember(id) { mutableStateOf(false) }
                         var loadError by remember(id) { mutableStateOf<String?>(null) }
                         var attempt by remember(id) { mutableStateOf(0) }
-                        // Not followed on the Mac: get its latest videos from YouTube here.
-                        LaunchedEffect(id, attempt) {
-                            if (id == null || channel != null) return@LaunchedEffect
+                        // The last name and picture seen: after unfollowing, they stay while YouTube's page loads.
+                        var knownTitle by remember(id) { mutableStateOf("") }
+                        var knownAvatar by remember(id) { mutableStateOf<String?>(null) }
+                        val followed = channel != null
+                        // Not followed (on the Mac, or here): get its latest videos from YouTube here. Standalone,
+                        // again when it stops being followed (removed from this page), so it shows them and Follow.
+                        LaunchedEffect(id, dev.stow.android.ui.ChannelPageRules.loadKey(attempt, standaloneMode, followed)) {
+                            if (id == null || !dev.stow.android.ui.ChannelPageRules.loads(followed)) return@LaunchedEffect
                             loading = true
                             loadError = null
                             try {
@@ -391,13 +468,25 @@ class MainActivity : ComponentActivity() {
                             itemsById.values.filter { it.fromSearch && it.video.channelId == id }
                         val loaded = page?.let { (it.videoIds + it.streamIds).mapNotNull { v -> itemsById[v] } }.orEmpty()
                         val videos = loaded + known.filterNot { k -> loaded.any { it.id == k.id } }
-                        val title = channel?.title ?: knownChannels.firstOrNull { it.id == id }?.title ?: page?.title?.takeIf { it.isNotEmpty() }
+                        val currentTitle = channel?.title ?: knownChannels.firstOrNull { it.id == id }?.title ?: page?.title?.takeIf { it.isNotEmpty() }
                             ?: videos.firstOrNull()?.video?.channelTitle.orEmpty()
+                        val currentAvatar = channel?.avatarUrl ?: page?.avatarUrl ?: avatars[id]
+                        LaunchedEffect(currentTitle) { if (currentTitle.isNotEmpty()) knownTitle = currentTitle }
+                        LaunchedEffect(currentAvatar) { if (currentAvatar != null) knownAvatar = currentAvatar }
+                        val title = dev.stow.android.ui.ChannelPageRules.title(currentTitle, knownTitle)
+                        val avatar = currentAvatar ?: knownAvatar
                         ChannelScreen(channel, title, videos, actions.copy(play = { item -> play(videos, item) }),
                                       groupNames = groups.filter { g -> g.channels.any { it.id == id } }.map { it.name },
                                       onGroups = { if (id != null) grouping = dev.stow.android.data.GroupChannel(id, title) },
                                       onBack = { nav.popBackStack() },
-                                      page = page, loading = loading, loadError = loadError, onRetry = { attempt++ })
+                                      page = page, loading = loading, loadError = loadError, onRetry = { attempt++ },
+                                      avatarUrl = avatar,
+                                      follow = if (standaloneMode && id != null) dev.stow.android.ui.FollowState(
+                                          followed = id in followedIds,
+                                          onFollow = { repository.follow(id, title, avatar, page?.handle) },
+                                          onUnfollow = { repository.unfollow(id) },
+                                      ) else null,
+                                      onRefresh = if (standaloneMode) refresh else null)
                     }
                     composable("playlist/{id}") { entry ->
                         val playlist = playlists.firstOrNull { it.id == entry.arguments?.getString("id") }
@@ -434,7 +523,32 @@ class MainActivity : ComponentActivity() {
                     composable("settings") {
                         SettingsScreen(repository, updater, wifiOnly, onReport = { nav.navigate("report") },
                                        onRemote = { nav.navigate("remote") }, onGroups = { nav.navigate("groups") },
-                                       onUpdate = { showUpdate = true }, onBack = { nav.popBackStack() })
+                                       onUpdate = { showUpdate = true }, onBack = { nav.popBackStack() },
+                                       onSignIn = { nav.navigate("account-signin") }, onManageChannels = { nav.navigate("channels-manage") },
+                                       onImport = { nav.navigate("import") }, notify = ::notify)
+                    }
+                    composable("account-signin") {
+                        dev.stow.android.ui.SignInScreen(engine, onImportFile = { cookiesImport?.start?.invoke() },
+                                                         onDone = { message -> notify(message); nav.popBackStack() },
+                                                         onCancel = { nav.popBackStack() })
+                    }
+                    composable("channels-manage") {
+                        val errors = checkStatus.channelErrors
+                        dev.stow.android.ui.ManageChannelsScreen(
+                            channels, errors, signedIn = account.state == dev.stow.android.standalone.AccountState.SIGNED_IN,
+                            onOpen = { nav.navigate("channel/$it") }, onMove = engine::moveChannel, onRemove = repository::unfollow,
+                            onGroups = { grouping = it }, onAdd = { addingChannel = true }, onImport = { nav.navigate("import") },
+                            onBack = { nav.popBackStack() })
+                    }
+                    composable("import") {
+                        dev.stow.android.ui.ImportChannelsScreen(
+                            followedIds, load = engine::loadSubscriptions,
+                            onAdd = { picked ->
+                                val added = engine.addChannels(picked)
+                                notify(if (added == 1) "Added 1 channel" else "Added $added channels")
+                                nav.popBackStack()
+                            },
+                            onSignIn = { nav.navigate("account-signin") }, onBack = { nav.popBackStack() })
                     }
                     composable("remote") { RemoteScreen(remote, alarm?.macName, onBack = { nav.popBackStack() }) }
                     composable("report") {
@@ -461,7 +575,7 @@ class MainActivity : ComponentActivity() {
                     // Up next: jump within the same queue.
                     play = { next -> player.play(queue.mapNotNull { itemsById[it] }, next) },
                     // Opening a channel from the watch page shrinks the player, like YouTube.
-                    openChannel = { id -> sheet.collapse(); nav.navigate("channel/$id") },
+                    openChannel = { id -> if (id.isNotEmpty()) { sheet.collapse(); nav.navigate("channel/$id") } },
                 ),
                 sheet = sheet, bottomInset = bottomBarHeight,
                 loadComments = { video, fresh -> repository.comments(video, fresh) },
@@ -477,6 +591,13 @@ class MainActivity : ComponentActivity() {
         }
         grouping?.let { channel ->
             dev.stow.android.ui.GroupPickerSheet(channel, groups, groupActions, notify = ::notify, onDismiss = { grouping = null })
+        }
+        if (addingChannel) {
+            dev.stow.android.ui.AddChannelDialog(
+                onAdd = { input -> engine.addChannel(input).title },
+                onAdded = { title -> addingChannel = false; notify("Following $title") },
+                onDismiss = { addingChannel = false },
+            )
         }
         if (newGroup) {
             dev.stow.android.ui.NameDialog("New group", "", onDismiss = { newGroup = false }) { name ->
@@ -520,6 +641,10 @@ class MainActivity : ComponentActivity() {
     companion object {
         /** The alarm notification's tap: opens the remote. */
         const val ACTION_OPEN_REMOTE = "dev.stow.android.OPEN_REMOTE"
+        /** The "YouTube signed you out" notification's tap: opens Settings. */
+        const val ACTION_OPEN_SETTINGS = "dev.stow.android.OPEN_SETTINGS"
+        /** Debug builds: a screen to open at launch. */
+        const val EXTRA_ROUTE = "stow.route"
         /** Downloads longer than this ask first, with the size. */
         const val LONG_VIDEO_MS = 20 * 60 * 1000L
     }

@@ -25,6 +25,22 @@ class LocalStore(context: Context) {
         save()
     }
 
+    /** Gives downloads without their video one (an older download's): one save, and their order (updatedAt) kept. */
+    fun fillVideos(videos: Map<String, Video>) {
+        if (videos.isEmpty()) return
+        var changed = false
+        _videos.update { current ->
+            current.mapValues { (id, local) ->
+                val video = videos[id]
+                if (local.video == null && video != null) {
+                    changed = true
+                    local.copy(video = video)
+                } else local
+            }
+        }
+        if (changed) save()
+    }
+
     fun clear() {
         _videos.value = emptyMap()
         save()
@@ -46,6 +62,7 @@ class LocalStore(context: Context) {
                 put("sentAt", video.sentAt)
                 put("downloadedAt", video.downloadedAt)
                 put("updatedAt", video.updatedAt)
+                video.video?.let { put("video", VideoJson.encode(it)) }
             })
         }
         val temp = File(file.parentFile, "videos.json.tmp")
@@ -71,6 +88,7 @@ class LocalStore(context: Context) {
                     sentAt = o.optLong("sentAt"),
                     downloadedAt = o.optLong("downloadedAt"),
                     updatedAt = o.optLong("updatedAt"),
+                    video = o.optJSONObject("video")?.let(VideoJson::decode),
                 )
             }
         }.getOrDefault(emptyMap())

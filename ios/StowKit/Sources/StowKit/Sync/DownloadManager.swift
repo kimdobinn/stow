@@ -12,6 +12,12 @@ public protocol DownloadHost: AnyObject {
     /// A temporary cookies.txt for members-only videos (the queue deletes it), or nil.
     func cookiesFile() async -> URL?
     func downloadFinished(_ video: Video)
+    /// What to say instead of the tool's error (standalone's sign-in messages), or nil.
+    func downloadFailure(_ video: Video, error: Error?) -> String?
+}
+
+public extension DownloadHost {
+    func downloadFailure(_ video: Video, error: Error?) -> String? { nil }
 }
 
 /// Downloads one video at a time through the `YouTubeTool`, in the order they were asked for.
@@ -302,7 +308,7 @@ public final class DownloadManager {
                 }
                 return
             }
-            let message = Self.message(error)
+            let message = host?.downloadFailure(video, error: error) ?? Self.message(error)
             let attempts = (queue.first { $0.id == id }?.attempts ?? entry.attempts) + 1
             log.warning("Download \(id, privacy: .public) failed (attempt \(attempts)): \(message, privacy: .public)")
             if attempts <= maxRetries {

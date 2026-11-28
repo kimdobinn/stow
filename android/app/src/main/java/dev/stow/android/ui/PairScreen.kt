@@ -33,7 +33,7 @@ import dev.stow.android.data.PairState
 
 /** Scan the QR code from Stow › Phone › Pair a Phone on the Mac. */
 @Composable
-fun PairScreen(state: PairState, onScanned: (String) -> Unit) {
+fun PairScreen(state: PairState, onScanned: (String) -> Unit, onStandalone: (() -> Unit)? = null) {
     val context = LocalContext.current
     Column(
         modifier = Modifier.fillMaxSize().padding(32.dp),
@@ -75,6 +75,12 @@ fun PairScreen(state: PairState, onScanned: (String) -> Unit) {
                 (state as? PairState.Unpaired)?.message?.let {
                     Spacer(Modifier.height(16.dp))
                     Text(it, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
+                }
+                if (onStandalone != null) {
+                    Spacer(Modifier.height(24.dp))
+                    androidx.compose.material3.TextButton(onClick = onStandalone) {
+                        Text("Use on its own instead", color = Stow.colors.accent)
+                    }
                 }
             }
         }

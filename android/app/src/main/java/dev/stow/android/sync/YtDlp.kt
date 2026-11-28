@@ -32,10 +32,34 @@ object YtDlp {
         ready = true
     }
 
+    private val updateLock = Mutex()
+    @Volatile private var lastUpdateAttempt = 0L
+    /** After a failed update (no network yet at launch), standalone's runs try again at most this often. */
+    private const val UPDATE_RETRY_MS = 60 * 1000L
+
     /** YouTube changes often; keep yt-dlp at the newest stable release (checked daily). */
-    suspend fun updateIfDue(context: Context, prefs: Prefs, force: Boolean = false): String? {
-        if (!force && System.currentTimeMillis() - prefs.lastYtDlpUpdate < UPDATE_INTERVAL_MS) return null
+    suspend fun updateIfDue(context: Context, prefs: Prefs, force: Boolean = false): String? = updateLock.withLock {
+        if (!force && System.currentTimeMillis() - prefs.lastYtDlpUpdate < UPDATE_INTERVAL_MS) null else update(context, prefs)
+    }
+
+    /**
+     * Before standalone's own yt-dlp runs (checks, seeds): the daily update when it's due, so a
+     * fresh install doesn't read YouTube with the bundled, older yt-dlp (no dates, no stream
+     * states) because the launch-time update had no network. Tried at most once a minute; runs
+     * that come while it updates wait for it.
+     */
+    suspend fun updateBeforeUse(context: Context, prefs: Prefs) {
+        fun fresh() = System.currentTimeMillis() - prefs.lastYtDlpUpdate < UPDATE_INTERVAL_MS
+        if (fresh()) return
+        updateLock.withLock {
+            if (fresh() || System.currentTimeMillis() - lastUpdateAttempt < UPDATE_RETRY_MS) return@withLock
+            update(context, prefs)
+        }
+    }
+
+    private suspend fun update(context: Context, prefs: Prefs): String? {
         ensureReady(context)
+        lastUpdateAttempt = System.currentTimeMillis()
         return withContext(Dispatchers.IO) {
             runCatching {
                 val status = YoutubeDL.getInstance().updateYoutubeDL(context.applicationContext, YoutubeDL.UpdateChannel.STABLE)
@@ -198,6 +222,21 @@ object YtDlp {
         val response = YoutubeDL.getInstance().execute(request, "comments-$videoId")
         if (response.exitCode != 0) throw java.io.IOException(summary(response.err))
         dev.stow.android.data.Comments.trim(response.out.lineSequence().first { it.trimStart().startsWith("{") })
+    }
+
+    /** One video's own details as yt-dlp's JSON (what a download made before 0.9.0 is of). */
+    suspend fun videoInfo(context: Context, videoId: String): String = withContext(Dispatchers.IO) {
+        ensureReady(context)
+        val request = YoutubeDLRequest("https://www.youtube.com/watch?v=$videoId").apply {
+            addOption("-J")
+            addOption("--skip-download")
+            addOption("--no-playlist")
+            addOption("--ignore-no-formats-error")
+            addOption("--no-warnings")
+        }
+        val response = YoutubeDL.getInstance().execute(request, "info-$videoId")
+        if (response.exitCode != 0) throw java.io.IOException(summary(response.err))
+        response.out.lineSequence().first { it.trimStart().startsWith("{") }
     }
 
     fun cancel(id: String) {

@@ -23,6 +23,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Subscriptions
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import androidx.compose.material.icons.rounded.Settings
@@ -140,6 +141,8 @@ fun HomeScreen(
     onRefresh: suspend () -> Unit, onNewGroup: () -> Unit, onEditGroup: (String) -> Unit,
     alarmMac: String? = null, onRemote: () -> Unit = {},
     update: String? = null, onUpdate: () -> Unit = {}, onHideUpdate: () -> Unit = {},
+    /** Standalone mode's banners and empty state; null with the Mac. */
+    standalone: StandaloneHome? = null,
 ) {
     var groupId by rememberSaveable { mutableStateOf<String?>(null) }
     var showWatched by rememberSaveable { mutableStateOf(false) }
@@ -148,6 +151,10 @@ fun HomeScreen(
         LargeTitleBar("Home", onSearch, onSettings)
         alarmMac?.let { AlarmBanner(it, onRemote) }
         update?.let { UpdateBanner(it, onUpdate, onHideUpdate) }
+        standalone?.let { s ->
+            if (s.expiredBanner) ExpiredBanner(s.onSignIn, s.onDismissExpired)
+            else if (s.signInPrompt && !s.signedIn) SignInPromptCard(s.onSignIn, s.onDismissPrompt)
+        }
         ChipRow {
             Chip("All", group == null, onClick = { groupId = null })
             groups.forEach { g ->
@@ -163,15 +170,28 @@ fun HomeScreen(
                 if (group == null) {
                     // YouTube's recommendations; your channels' newest until the Mac has shared them.
                     val videos = recommended.ifEmpty { everything.filter { !it.watched } }
+                    if (standalone != null && standalone.followsNone && videos.isEmpty()) {
+                        item(key = "follow-some") { FollowSomeChannels(standalone, onSearch) }
+                        return@LazyColumn
+                    }
                     if (recommended.isEmpty()) {
+                        val note = when {
+                            standalone == null -> "YouTube's recommendations come through the Mac: keep Stow there signed in to YouTube. Until then, here's what's new from your channels."
+                            standalone.signedIn -> "YouTube's recommendations show here after the next check. Until then, here's what's new from your channels."
+                            else -> "What's new from your channels. Sign in to YouTube in Settings to see its recommendations here too."
+                        }
                         item(key = "no-recs") {
-                            Text("YouTube's recommendations come through the Mac: keep Stow there signed in to YouTube. Until then, here's what's new from your channels.",
-                                 style = StowType.footnote, color = Stow.colors.secondaryText, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+                            Text(note, style = StowType.footnote, color = Stow.colors.secondaryText, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
                         }
                     }
                     items(videos, key = { "all-" + it.id }) { VideoCard(it, avatars[it.video.channelId], actions) }
                     item(key = "end") {
-                        Text(if (videos.isEmpty()) "Nothing here yet. Pull down to ask the Mac for videos." else "That's everything for now. Pull down for a fresh batch.",
+                        Text(when {
+                                 standalone != null && videos.isEmpty() -> "Nothing here yet. Pull down to check your channels."
+                                 standalone != null -> "That's everything for now. Pull down to check for new videos."
+                                 videos.isEmpty() -> "Nothing here yet. Pull down to ask the Mac for videos."
+                                 else -> "That's everything for now. Pull down for a fresh batch."
+                             },
                              style = StowType.footnote, color = Stow.colors.secondaryText, textAlign = TextAlign.Center,
                              modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 28.dp))
                     }
@@ -197,6 +217,64 @@ fun HomeScreen(
                 }
             }
         }
+    }
+}
+
+/** What Home shows only in standalone mode. */
+data class StandaloneHome(
+    val signedIn: Boolean,
+    /** YouTube signed the phone out, and the banner wasn't closed. */
+    val expiredBanner: Boolean,
+    /** Just switched from the Mac: offer the phone's own sign-in. */
+    val signInPrompt: Boolean,
+    val followsNone: Boolean,
+    val onSignIn: () -> Unit,
+    val onDismissExpired: () -> Unit,
+    val onDismissPrompt: () -> Unit,
+    val onAddChannel: () -> Unit,
+    val onImport: () -> Unit,
+)
+
+/** "YouTube signed you out": sign in again, or close it until the next time. */
+@Composable
+private fun ExpiredBanner(onSignIn: () -> Unit, onDismiss: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+            .background(Stow.colors.chip).padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Text("YouTube signed you out.", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Stow.colors.text,
+             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        TextButton(onClick = onSignIn) { Text("Sign in", color = Color3D(), fontWeight = FontWeight.SemiBold) }
+        IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, contentDescription = "Close", tint = Stow.colors.secondaryText, modifier = Modifier.size(18.dp)) }
+    }
+}
+
+/** After switching from the Mac: its sign-in stayed there. */
+@Composable
+private fun SignInPromptCard(onSignIn: () -> Unit, onDismiss: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+               .background(Stow.colors.chip).padding(start = 14.dp, end = 8.dp, top = 12.dp, bottom = 4.dp)) {
+        Text("Sign in to YouTube on this phone for Home, Subscriptions and members-only videos.",
+             style = StowType.subheadline, color = Stow.colors.text, modifier = Modifier.padding(end = 6.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = onDismiss) { Text("Not now", color = Stow.colors.secondaryText) }
+            TextButton(onClick = onSignIn) { Text("Sign in", color = Color3D(), fontWeight = FontWeight.SemiBold) }
+        }
+    }
+}
+
+/** Standalone Home before any channel is followed. */
+@Composable
+private fun FollowSomeChannels(standalone: StandaloneHome, onSearch: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("Follow channels to see their new videos here", style = StowType.title3, color = Stow.colors.text, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(20.dp))
+        PillButton("Add a channel", Icons.Filled.Add, standalone.onAddChannel, filled = true)
+        if (standalone.signedIn) {
+            Spacer(Modifier.height(10.dp))
+            PillButton("Import from YouTube", Icons.Rounded.Subscriptions, standalone.onImport)
+        }
+        Spacer(Modifier.height(10.dp))
+        PillButton("Search YouTube", Icons.Rounded.Search, onSearch)
     }
 }
 
@@ -249,6 +327,7 @@ data class SubscriptionChannel(val id: String, val title: String, val avatarUrl:
 fun SubscriptionsScreen(
     feed: List<VideoItem>, channels: List<SubscriptionChannel>, actions: VideoActions,
     onAllChannels: () -> Unit, onSearch: () -> Unit, onSettings: () -> Unit, onRefresh: suspend () -> Unit,
+    emptyText: String = "No videos yet. Pull down to ask the Mac for new ones.",
 ) {
     var selected by rememberSaveable { mutableStateOf<String?>(null) }
     val avatars = channels.associate { it.id to it.avatarUrl }
@@ -283,7 +362,7 @@ fun SubscriptionsScreen(
         Refreshable(onRefresh) {
             LazyColumn(Modifier.fillMaxSize()) {
                 topAnchor()
-                if (shown.isEmpty()) item { EmptyState("No videos yet. Pull down to ask the Mac for new ones.") }
+                if (shown.isEmpty()) item { EmptyState(emptyText) }
                 items(shown, key = { it.id }) { VideoCard(it, avatars[it.video.channelId], actions) }
             }
         }
@@ -317,6 +396,28 @@ fun ChannelsScreen(channels: List<SubscriptionChannel>, counts: Map<String, Int>
 
 private enum class ChannelTab(val label: String) { VIDEOS("Videos"), LIVE("Live") }
 
+/** What a channel's page loads and shows (pure, so it's tested). */
+object ChannelPageRules {
+    /**
+     * What the page loads on: again on a retry, and in standalone when the channel stops being
+     * followed (removed from its own page), so it shows YouTube's videos and Follow like any other
+     * channel. `followed` is null with the Mac, whose channels come and go with its own checks.
+     */
+    data class LoadKey(val attempt: Int, val followed: Boolean?)
+
+    fun loadKey(attempt: Int, standalone: Boolean, followed: Boolean) = LoadKey(attempt, followed.takeIf { standalone })
+
+    /** A channel that isn't followed gets its latest videos from YouTube; a followed one has its own. */
+    fun loads(followed: Boolean) = !followed
+
+    /** The header (and Follow) shows for a followed channel, one with videos, or in standalone, one whose name is known (while loading). */
+    fun showsHeader(followed: Boolean, hasVideos: Boolean, standalone: Boolean, title: String) =
+        followed || hasVideos || (standalone && title.isNotEmpty())
+
+    /** The name to show: the current one, or the last one seen (it stays after unfollowing). */
+    fun title(current: String, lastSeen: String) = current.ifEmpty { lastSeen }
+}
+
 /** A channel's page: its header, then its videos, and its past live streams under Live, like YouTube. */
 @Composable
 fun ChannelScreen(
@@ -324,6 +425,10 @@ fun ChannelScreen(
     groupNames: List<String>, onGroups: () -> Unit, onBack: () -> Unit,
     /** For a channel the Mac doesn't follow: its latest videos, loaded from YouTube on the phone. */
     page: ChannelPage? = null, loading: Boolean = false, loadError: String? = null, onRetry: () -> Unit = {},
+    /** Its picture, as last seen (kept after unfollowing while YouTube's page loads). */
+    avatarUrl: String? = null,
+    /** Standalone: Follow / Following, and pull to check the channels. */
+    follow: FollowState? = null, onRefresh: (suspend () -> Unit)? = null,
 ) {
     var oldestFirst by rememberSaveable { mutableStateOf(false) }
     var tab by rememberSaveable { mutableStateOf(ChannelTab.VIDEOS) }
@@ -331,7 +436,7 @@ fun ChannelScreen(
     val listed = if (tab == ChannelTab.LIVE) streams else uploads
     Column(Modifier.fillMaxSize()) {
         BackTopBar(title, onBack)
-        if (channel == null && videos.isEmpty()) {
+        if (!ChannelPageRules.showsHeader(channel != null, videos.isNotEmpty(), follow != null, title)) {
             when {
                 loading -> Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
                     androidx.compose.material3.CircularProgressIndicator(color = Stow.colors.accent, strokeWidth = 3.dp, modifier = Modifier.size(32.dp))
@@ -341,23 +446,29 @@ fun ChannelScreen(
             }
             return
         }
-        LazyColumn(Modifier.fillMaxSize()) {
+        val list: @Composable () -> Unit = { LazyColumn(Modifier.fillMaxSize()) {
             item {
                 Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    ChannelAvatar(channel?.avatarUrl ?: page?.avatarUrl ?: LocalChannelAvatars.current[videos.firstOrNull()?.video?.channelId], 72.dp, name = title)
+                    ChannelAvatar(channel?.avatarUrl ?: page?.avatarUrl ?: avatarUrl ?: LocalChannelAvatars.current[videos.firstOrNull()?.video?.channelId], 72.dp, name = title)
                     Spacer(Modifier.width(16.dp))
                     Column(Modifier.weight(1f)) {
                         Text(title, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Stow.colors.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text(listOfNotNull(channel?.handle, Format.count(videos.size, "recent video")).joinToString(" · "),
+                        Text(listOfNotNull(channel?.handle ?: page?.handle, Format.count(videos.size, "recent video")).joinToString(" · "),
                              fontSize = 13.sp, color = Stow.colors.secondaryText)
                         Spacer(Modifier.height(6.dp))
-                        PillButton(if (groupNames.isEmpty()) "Add to group" else groupNames.joinToString(", "),
-                                   if (groupNames.isEmpty()) Icons.Filled.Add else Icons.Rounded.Check, onGroups)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            follow?.let { FollowPill(it) }
+                            PillButton(if (groupNames.isEmpty()) "Add to group" else groupNames.joinToString(", "),
+                                       if (groupNames.isEmpty()) Icons.Filled.Add else Icons.Rounded.Check, onGroups)
+                        }
                     }
                 }
                 if (channel == null) {
-                    Text(if (page != null) "Not followed on the Mac yet. Add it to a group and the Mac follows it."
-                         else "Not followed on the Mac yet: these are its videos from your YouTube feeds and searches. Add it to a group and the Mac follows it.",
+                    Text(when {
+                             follow != null -> "Not followed yet: these are its latest videos on YouTube. Follow it and Stow checks it for new ones."
+                             page != null -> "Not followed on the Mac yet. Add it to a group and the Mac follows it."
+                             else -> "Not followed on the Mac yet: these are its videos from your YouTube feeds and searches. Add it to a group and the Mac follows it."
+                         },
                          fontSize = 13.sp, color = Stow.colors.secondaryText, modifier = Modifier.padding(horizontal = 16.dp))
                 }
                 ChipRow {
@@ -377,6 +488,27 @@ fun ChannelScreen(
             } else if (loadError != null) item("error") { LoadError(loadError, onRetry) }
             if (sorted.isEmpty() && !loading) item { EmptyState(if (tab == ChannelTab.LIVE) "No past live streams." else "No recent videos.") }
             items(sorted, key = { it.id }) { item -> VideoRow(item, actions, showChannel = false) }
+        } }
+        if (onRefresh != null) Refreshable(onRefresh) { list() } else list()
+    }
+}
+
+/** Standalone: whether this phone follows the channel, and the two ways to change it. */
+data class FollowState(val followed: Boolean, val onFollow: () -> Unit, val onUnfollow: () -> Unit)
+
+/** "Follow" (the screen's primary action) or "Following", whose menu removes the channel. */
+@Composable
+private fun FollowPill(state: FollowState) {
+    if (!state.followed) {
+        PillButton("Follow", Icons.Filled.Add, state.onFollow, filled = true)
+        return
+    }
+    var menu by remember { mutableStateOf(false) }
+    Box {
+        PillButton("Following", Icons.Rounded.Check, { menu = true })
+        androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            androidx.compose.material3.DropdownMenuItem(text = { Text("Remove channel", color = androidx.compose.ui.graphics.Color(0xFFFF3B30)) },
+                                                        onClick = { menu = false; state.onUnfollow() })
         }
     }
 }

@@ -20,7 +20,15 @@
         android:theme="@style/Theme.Stow"
         android:extractNativeLibs="true"
         android:networkSecurityConfig="@xml/network_security_config"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:supportsRtl="true">
+
+        <!-- No push token until the phone pairs with the Mac (Repository turns it on then):
+             standalone mode never talks to Firebase. -->
+        <meta-data
+            android:name="firebase_messaging_auto_init_enabled"
+            android:value="false" />
 
         <activity
             android:name=".MainActivity"

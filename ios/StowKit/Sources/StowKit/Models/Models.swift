@@ -429,6 +429,10 @@ public enum RefreshResult: Sendable {
     /// The Mac didn't answer in time (Stow isn't running on it, or it's asleep).
     case noAnswer
     case failed
+    /// Standalone: most channels couldn't be reached (offline).
+    case youtubeFailed
+    /// Standalone: YouTube answered HTTP 429; automatic checks back off.
+    case slowedDown
 }
 
 public enum PairState: Equatable, Sendable {

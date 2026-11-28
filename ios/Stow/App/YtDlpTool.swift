@@ -26,6 +26,15 @@ nonisolated struct YtDlpTool: YouTubeTool {
         try await text(ytdlp.comments(videoID: videoId, cookies: cookies))
     }
 
+    func flatListing(_ url: String, count: Int, cookies: URL?) async throws -> FlatListing {
+        let listing = try await ytdlp.flatListing(url: url, count: count, cookies: cookies)
+        return FlatListing(json: text(listing.json), cookiesRejected: listing.cookiesRejected)
+    }
+
+    func markWatched(videoId: String, cookies: URL) async throws {
+        try await ytdlp.markWatched(videoID: videoId, cookies: cookies)
+    }
+
     /// HLS first (AVPlayer picks the quality, capped by the player); then separate H.264 and AAC;
     /// then the single progressive file.
     func stream(_ video: Video, cookies: URL?) async throws -> StreamInfo {

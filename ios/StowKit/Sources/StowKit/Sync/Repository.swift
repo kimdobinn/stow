@@ -7,8 +7,11 @@ import os
 ///
 /// With no push on a sideloaded iPhone, it polls Firestore: call `start()` once at launch,
 /// `setActive(_:)` as the scene becomes active or leaves the screen (it polls on activation and
-/// every 60 s while active), `refreshFromMac()` for pull-to-refresh, and `backgroundRefresh()`
+/// every 60 s while active), `pullToRefresh()` for pull-to-refresh, and `backgroundRefresh()`
 /// from a BGAppRefreshTask.
+///
+/// In standalone mode (`mode == .standalone`) there is no Firebase at all: `standalone` follows
+/// the channels and checks them itself, and the same calls drive it instead.
 @MainActor
 @Observable
 public final class Repository {
@@ -17,8 +20,13 @@ public final class Repository {
     public let playlistStore: PlaylistStore
     public let stats: WatchStats
     public let downloads: DownloadManager
-    /// nil in demo mode or when the build has no Firebase settings.
-    @ObservationIgnored public let remote: Remote?
+    /// Only in Mac mode: nil in demo mode, while choosing, in standalone mode, or when the build
+    /// has no Firebase settings.
+    @ObservationIgnored public private(set) var remote: Remote?
+    /// How the app is used; worked out at launch from the preferences (`AppMode.resolve`).
+    public private(set) var mode: AppMode
+    /// The phone's own channels, checks and YouTube sign-in, while the mode is standalone.
+    public private(set) var standalone: StandaloneEngine?
     @ObservationIgnored public let youtube: YouTubeTool
     public let isDemo: Bool
     /// Shown on the Mac's list of phones. The app sets it (UIDevice's name).
@@ -57,9 +65,21 @@ public final class Repository {
     @ObservationIgnored private var lastFullSync: Date?
     @ObservationIgnored private var polling: Task<Bool, Never>?
     @ObservationIgnored private var pollLoop: Task<Void, Never>?
+    /// Bumped on every mode change: work started in one mode stops at the next.
+    @ObservationIgnored private var modeEra = 0
     @ObservationIgnored private var started = false
+    @ObservationIgnored private var isActive = false
     @ObservationIgnored private var signingOut: Task<Void, Never>?
     @ObservationIgnored private let directory: URL
+    @ObservationIgnored private let config: FirebaseConfig?
+    @ObservationIgnored private let firebaseSession: URLSession?
+    @ObservationIgnored private let tokenStore: TokenStore
+    @ObservationIgnored private let cookieVault: CookieVault
+    @ObservationIgnored private let webSession: URLSession?
+    /// Closed outside Mac mode: a Firebase request then fails (and asserts in debug builds).
+    @ObservationIgnored public let firebaseGuard = FirebaseGuard()
+    /// Standalone: YouTube signed the phone out (the app posts a notification).
+    @ObservationIgnored public var onYouTubeSignedOut: (() -> Void)?
     @ObservationIgnored private let log = Logger(subsystem: "dev.stow.ios", category: "repository")
 
     /// How often to poll while the app is on screen.
@@ -81,10 +101,13 @@ public final class Repository {
     ///   - config: the Firebase project (nil when the build has none; pairing then says so).
     ///   - directory: Application Support (a temporary folder in tests).
     ///   - session: for Firebase (tests pass one with a stub URLProtocol).
+    ///   - cookieVault: standalone mode's YouTube sign-in (the Keychain in the app).
+    ///   - webSession: standalone mode's requests to youtube.com (tests pass a stub).
     public init(config: FirebaseConfig?, youtube: YouTubeTool, demo: Bool = false,
                 defaults: UserDefaults = .standard, directory: URL = StowPaths.applicationSupport,
                 tokenStore: TokenStore = KeychainTokenStore(), network: NetworkMonitoring? = nil,
-                session: URLSession? = nil) {
+                session: URLSession? = nil, cookieVault: CookieVault = KeychainCookieVault(),
+                webSession: URLSession? = nil) {
         let prefs = Prefs(defaults: defaults)
         let local = LocalStore(directory: directory)
         self.prefs = prefs
@@ -95,16 +118,53 @@ public final class Repository {
         downloads = DownloadManager(local: local, prefs: prefs, network: network ?? PathMonitor(), tool: youtube, directory: directory)
         self.youtube = youtube
         isDemo = demo
-        remote = demo ? nil : config.map { Remote(config: $0, session: session, tokenStore: tokenStore) }
+        self.config = config
+        firebaseSession = session
+        self.tokenStore = tokenStore
+        self.cookieVault = cookieVault
+        self.webSession = webSession
+        // Demo mode overrides the mode (and never stores one); otherwise the preferences decide,
+        // and an install paired before modes existed stays paired.
+        let resolved = demo ? AppMode.mac : prefs.resolveMode()
+        mode = resolved
         if demo {
             pairState = .paired
-        } else if let config, prefs.pairedProject == config.projectId, tokenStore.load() != nil {
+        } else if resolved == .mac, let config, prefs.pairedProject == config.projectId, tokenStore.load() != nil {
             pairState = .paired
         } else {
             pairState = .unpaired(message: nil)
         }
         downloads.host = self
         local.onChange = { [weak self] in self?.rebuildItems() }
+        firebaseGuard.set(resolved)
+        if !demo, mode == .mac { makeRemote() }
+        if mode == .standalone { makeStandalone() }
+    }
+
+    private func makeRemote() {
+        guard remote == nil, !isDemo, let config else { return }
+        remote = Remote(config: config, session: firebaseSession, tokenStore: tokenStore, firebaseGuard: firebaseGuard)
+    }
+
+    private func makeStandalone() {
+        guard standalone == nil else { return }
+        let engine = StandaloneEngine(directory: directory, youtube: youtube, prefs: prefs, vault: cookieVault, session: webSession)
+        engine.onChange = { [weak self] in self?.applyStandalone() }
+        engine.onExpired = { [weak self] in self?.onYouTubeSignedOut?() }
+        engine.knownVideoIds = { [weak self] in Set(self?.local.videos.keys.map { $0 } ?? []) }
+        standalone = engine
+        applyStandalone()
+    }
+
+    /// The engine's state, where the screens read it: the same lists as in Mac mode.
+    private func applyStandalone() {
+        guard mode == .standalone, let standalone else { return }
+        let newChannels = standalone.repositoryChannels
+        if newChannels != channels { channels = newChannels }
+        let feeds = standalone.youtubeFeeds
+        if feeds != youtubeFeeds { youtubeFeeds = feeds }
+        if shared.groups != standalone.groups { shared.groups = standalone.groups }
+        rebuildItems()
     }
 
     /// The app's repository: Firebase.plist from the app bundle, tokens in the Keychain, demo mode
@@ -115,10 +175,17 @@ public final class Repository {
 
     public var isPaired: Bool { pairState == .paired }
 
-    /// Once, at launch: picks up the download queue and, in demo mode, fills in the samples.
+    /// Once, at launch: picks up the download queue and, in demo mode, fills in the samples. In
+    /// standalone mode, checks the channels when due.
     public func start() {
         guard !started else { return }
         started = true
+        if let standalone, mode == .standalone {
+            rebuildItems()
+            downloads.restore()
+            Task { await standalone.checkIfDue(.launch) }
+            return
+        }
         if isDemo {
             channels = DemoData.channels()
             youtubeFeeds = DemoData.youtubeFeeds()
@@ -212,6 +279,9 @@ public final class Repository {
             return
         }
         guard pairState != .pairing else { return }
+        // A pairing link decides the mode (the app asks first when leaving standalone).
+        if mode == .choosing { chooseMac() }
+        if mode == .standalone { switchToMac() }
         guard let remote else {
             pairState = .unpaired(message: StowError.notConfigured.message)
             return
@@ -222,10 +292,13 @@ public final class Repository {
         signingOut = nil
         do {
             try await remote.pair(invite, deviceName: deviceName)
+            guard mode == .mac else { return }
             prefs.savePairing(projectId: invite.projectId, keyBase64URL: invite.key)
             pairState = .paired
             _ = await refresh()
         } catch {
+            // Switched to standalone while it waited: nothing to say on the pair screen.
+            guard mode == .mac else { return }
             log.warning("Pairing failed: \(String(describing: error), privacy: .public)")
             pairState = .unpaired(message: (error as? LocalizedError)?.errorDescription ?? "Pairing failed.")
         }
@@ -255,10 +328,103 @@ public final class Repository {
         rebuildItems()
     }
 
+    // Modes
+
+    /// Channels this phone follows on its own (empty in Mac mode): for the Follow buttons.
+    public var followedIds: Set<String> { mode == .standalone ? standalone?.followedIds ?? [] : [] }
+
+    /// Welcome › "Use with my Mac": the pair screen next.
+    public func chooseMac() {
+        guard !isDemo else { return }
+        // A YouTube sign-in left in the Keychain by an earlier install: the Mac's is used.
+        if cookieVault.load() != nil {
+            do { try cookieVault.save(nil) } catch {
+                log.warning("Couldn't delete a leftover YouTube sign-in: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        setMode(.mac)
+        pairState = .unpaired(message: nil)
+        makeRemote()
+    }
+
+    /// Welcome › "Use on its own": the app, checking its own channels.
+    public func chooseStandalone() {
+        guard !isDemo else { return }
+        enterStandalone()
+    }
+
+    /// Standalone → Mac (Settings › Mac › "Use with my Mac"): the phone's YouTube sign-in goes
+    /// (the Mac's is used) with its pending watched marks, and standalone.json stays for later.
+    /// Downloads, playlists and watched videos stay. The pair screen shows next.
+    public func switchToMac() {
+        guard !isDemo, mode != .mac else { return }
+        if let standalone {
+            standalone.signOut()
+            standalone.saveForLater()
+        }
+        standalone = nil
+        channels = []
+        youtubeFeeds = YouTubeFeeds()
+        shared = SharedState()
+        setMode(.mac)
+        pairState = .unpaired(message: nil)
+        makeRemote()
+        rebuildItems()
+        restartLoop()
+    }
+
+    /// Mac → standalone (Settings › Mac › "Use on its own", or the pair screen's "Use on its own
+    /// instead"). With `keepChannels`, the Mac's channels, recent videos and groups are copied into
+    /// standalone.json first, after what's there. The Mac's watched videos stay watched. Then it
+    /// unpairs exactly as `unpair()` does, and checks when a check is due. The Mac's YouTube
+    /// sign-in isn't carried over.
+    public func switchToStandalone(keepChannels: Bool) {
+        guard !isDemo, mode != .standalone else { return }
+        let wasPaired = isPaired
+        let macChannels = channels
+        let macGroups = shared.groups
+        // Watched on the Mac: watched here.
+        for video in sent where video.watched { prefs.setWatchedHere(video.video.id, true) }
+        for channel in macChannels {
+            for recent in channel.recent where recent.watched { prefs.setWatchedHere(recent.video.id, true) }
+        }
+        if mode == .mac { unpair() }
+        enterStandalone()
+        if keepChannels, let standalone { standalone.adopt(channels: macChannels, groups: macGroups) }
+        if wasPaired { prefs.signInPromptPending = true }
+        // The check `enterStandalone` started runs after the adoption, and only when one is due,
+        // like at launch: the Mac's channels count as read just now (uploads and past streams),
+        // so they aren't all fetched at once.
+    }
+
+    private func enterStandalone() {
+        pollLoop?.cancel()
+        pollLoop = nil
+        setMode(.standalone)
+        remote = nil
+        pairState = .unpaired(message: nil)
+        makeStandalone()
+        rebuildItems()
+        restartLoop()
+        if let standalone { Task { await standalone.checkIfDue(.launch) } }
+    }
+
+    private func setMode(_ newMode: AppMode) {
+        if newMode != mode { modeEra += 1 }
+        mode = newMode
+        prefs.appMode = newMode.stored
+        firebaseGuard.set(newMode)
+    }
+
+    private func restartLoop() {
+        if isActive { setActive(true) }
+    }
+
     // Polling
 
     /// The scene became active (poll now, then every minute) or left the screen (stop).
     public func setActive(_ active: Bool) {
+        isActive = active
         pollLoop?.cancel()
         pollLoop = nil
         guard active else {
@@ -266,6 +432,20 @@ public final class Repository {
             return
         }
         downloads.reevaluate()
+        if mode == .standalone {
+            // Back on screen, then the minute timer: each checks when 15 minutes have passed.
+            pollLoop = Task { [weak self] in
+                var trigger = CheckTrigger.foreground
+                while !Task.isCancelled {
+                    await self?.standalone?.checkIfDue(trigger)
+                    trigger = .tick
+                    guard let interval = self?.pollInterval else { return }
+                    try? await Task.sleep(for: interval)
+                }
+            }
+            return
+        }
+        guard mode == .mac else { return }
         pollLoop = Task { [weak self] in
             while !Task.isCancelled {
                 _ = await self?.refresh()
@@ -275,9 +455,11 @@ public final class Repository {
         }
     }
 
-    /// For a BGAppRefreshTask: one poll (new videos join the download queue). True when it worked.
+    /// For a BGAppRefreshTask: one poll (new videos join the download queue), or in standalone
+    /// mode the RSS round and a due history sync. True when it worked.
     public func backgroundRefresh() async -> Bool {
-        await refresh()
+        if mode == .standalone, let standalone { return await standalone.backgroundRefresh() }
+        return await refresh()
     }
 
     /// Reads Firebase once: what changed since the last poll, or everything when `full` (and on
@@ -285,7 +467,7 @@ public final class Repository {
     /// already under way is joined, not repeated. True when it worked.
     @discardableResult
     public func refresh(full: Bool = false) async -> Bool {
-        guard !isDemo, isPaired, let remote else { return isDemo }
+        guard !isDemo, mode == .mac, isPaired, let remote else { return isDemo }
         if let polling { return await polling.value }
         let task = Task { await self.poll(remote, full: full) }
         polling = task
@@ -451,7 +633,7 @@ public final class Repository {
     /// connection, Firestore's quota, a 5xx) is tried again on the next poll, like the SDK's
     /// offline queue on Android. Until it's filed the video shows as sent from here.
     private func sendPendingRequests() {
-        guard !isDemo, isPaired, let remote else { return }
+        guard !isDemo, mode == .mac, isPaired, let remote else { return }
         let onServer = Set(serverSent.map(\.video.id))
         let waiting = local.videos.values.filter { video in
             video.requestedAt != nil && video.state != .deleted && video.video != nil
@@ -553,6 +735,12 @@ public final class Repository {
 
     // Pull to refresh
 
+    /// Pull to refresh, by mode: the phone checks its channels itself, or asks the Mac to.
+    public func pullToRefresh() async -> RefreshResult {
+        if mode == .standalone, let standalone { return await standalone.refresh() }
+        return await refreshFromMac()
+    }
+
     /// Asks the Mac to check every channel and YouTube's feeds now, and waits for it (up to 2 minutes).
     public func refreshFromMac() async -> RefreshResult {
         if isDemo {
@@ -560,7 +748,11 @@ public final class Repository {
             return .done
         }
         guard let remote, isPaired else { return .failed }
+        let era = modeEra
+        // Unpaired, or switched to standalone, while this waited: the pull is over.
+        var stillPaired: Bool { mode == .mac && isPaired && modeEra == era }
         _ = await refresh()
+        guard stillPaired else { return .failed }
         let requested: Date
         do {
             requested = try await remote.requestRefresh()
@@ -572,7 +764,9 @@ public final class Repository {
         let deadline = clock.now.advanced(by: Self.refreshTimeout)
         while clock.now < deadline, !Task.isCancelled {
             try? await Task.sleep(for: .seconds(3))
+            guard stillPaired else { return .failed }
             guard let state = try? await remote.shared() else { continue }
+            guard stillPaired else { return .failed }
             applyShared(state)
             // The Mac answers with the request's time (to the millisecond).
             if let handled = state.refreshHandledAt, handled >= requested.addingTimeInterval(-1) {
@@ -644,9 +838,11 @@ public final class Repository {
         return item.durationMs > 0 ? Feeds.estimatedBytes(durationMs: item.durationMs) : nil
     }
 
-    /// The YouTube cookies (members-only videos) as a temporary cookies.txt (0600); the caller deletes it.
+    /// The YouTube cookies (members-only videos) as a temporary cookies.txt (0600); the caller
+    /// deletes it. From the phone's own sign-in in standalone mode, else the Mac's (sealed in Firestore).
     public func cookiesFile() async -> URL? {
-        guard let remote, let key = prefs.pairingKey else { return nil }
+        if mode == .standalone { return standalone?.cookiesFile() }
+        guard mode == .mac, let remote, let key = prefs.pairingKey else { return nil }
         do {
             guard let data = try await remote.cookies(key: key) else { return nil }
             let url = FileManager.default.temporaryDirectory.appending(path: "cookies-\(UUID().uuidString).txt")
@@ -703,8 +899,9 @@ public final class Repository {
         if let sent = item.sent {
             queue(item.id, sentAt: sent.sentAt ?? .now, video: item.video)
         } else {
+            // Standalone: nothing to file with a Mac, so no request.
             let now = Date.now
-            queue(item.id, sentAt: now, video: item.video, requestedAt: now)
+            queue(item.id, sentAt: now, video: item.video, requestedAt: mode == .standalone ? nil : now)
         }
         sendPendingRequests()
     }
@@ -717,6 +914,8 @@ public final class Repository {
         guard item?.sent != nil, !isUnfiledRequest(id) else {
             // Streamed without ever being sent (or the request isn't filed yet, and carries it): remember it here.
             prefs.setWatchedHere(id, watched)
+            // Standalone: and on YouTube, while syncing.
+            if mode == .standalone { standalone?.noteWatched(id, watched) }
             rebuildItems()
             return
         }
@@ -735,7 +934,7 @@ public final class Repository {
             pendingWatched[id] = (watched, .now)
         }
         rebuildItems()
-        guard !isDemo, let remote else { return }
+        guard !isDemo, mode == .mac, let remote else { return }
         Task {
             do { try await remote.setWatched(id, watched: watched) } catch {
                 log.warning("setWatched failed: \(String(describing: error), privacy: .public)")
@@ -799,25 +998,39 @@ public final class Repository {
 
     // Channel groups
 
-    private func editGroups(_ change: @escaping @Sendable ([ChannelGroup]) -> [ChannelGroup]) {
+    /// Group edits: in Firestore's shared/phone with the Mac, in standalone.json on the phone's own.
+    /// Returns the channels a group gained that the phone didn't follow (standalone follows them).
+    @discardableResult
+    private func editGroups(_ change: @escaping @Sendable ([ChannelGroup]) -> [ChannelGroup]) -> [GroupChannel] {
+        if mode == .standalone, let standalone {
+            let followed = standalone.editGroups(change)
+            applyStandalone()
+            return followed
+        }
         shared.groups = change(shared.groups)
-        guard !isDemo, let remote else { return }
+        guard !isDemo, mode == .mac, let remote else { return [] }
         groupEditsInFlight += 1
         Task {
             do { try await remote.editGroups(change) } catch {
                 log.warning("Saving groups failed: \(String(describing: error), privacy: .public)")
             }
             groupEditsInFlight -= 1
-            if groupEditsInFlight == 0, let state = try? await remote.shared() { applyShared(state) }
+            if groupEditsInFlight == 0, mode == .mac, let state = try? await remote.shared() { applyShared(state) }
         }
+        return []
     }
 
     @discardableResult
     public func createGroup(_ name: String, with channel: GroupChannel? = nil) -> ChannelGroup {
+        createGroupFollowing(name, with: channel).group
+    }
+
+    /// Like `createGroup`; also says whether the channel got followed (standalone).
+    public func createGroupFollowing(_ name: String, with channel: GroupChannel? = nil) -> (group: ChannelGroup, followed: Bool) {
         let group = ChannelGroup(id: UUID().uuidString.lowercased(), name: name.trimmingCharacters(in: .whitespacesAndNewlines),
                                  channels: channel.map { [$0] } ?? [])
-        editGroups { $0 + [group] }
-        return group
+        let followed = editGroups { $0 + [group] }
+        return (group, !followed.isEmpty)
     }
 
     public func renameGroup(_ id: String, to name: String) {
@@ -832,13 +1045,15 @@ public final class Repository {
 
     public func deleteGroup(_ id: String) { editGroups { $0.filter { $0.id != id } } }
 
-    public func setInGroup(_ groupId: String, channel: GroupChannel, included: Bool) {
-        editGroups { groups in groups.map { group in
+    /// True when that made the phone follow the channel (standalone: groups hold followed channels).
+    @discardableResult
+    public func setInGroup(_ groupId: String, channel: GroupChannel, included: Bool) -> Bool {
+        !editGroups { groups in groups.map { group in
             guard group.id == groupId else { return group }
             var group = group
             group.channels = group.channels.filter { $0.id != channel.id } + (included ? [channel] : [])
             return group
-        } }
+        } }.isEmpty
     }
 
     /// Moves a group one place up (-1) or down (+1).
@@ -870,8 +1085,21 @@ public final class Repository {
 extension Repository: DownloadHost {
     public func videoToDownload(_ id: String) async throws -> Video? {
         if let video = items[id]?.video ?? local[id]?.video { return video }
-        guard let remote, isPaired else { return nil }
+        guard mode == .mac, let remote, isPaired else { return nil }
         return try await remote.video(id)?.video
+    }
+
+    /// Standalone: members-only downloads say what the sign-in needs.
+    public func downloadFailure(_ video: Video, error: Error?) -> String? {
+        guard mode == .standalone, video.isMembersOnly, let standalone else { return nil }
+        switch standalone.accountInfo.state {
+        case .signedOut: return "Members-only. Sign in to YouTube in Settings."
+        case .expired: return "YouTube signed you out. Sign in again in Settings."
+        case .signedIn:
+            guard let error, YouTubeFailure.classify(error) == .auth else { return nil }
+            standalone.markExpired()
+            return "YouTube signed you out. Sign in again in Settings."
+        }
     }
 
     public func downloadFinished(_ video: Video) {

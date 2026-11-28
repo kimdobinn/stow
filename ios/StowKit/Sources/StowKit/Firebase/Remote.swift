@@ -24,11 +24,11 @@ public struct Remote: Sendable {
     public let auth: FirebaseAuth
     public let firestore: FirestoreClient
 
-    public init(config: FirebaseConfig, session: URLSession? = nil, tokenStore: TokenStore) {
+    public init(config: FirebaseConfig, session: URLSession? = nil, tokenStore: TokenStore, firebaseGuard: FirebaseGuard? = nil) {
         let session = session ?? HTTPClient.makeSession()
         self.config = config
-        auth = FirebaseAuth(config: config, session: session, store: tokenStore)
-        firestore = FirestoreClient(projectId: config.projectId, auth: auth, session: session)
+        auth = FirebaseAuth(config: config, session: session, store: tokenStore, firebaseGuard: firebaseGuard)
+        firestore = FirestoreClient(projectId: config.projectId, auth: auth, session: session, firebaseGuard: firebaseGuard)
     }
 
     public var projectId: String { config.projectId }

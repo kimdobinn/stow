@@ -45,6 +45,11 @@ struct PairScreen: View {
                             pasting = true
                         }
                         .font(.body.weight(.medium))
+                        Button("Use on its own instead") {
+                            repository.switchToStandalone(keepChannels: false)
+                        }
+                        .font(.body.weight(.medium))
+                        .padding(.top, 4)
                         if case .unpaired(let message?) = repository.pairState {
                             Text(message)
                                 .font(.callout)

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns:media="http://search.yahoo.com/mrss/" xmlns="http://www.w3.org/2005/Atom">
+ <link rel="self" href="http://www.youtube.com/feeds/videos.xml?playlist_id=UULFaaaaaaaaaaaaaaaaaaaaaa"/>
+ <id>yt:playlist:UULFaaaaaaaaaaaaaaaaaaaaaa</id>
+ <yt:playlistId>UULFaaaaaaaaaaaaaaaaaaaaaa</yt:playlistId>
+ <yt:channelId>UCaaaaaaaaaaaaaaaaaaaaaa</yt:channelId>
+ <title>Uploads from Test Channel</title>
+ <author>
+  <name>Test Channel</name>
+  <uri>https://www.youtube.com/channel/UCaaaaaaaaaaaaaaaaaaaaaa</uri>
+ </author>
+ <published>2020-01-01T00:00:00+00:00</published>
+ <entry>
+  <id>yt:video:vid00000001</id>
+  <yt:videoId>vid00000001</yt:videoId>
+  <yt:channelId>UCaaaaaaaaaaaaaaaaaaaaaa</yt:channelId>
+  <title>Rockets &amp; Moons</title>
+  <link rel="alternate" href="https://www.youtube.com/watch?v=vid00000001"/>
+  <author>
+   <name>Test Channel</name>
+   <uri>https://www.youtube.com/channel/UCaaaaaaaaaaaaaaaaaaaaaa</uri>
+  </author>
+  <published>2026-11-20T15:00:00+00:00</published>
+  <updated>2026-11-21T10:00:00+00:00</updated>
+  <media:group>
+   <media:title>Media title, not the entry's</media:title>
+   <media:content url="https://www.youtube.com/v/vid00000001?version=3" type="application/x-shockwave-flash" width="640" height="390"/>
+   <media:thumbnail url="https://i1.ytimg.com/vi/vid00000001/hqdefault.jpg" width="480" height="360"/>
+   <media:description>A test video.</media:description>
+  </media:group>
+ </entry>
+ <entry>
+  <id>yt:video:vid00000002</id>
+  <yt:videoId>vid00000002</yt:videoId>
+  <yt:channelId>UCaaaaaaaaaaaaaaaaaaaaaa</yt:channelId>
+  <title>Second video</title>
+  <author>
+   <name>Test Channel (entry)</name>
+  </author>
+  <published>2026-11-18T09:30:00+00:00</published>
+  <media:group>
+   <media:thumbnail url="https://i1.ytimg.com/vi/vid00000002/hqdefault.jpg" width="480" height="360"/>
+  </media:group>
+ </entry>
+</feed>

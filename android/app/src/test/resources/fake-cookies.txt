@@ -1,0 +1,5 @@
+# Netscape HTTP Cookie File
+
+.youtube.com	TRUE	/	TRUE	4102444800	LOGIN_INFO	FAKE
+.youtube.com	TRUE	/	TRUE	4102444800	SAPISID	fake/fake
+.youtube.com	TRUE	/	TRUE	4102444800	__Secure-3PAPISID	fake/fake

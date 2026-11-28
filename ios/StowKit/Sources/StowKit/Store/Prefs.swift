@@ -106,6 +106,34 @@ public final class Prefs {
         defaults.removeObject(forKey: Keys.key)
     }
 
+    // Mode
+
+    /// "mac" or "standalone"; nil until chosen (see `AppMode.resolve`).
+    public var appMode: String? {
+        get { defaults.string(forKey: Keys.appMode) }
+        set { defaults.set(newValue, forKey: Keys.appMode) }
+    }
+
+    /// The mode for this launch, from the preferences only (never Firebase). A paired install from
+    /// before modes existed becomes "mac" here, and stays paired.
+    public func resolveMode() -> AppMode {
+        let resolved = AppMode.resolve(stored: appMode, hasPairing: pairedProject != nil)
+        if let write = resolved.write { appMode = write }
+        return resolved.mode
+    }
+
+    /// Standalone: the Home banner after YouTube signed the phone out was closed (until the next time).
+    public var expiredBannerClosed: Bool {
+        get { defaults.bool(forKey: Keys.expiredBannerClosed) }
+        set { defaults.set(newValue, forKey: Keys.expiredBannerClosed) }
+    }
+
+    /// Standalone, after switching from the Mac: Home suggests signing in to YouTube here, once.
+    public var signInPromptPending: Bool {
+        get { defaults.bool(forKey: Keys.signInPrompt) }
+        set { defaults.set(newValue, forKey: Keys.signInPrompt) }
+    }
+
     // yt-dlp
 
     /// When the app last updated yt-dlp (YouTube changes often).
@@ -129,6 +157,9 @@ public final class Prefs {
         static let quality = "downloadQuality"
         static let recentSearches = "recentSearches"
         static let speed = "playbackSpeed"
+        static let appMode = "appMode"
+        static let expiredBannerClosed = "standaloneExpiredBannerClosed"
+        static let signInPrompt = "standaloneSignInPrompt"
     }
 }
 
@@ -138,6 +169,13 @@ public enum Demo {
     public static func isEnabled(arguments: [String] = ProcessInfo.processInfo.arguments,
                                  directory: URL = StowPaths.applicationSupport) -> Bool {
         arguments.contains("-demo") || FileManager.default.fileExists(atPath: directory.appending(path: "demo").path)
+    }
+
+    /// Debug builds: standalone mode asked for with `-standalone` or a file named "standalone"
+    /// in Application Support (ignored when paired, and when demo mode is on).
+    public static func wantsStandalone(arguments: [String] = ProcessInfo.processInfo.arguments,
+                                       directory: URL = StowPaths.applicationSupport) -> Bool {
+        arguments.contains("-standalone") || FileManager.default.fileExists(atPath: directory.appending(path: "standalone").path)
     }
 }
 

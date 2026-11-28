@@ -38,6 +38,38 @@ public protocol YouTubeTool: Sendable {
 
     /// Stops the download of this video id, if one is running (the task is canceled too).
     func cancel(videoId: String)
+
+    /// `--flat-playlist -J --playlist-end <count> <url>` (`count` 0: `--playlist-items 0`, the
+    /// page's own fields only), with the cookies when given. Any listing: a channel tab, a
+    /// playlist, or one of YouTube's feeds (`:ytrec`, `:ytsubs`, `:ythistory`). A run that only
+    /// warned about the cookies returns with `cookiesRejected` set.
+    func flatListing(_ url: String, count: Int, cookies: URL?) async throws -> FlatListing
+
+    /// `--simulate --mark-watched <watch url>` with the cookies: YouTube records a view.
+    func markWatched(videoId: String, cookies: URL) async throws
+}
+
+/// yt-dlp's flat-playlist answer, and whether YouTube took the cookies.
+public struct FlatListing: Hashable, Sendable {
+    public var json: String
+    /// The run succeeded, but its warnings say the cookies are missing, invalid or expired.
+    public var cookiesRejected: Bool
+
+    public init(json: String, cookiesRejected: Bool = false) {
+        self.json = json
+        self.cookiesRejected = cookiesRejected
+    }
+}
+
+public extension YouTubeTool {
+    /// Tools that predate standalone mode (test fakes) list nothing.
+    func flatListing(_ url: String, count: Int, cookies: URL?) async throws -> FlatListing {
+        throw StandaloneError.other("This YouTube tool can't list \(url)")
+    }
+
+    func markWatched(videoId: String, cookies: URL) async throws {
+        throw StandaloneError.other("This YouTube tool can't mark videos watched")
+    }
 }
 
 public enum ChannelTab: String, Sendable {

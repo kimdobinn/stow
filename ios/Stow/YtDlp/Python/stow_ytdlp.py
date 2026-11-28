@@ -178,6 +178,7 @@ class _Call:
     def __init__(self, call_id):
         self.id = call_id
         self.errors = []
+        self.warnings = []
         self.lines = collections.deque(maxlen=20)
         self._last_progress = 0.0
 
@@ -206,6 +207,7 @@ class _Call:
 
     def warning(self, message):
         self.lines.append(f'WARNING: {message}')
+        self.warnings.append(message)
         # iOS has no ffmpeg by design (AVFoundation merges), and yt-dlp says so on every call.
         if 'ffmpeg not found' not in message and 'Unknown codec' not in message:
             print(f'[yt-dlp {self.id}] WARNING: {message}', file=sys.stderr)
@@ -378,6 +380,45 @@ def _op_channel(call, request):
         return json.dumps(ydl.sanitize_info(info), ensure_ascii=False)
 
 
+# yt-dlp's words when it ran but YouTube didn't take the cookies (the Mac's YTDLP.classify "auth").
+_AUTH_MARKS = ('cookies are no longer valid', '--cookies for the authentication')
+
+
+def _cookies_rejected(call, request):
+    """A run with cookies whose warnings say YouTube didn't accept them."""
+    if not request.get('cookies'):
+        return False
+    return any(mark in warning.lower() for warning in call.warnings for mark in _AUTH_MARKS)
+
+
+def _op_flat(call, request):
+    """Any flat listing (`--flat-playlist -J --playlist-end <count> <url>`): a channel tab, a playlist,
+    or YouTube's own feeds (:ytrec, :ytsubs, :ythistory) with the cookies. `count` 0 lists only the
+    page's own fields (`--playlist-items 0`)."""
+    count = int(request.get('count', 30))
+    options = {'extract_flat': 'in_playlist', 'noplaylist': False}
+    if count <= 0:
+        options['playlist_items'] = '0'
+    else:
+        options['playlistend'] = count
+    with _session(call, request, **options) as ydl:
+        info = ydl.extract_info(request['url'], download=False)
+        return json.dumps({'info': ydl.sanitize_info(info), 'cookiesRejected': _cookies_rejected(call, request)},
+                          ensure_ascii=False)
+
+
+def _op_mark_watched(call, request):
+    """`--simulate --mark-watched <watch url>` with the cookies: YouTube records a view, as if it was
+    played there. Rejected cookies fail the call (in yt-dlp's words, so Swift classifies it)."""
+    with _session(call, request, mark_watched=True, skip_download=True, simulate=True,
+                  ignore_no_formats_error=True) as ydl:
+        ydl.extract_info(_watch_url(request), download=False)
+    if _cookies_rejected(call, request):
+        call.error('ERROR: The provided YouTube account cookies are no longer valid')
+        raise RuntimeError('The provided YouTube account cookies are no longer valid')
+    return {'marked': True}
+
+
 def _op_comments(call, request):
     limits = request.get('limits') or COMMENT_LIMITS
     with _session(call, dict(request, youtube_args={
@@ -505,6 +546,8 @@ _OPS = {
     'search': _op_search,
     'channel': _op_channel,
     'comments': _op_comments,
+    'flat': _op_flat,
+    'mark_watched': _op_mark_watched,
     'stream': _op_stream,
     'plan': _op_plan,
     'download': _op_download,

@@ -10,6 +10,8 @@ struct SettingsScreen: View {
     @State private var storage: Int64?
     @State private var ytDlpVersion: String?
     @State private var confirmUnpair = false
+    @State private var confirmUseWithMac = false
+    @State private var choosingStandalone = false
     @State private var confirmDeleteWatched = false
     @State private var confirmDeleteAll = false
 
@@ -83,7 +85,8 @@ struct SettingsScreen: View {
             } header: {
                 Text("Downloads")
             } footer: {
-                Text("Videos download only when you tap the download button, here or with Send to Phone on the Mac.")
+                Text(repository.mode == .standalone ? "Videos download only when you tap the download button."
+                     : "Videos download only when you tap the download button, here or with Send to Phone on the Mac.")
             }
             .listRowBackground(colors.raised)
 
@@ -98,6 +101,14 @@ struct SettingsScreen: View {
                 Text("Stow finds, plays and downloads videos with yt-dlp, on this phone. Tap to check that it works.")
             }
             .listRowBackground(colors.raised)
+
+            if repository.mode == .standalone {
+                AccountSection()
+                    .listRowBackground(colors.raised)
+                    .id("account")
+                StandaloneChannelsSection()
+                    .listRowBackground(colors.raised)
+            }
 
             macSection
                 .listRowBackground(colors.raised)
@@ -130,6 +141,18 @@ struct SettingsScreen: View {
         } message: {
             Text("It stops getting videos until you scan a new code. Downloads stay. Also unpair it on the Mac (Stow › Phone).")
         }
+        .alert("Pair with your Mac instead?", isPresented: $confirmUseWithMac) {
+            Button("Cancel", role: .cancel) {}
+            Button("Use with my Mac") {
+                shell.closePlayer()
+                repository.switchToMac()
+            }
+        } message: {
+            Text("The Mac's channels replace this phone's while paired. Your channels and groups here are kept for later. You'll be signed out of YouTube on this phone (the Mac's sign-in is used). Downloads, playlists and watched videos stay.")
+        }
+        .sheet(isPresented: $choosingStandalone) {
+            UseOnItsOwnSheet().sheetTheme(repository)
+        }
         .alert("Delete watched downloads?", isPresented: $confirmDeleteWatched) {
             Button("Cancel", role: .cancel) {}
             Button("Delete", role: .destructive) { delete(watchedDownloads) }
@@ -155,8 +178,15 @@ struct SettingsScreen: View {
         Section {
             if repository.isDemo {
                 SettingLabel("Sample videos", "Demo mode: no Mac, nothing is sent anywhere", icon: "desktopcomputer", color: .indigo)
+            } else if repository.mode == .standalone {
+                Button { confirmUseWithMac = true } label: {
+                    SettingLabel("Use with my Mac", "Pair with Stow on a Mac instead", icon: "desktopcomputer", color: .indigo)
+                }
             } else {
                 SettingLabel("Paired with your Mac", syncText, icon: "desktopcomputer", color: .indigo)
+                Button { choosingStandalone = true } label: {
+                    SettingLabel("Use on its own", "This phone follows channels itself, without the Mac", icon: "iphone", color: .teal)
+                }
                 Button { confirmUnpair = true } label: {
                     SettingLabel("Unpair this phone", "Firebase project \(repository.prefs.pairedProject ?? "–")",
                                  icon: "iphone.slash", color: .red, destructive: true)
@@ -165,7 +195,9 @@ struct SettingsScreen: View {
         } header: {
             Text("Mac")
         } footer: {
-            Text("New videos come from the Mac each time you open Stow, every minute while it's open, and now and then in the background.")
+            if repository.mode != .standalone {
+                Text("New videos come from the Mac each time you open Stow, every minute while it's open, and now and then in the background.")
+            }
         }
     }
 
@@ -234,6 +266,49 @@ struct SettingsScreen: View {
         items.forEach { repository.deleteDownload($0.id) }
         storage = repository.storageUsedBytes()
         shell.notify(items.count == 1 ? "Deleted 1 video" : "Deleted \(items.count) videos")
+    }
+}
+
+/// Mac → standalone: what happens, and whether to keep the Mac's channels and groups (on by default).
+private struct UseOnItsOwnSheet: View {
+    @Environment(Repository.self) private var repository
+    @Environment(Shell.self) private var shell
+    @Environment(\.stowColors) private var colors
+    @Environment(\.dismiss) private var dismiss
+    @State private var keep = true
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("Use Stow without your Mac? This phone stops getting videos from the Mac and checks your channels itself. Also remove it on the Mac (Stow › Phone).")
+                    .foregroundStyle(colors.text)
+                Toggle(isOn: $keep) {
+                    Text("Keep the Mac's \(Format.count(repository.channels.count, "channel")) and groups on this phone")
+                        .foregroundStyle(colors.text)
+                }
+                .tint(.green)
+                Spacer()
+                Button {
+                    dismiss()
+                    shell.closePlayer()
+                    repository.switchToStandalone(keepChannels: keep)
+                    shell.select(.home)
+                } label: {
+                    Text("Use on its own").font(.headline).frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .buttonBorderShape(.capsule)
+            }
+            .padding(24)
+            .background(colors.background)
+            .navigationTitle("Use on its own")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+            }
+        }
+        .presentationDetents([.medium])
     }
 }
 

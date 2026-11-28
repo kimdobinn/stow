@@ -18,6 +18,7 @@ struct HomeScreen: View {
         ScrollView {
             LazyVStack(spacing: 0) {
                 UpdateBanner()
+                StandaloneBanners()
                 ChipRow {
                     Chip(label: "All", selected: group == nil) { groupId = "" }
                     ForEach(groups) { g in
@@ -42,7 +43,7 @@ struct HomeScreen: View {
             }
         }
         .background(colors.background)
-        .refreshable { await shell.refreshFromMac() }
+        .refreshable { await shell.refresh() }
         .navigationTitle("Home")
         .toolbar { TabToolbar(shell: shell) }
     }
@@ -51,6 +52,25 @@ struct HomeScreen: View {
         let recommended = repository.recommended
         // YouTube's recommendations; your channels' newest until the Mac has shared them.
         let videos = recommended.isEmpty ? repository.everything.filter { !$0.watched } : recommended
+        if repository.mode == .standalone {
+            if videos.isEmpty && repository.followedIds.isEmpty {
+                StandaloneEmptyHome()
+            } else {
+                ForEach(videos) { VideoCard(item: $0, actions: actions) }
+                Text(videos.isEmpty ? "Nothing new yet. Pull down to check your channels." : "That's everything for now. Pull down for a fresh batch.")
+                    .font(.footnote)
+                    .foregroundStyle(colors.secondaryText)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 28)
+            }
+        } else {
+            macFeed(videos: videos, recommended: recommended, actions: actions)
+        }
+    }
+
+    @ViewBuilder private func macFeed(videos: [VideoItem], recommended: [VideoItem], actions: VideoActions) -> some View {
         if recommended.isEmpty {
             FootnoteText("YouTube's recommendations come through the Mac: keep Stow there signed in to YouTube. Until then, here's what's new from your channels.")
                 .padding(.horizontal, 16)
@@ -126,5 +146,83 @@ private struct CaughtUp: View {
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 24)
         .padding(.vertical, 32)
+    }
+}
+
+/// Standalone: the one-line banner after YouTube signed the phone out, and (after switching from
+/// the Mac) the card suggesting a sign-in here.
+private struct StandaloneBanners: View {
+    @Environment(Repository.self) private var repository
+    @Environment(Shell.self) private var shell
+    @Environment(\.stowColors) private var colors
+
+    var body: some View {
+        if repository.mode == .standalone, let standalone = repository.standalone {
+            if standalone.showsExpiredBanner {
+                HStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(colors.destructive)
+                    Text("YouTube signed you out.")
+                        .font(.subheadline)
+                        .foregroundStyle(colors.text)
+                    Spacer(minLength: 4)
+                    Button("Sign in") { shell.signingIn = true }
+                        .font(.subheadline.weight(.semibold))
+                    Button("Close", systemImage: "xmark") { withAnimation { standalone.closeExpiredBanner() } }
+                        .labelStyle(.iconOnly)
+                        .font(.subheadline)
+                        .foregroundStyle(colors.secondaryText)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(colors.raised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+            } else if standalone.showsSignInPrompt {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Sign in to YouTube on this phone for Home, Subscriptions and members-only videos.")
+                        .font(.subheadline)
+                        .foregroundStyle(colors.text)
+                    HStack(spacing: 10) {
+                        PillButton(label: "Sign in", filled: true) { shell.signingIn = true }
+                        PillButton(label: "Not now") { withAnimation { standalone.closeSignInPrompt() } }
+                    }
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(colors.raised, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+            }
+        }
+    }
+}
+
+/// Standalone with nothing followed: what to do first.
+private struct StandaloneEmptyHome: View {
+    @Environment(Repository.self) private var repository
+    @Environment(Shell.self) private var shell
+    @Environment(\.stowColors) private var colors
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "person.2.badge.plus")
+                .font(.system(size: 40))
+                .foregroundStyle(colors.secondaryText)
+                .accessibilityHidden(true)
+            Text("Follow channels to see their new videos here")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(colors.text)
+                .multilineTextAlignment(.center)
+            VStack(spacing: 10) {
+                PillButton(label: "Add a channel", systemImage: "plus", filled: true) { shell.addingChannel = true }
+                if repository.standalone?.isSignedIn == true {
+                    PillButton(label: "Import from YouTube", systemImage: "square.and.arrow.down") { shell.open(.importChannels) }
+                }
+                PillButton(label: "Search YouTube", systemImage: "magnifyingglass") { shell.open(.search) }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 32)
+        .padding(.vertical, 48)
     }
 }

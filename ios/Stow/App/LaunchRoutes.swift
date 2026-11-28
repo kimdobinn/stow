@@ -3,7 +3,8 @@ import SwiftUI
 
 /// For checking screens without tapping (simulator screenshots): `-tab downloads` picks a tab and
 /// `-open settings,report` pushes routes on it. Routes: search, settings, report, groups, channels,
-/// ytdlp, channel:<id>, group:<id>, playlist:<id> (or playlist:first), save:<video id> (the
+/// ytdlp, account, channels-manage, import, add-channel, signin (standalone mode), channel:<id>,
+/// group:<id>, playlist:<id> (or playlist:first), save:<video id> (the
 /// save-to-playlist sheet), update (the update sheet, once a check finds one; with `-updates-url`). `-search <text>` runs a search when the search screen opens.
 /// `-scroll-end` or `-scroll-to <id>` scroll screens that support it (see `launchScroll`).
 enum LaunchRoutes {
@@ -28,6 +29,12 @@ enum LaunchRoutes {
             case "groups": shell.open(.groups)
             case "channels": shell.open(.channels)
             case "ytdlp": shell.open(.ytdlp)
+            // Standalone mode's screens.
+            case "account": shell.open(.account)
+            case "channels-manage": shell.open(.channelsManage)
+            case "import": shell.open(.importChannels)
+            case "add-channel": shell.addingChannel = true
+            case "signin": shell.signingIn = true
             case "channel": shell.open(.channel(argument))
             case "group": shell.open(.group(argument))
             case "playlist":

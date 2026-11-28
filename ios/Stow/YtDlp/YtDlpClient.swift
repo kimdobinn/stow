@@ -60,6 +60,16 @@ nonisolated final class YtDlp: YtDlpService {
         try await runtime.call(request("comments", videoID: videoID, cookies: cookies))
     }
 
+    func flatListing(url: String, count: Int, cookies: URL?) async throws -> YtDlpFlatListing {
+        var body: [String: Any] = ["op": "flat", "url": url, "count": count]
+        if let cookies { body["cookies"] = cookies.path }
+        return try YtDlpFlatListing.parse(await runtime.call(body))
+    }
+
+    func markWatched(videoID: String, cookies: URL) async throws {
+        _ = try await runtime.call(request("mark_watched", videoID: videoID, cookies: cookies))
+    }
+
     func stream(videoID: String, cookies: URL?) async throws -> YtDlpStream {
         let data = try await runtime.call(request("stream", videoID: videoID, cookies: cookies))
         let stream = try Self.parseStream(data, videoID: videoID)

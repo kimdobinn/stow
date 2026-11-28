@@ -56,4 +56,21 @@ class YouTubeListingTest {
         assertEquals("https://yt3.example/avatar", YouTubeListing.channelAvatar(json))
         assertEquals("Chillhop Music", YouTubeListing.channelTitle(json))
     }
+
+    @Test fun aChannelTabsHandle() {
+        assertEquals("@veritasium", YouTubeListing.channelHandle("""{"uploader_id":"@veritasium","uploader_url":"https://www.youtube.com/@veritasium"}"""))
+        assertEquals("@veritasium", YouTubeListing.channelHandle("""{"uploader_id":null,"uploader_url":"https://www.youtube.com/@veritasium"}"""))
+        assertNull(YouTubeListing.channelHandle("""{"uploader_id":"UCHnyfMqiRRG1u-2MsSQLbXA"}"""))
+    }
+
+    @Test fun oneVideosOwnAnswerShortsIncluded() {
+        val video = YouTubeListing.video("""{"id":"abcdefghijk","title":"A Short","channel":"Bee","channel_id":"UCbee","duration":30,"timestamp":1700000000,"live_status":"not_live","thumbnails":[{"url":"https://i.ytimg.com/vi_webp/abcdefghijk/maxresdefault.webp","width":1920}]}""")!!
+        assertEquals("A Short", video.title)
+        assertEquals("UCbee", video.channelId)
+        assertEquals(30L, video.durationSeconds)
+        assertEquals(1_700_000_000_000L, video.publishedAt?.time)
+        assertEquals("https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg", video.thumbnailUrl)
+        assertNull(YouTubeListing.video("""{"title":"no id"}"""))
+        assertNull(YouTubeListing.video("not json"))
+    }
 }

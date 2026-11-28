@@ -51,6 +51,8 @@ data class GroupActions(
     val delete: (String) -> Unit,
     val setChannel: (String, GroupChannel, Boolean) -> Unit,
     val move: (String, Int) -> Unit,
+    /** Standalone: this phone follows the channels (the notes say so instead of "the Mac"). */
+    val standalone: Boolean = false,
 )
 
 /** "Add channel to a group": a checkbox per group, and a new group with this channel in it. */
@@ -83,7 +85,8 @@ fun GroupPickerSheet(channel: GroupChannel, groups: List<ChannelGroup>, actions:
                 Spacer(Modifier.width(16.dp))
                 Text("New group", color = Stow.colors.accent, style = StowType.body, fontWeight = FontWeight.Medium)
             }
-            Text("Home can show just a group's channels. The Mac adds any channel it doesn't follow yet.",
+            Text(if (actions.standalone) "Home can show just a group's channels. A channel you don't follow yet gets followed."
+                 else "Home can show just a group's channels. The Mac adds any channel it doesn't follow yet.",
                  style = StowType.footnote, color = Stow.colors.secondaryText, modifier = Modifier.padding(horizontal = 20.dp))
         }
     }
@@ -179,7 +182,8 @@ fun GroupScreen(
                 }
             }
             item {
-                Text("Any video's ⋯ menu can add its channel too. Channels the Mac doesn't follow yet get added there (with Morning off).",
+                Text(if (actions.standalone) "Any video's ⋯ menu can add its channel too. Channels you don't follow yet get followed."
+                     else "Any video's ⋯ menu can add its channel too. Channels the Mac doesn't follow yet get added there (with Morning off).",
                      style = StowType.footnote, color = Stow.colors.secondaryText, modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp))
             }
             item {
@@ -218,7 +222,8 @@ private fun AddChannelsSheet(group: ChannelGroup, known: List<GroupChannel>, ava
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Stow.colors.raised) {
         Text("Add to ${group.name}", style = StowType.headline, color = Stow.colors.text,
              modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
-        if (known.isEmpty()) EmptyState("No channels yet: they come from the Mac and your YouTube feeds.")
+        if (known.isEmpty()) EmptyState(if (actions.standalone) "No channels yet: follow some, or sign in to YouTube for your feeds' channels."
+                                        else "No channels yet: they come from the Mac and your YouTube feeds.")
         LazyColumn(Modifier.fillMaxWidth().padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(0.dp)) {
             items(known, key = { it.id }) { channel ->
                 val included = group.channels.any { it.id == channel.id }

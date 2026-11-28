@@ -69,13 +69,31 @@ import dev.stow.android.sync.YtDlp
 import dev.stow.android.update.Updater
 import androidx.compose.material.icons.rounded.SystemUpdate
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.map
+import dev.stow.android.standalone.AccountState
+import dev.stow.android.standalone.AppMode
+import dev.stow.android.standalone.Standalone
+import androidx.compose.material.icons.automirrored.rounded.Logout
+import androidx.compose.material.icons.rounded.AccountCircle
+import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.Laptop
+import androidx.compose.material.icons.rounded.Login
+import androidx.compose.material.icons.rounded.PhoneAndroid
+import androidx.compose.material.icons.rounded.Subscriptions
+import androidx.compose.material.icons.rounded.Sync
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** Downloads, the downloader and the pairing, in YouTube's plain settings style. */
 @Composable
 fun SettingsScreen(repository: Repository, updater: Updater, wifiOnly: Boolean, onReport: () -> Unit, onRemote: () -> Unit, onGroups: () -> Unit,
-                   onUpdate: () -> Unit, onBack: () -> Unit) {
+                   onUpdate: () -> Unit, onBack: () -> Unit,
+                   onSignIn: () -> Unit = {}, onManageChannels: () -> Unit = {}, onImport: () -> Unit = {}, notify: (String) -> Unit = {}) {
+    val mode by repository.mode.collectAsStateWithLifecycle()
+    val standaloneMode = mode == AppMode.STANDALONE
+    var confirmStandalone by remember { mutableStateOf(false) }
+    var confirmMac by remember { mutableStateOf(false) }
     val groups by repository.groups.collectAsStateWithLifecycle()
     val autoplay by repository.prefs.autoplay.collectAsStateWithLifecycle()
     val calm by repository.prefs.calm.collectAsStateWithLifecycle()
@@ -102,6 +120,7 @@ fun SettingsScreen(repository: Repository, updater: Updater, wifiOnly: Boolean, 
     Column(Modifier.fillMaxSize().background(Stow.colors.groupedBackground)) {
         BackTopBar("Settings", onBack)
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+            if (standaloneMode) StandaloneSections(repository, onSignIn, onManageChannels, onImport, notify)
             Section("Appearance") {
                 ThemePicker(theme, repository.prefs::setTheme)
             }
@@ -123,7 +142,8 @@ fun SettingsScreen(repository: Repository, updater: Updater, wifiOnly: Boolean, 
                     StowSwitch(grayscale, repository.prefs::setGrayscale)
                 }
             }
-            Section("Downloads", footer = "Videos download only when you tap the download button, here or with Send to Phone on the Mac.") {
+            Section("Downloads", footer = if (standaloneMode) "Videos download only when you tap the download button."
+                                          else "Videos download only when you tap the download button, here or with Send to Phone on the Mac.") {
                 SettingRow(Icons.Rounded.Wifi, Blue, "Download on Wi-Fi only", if (wifiOnly) "Waits for Wi-Fi" else "Also uses mobile data",
                            onClick = { repository.setWifiOnly(!wifiOnly) }) {
                     StowSwitch(wifiOnly, repository::setWifiOnly)
@@ -151,10 +171,19 @@ fun SettingsScreen(repository: Repository, updater: Updater, wifiOnly: Boolean, 
             Section("About") {
                 UpdateRow(updater, onUpdate)
             }
-            Section("Mac") {
-                SettingRow(Icons.Rounded.Alarm, Indigo, "Alarm remote", "Control the Mac's morning alarm from this phone", onClick = onRemote, chevron = true)
-                SettingRow(Icons.Rounded.LinkOff, Red, "Unpair this phone", "Paired with Firebase project ${repository.prefs.pairedProject ?: "–"}",
-                           onClick = { confirmUnpair = true }, destructive = true, last = true)
+            if (standaloneMode) {
+                Section("Mac") {
+                    SettingRow(Icons.Rounded.Laptop, Indigo, "Use with my Mac", "Pair with Stow on a Mac instead",
+                               onClick = { confirmMac = true }, chevron = true, last = true)
+                }
+            } else {
+                Section("Mac") {
+                    SettingRow(Icons.Rounded.Alarm, Indigo, "Alarm remote", "Control the Mac's morning alarm from this phone", onClick = onRemote, chevron = true)
+                    SettingRow(Icons.Rounded.PhoneAndroid, Teal, "Use on its own", "This phone follows channels and checks them itself",
+                               onClick = { confirmStandalone = true })
+                    SettingRow(Icons.Rounded.LinkOff, Red, "Unpair this phone", "Paired with Firebase project ${repository.prefs.pairedProject ?: "–"}",
+                               onClick = { confirmUnpair = true }, destructive = true, last = true)
+                }
             }
         }
     }
@@ -196,6 +225,46 @@ fun SettingsScreen(repository: Repository, updater: Updater, wifiOnly: Boolean, 
             text = { Text("It stops getting videos until you scan a new code. Downloads stay. Also unpair it on the Mac (Stow › Phone).") },
             confirmButton = { TextButton(onClick = { confirmUnpair = false; repository.unpair(); onBack() }) { Text("Unpair") } },
             dismissButton = { TextButton(onClick = { confirmUnpair = false }) { Text("Cancel") } },
+        )
+    }
+    if (confirmStandalone) {
+        val count = remember { repository.channels.value.size }
+        var keep by remember { mutableStateOf(true) }
+        AlertDialog(
+            onDismissRequest = { confirmStandalone = false },
+            title = { Text("Use Stow without your Mac?") },
+            text = {
+                Column {
+                    Text("This phone stops getting videos from the Mac and checks your channels itself. Also remove it on the Mac (Stow › Phone).")
+                    Spacer(Modifier.height(12.dp))
+                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { keep = !keep }.padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.Checkbox(checked = keep, onCheckedChange = { keep = it })
+                        Text("Keep the Mac's ${Format.count(count, "channel")} and groups on this phone", style = StowType.subheadline)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmStandalone = false
+                    repository.switchToStandalone(keep)
+                    notify("Stow now works on its own")
+                    onBack()
+                }) { Text("Use on Its Own") }
+            },
+            dismissButton = { TextButton(onClick = { confirmStandalone = false }) { Text("Cancel") } },
+        )
+    }
+    if (confirmMac) {
+        AlertDialog(
+            onDismissRequest = { confirmMac = false },
+            title = { Text("Pair with your Mac instead?") },
+            text = {
+                Text("The Mac's channels replace this phone's while paired. Your channels and groups here are kept for later. " +
+                     "You'll be signed out of YouTube on this phone (the Mac's sign-in is used). Downloads, playlists and watched videos stay.")
+            },
+            confirmButton = { TextButton(onClick = { confirmMac = false; repository.switchToMac() }) { Text("Use with My Mac") } },
+            dismissButton = { TextButton(onClick = { confirmMac = false }) { Text("Cancel") } },
         )
     }
     if (confirmDeleteAll) {
@@ -243,6 +312,96 @@ private val Orange = Color(0xFFFF9500)
 private val Red = Color(0xFFFF3B30)
 private val Green = Color(0xFF34C759)
 private val Indigo = Color(0xFF5856D6)
+
+/** Standalone only: the phone's own YouTube sign-in and channels. */
+@Composable
+private fun StandaloneSections(repository: Repository, onSignIn: () -> Unit, onManageChannels: () -> Unit, onImport: () -> Unit,
+                               notify: (String) -> Unit) {
+    val engine = repository.standalone
+    val account by engine.account.collectAsStateWithLifecycle()
+    val sync by remember { engine.state.map { it.syncWatchedWithYouTube } }.collectAsStateWithLifecycle(true)
+    val syncError by engine.watchSyncError.collectAsStateWithLifecycle()
+    val status by engine.checkStatus.collectAsStateWithLifecycle()
+    var confirmSignOut by remember { mutableStateOf(false) }
+    val cookies = rememberCookiesImport(engine, notify)
+    val since = account.since.takeIf { it > 0 }?.let { java.text.SimpleDateFormat("d MMM", java.util.Locale.getDefault()).format(java.util.Date(it)) }
+    Section("YouTube account") {
+        when (account.state) {
+            AccountState.SIGNED_OUT -> {
+                SettingRow(Icons.Rounded.AccountCircle, Red, "Sign in to YouTube",
+                           "Not signed in. Optional: for Home, Subscriptions and members-only videos.", onClick = onSignIn, chevron = true)
+                SettingRow(Icons.Rounded.Description, Gray, "Use a cookies.txt file", "From a desktop browser", onClick = cookies.start, last = true)
+            }
+            AccountState.SIGNED_IN -> {
+                SettingRow(Icons.Rounded.AccountCircle, Red, "YouTube",
+                           listOfNotNull("Signed in", since?.let { "since $it" }).joinToString(" · ") +
+                               if (account.source == Standalone.SOURCE_FILE) " · from a cookies.txt file" else "")
+                SettingRow(Icons.Rounded.Sync, Green, "Sync watched with YouTube",
+                           syncError?.let { "Couldn't sync: $it" } ?: if (sync) "Watched here shows on YouTube, and back" else "Off",
+                           onClick = { engine.setSyncWatched(!sync) }) {
+                    StowSwitch(sync, engine::setSyncWatched)
+                }
+                SettingRow(Icons.Rounded.Description, Gray, "Use a cookies.txt file", "Replaces the sign-in", onClick = cookies.start)
+                SettingRow(Icons.AutoMirrored.Rounded.Logout, Red, "Sign out", "Deletes the sign-in from this phone",
+                           onClick = { confirmSignOut = true }, destructive = true, last = true)
+            }
+            AccountState.EXPIRED -> {
+                SettingRow(Icons.Rounded.AccountCircle, Red, "YouTube signed you out. Sign in again.",
+                           "Home, Subscriptions and members-only videos wait for a new sign-in", destructive = true)
+                SettingRow(Icons.Rounded.Login, Blue, "Sign in again", "Google's sign-in page", onClick = onSignIn, chevron = true)
+                SettingRow(Icons.Rounded.Description, Gray, "Use a cookies.txt file", "Replaces the sign-in", onClick = cookies.start)
+                SettingRow(Icons.AutoMirrored.Rounded.Logout, Red, "Sign out", "Deletes the sign-in from this phone",
+                           onClick = { confirmSignOut = true }, destructive = true, last = true)
+            }
+        }
+    }
+    val signedIn = account.state == AccountState.SIGNED_IN
+    Section("Channels", footer = "Stow checks your channels about every 15 minutes, and when you pull down to refresh.") {
+        SettingRow(Icons.Rounded.Subscriptions, Orange, "Your channels (${status.channelCount})", checkStatusText(status),
+                   onClick = onManageChannels, chevron = true, last = !signedIn)
+        if (signedIn) {
+            SettingRow(Icons.Rounded.CloudDownload, Red, "Import from YouTube", "Pick from your subscriptions", onClick = onImport,
+                       chevron = true, last = true)
+        }
+    }
+    if (confirmSignOut) {
+        AlertDialog(
+            onDismissRequest = { confirmSignOut = false },
+            title = { Text("Sign out of YouTube?") },
+            text = { Text("Home and Subscriptions empty, and members-only videos hide until you sign in again. Downloads stay.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmSignOut = false
+                    engine.signOut()
+                    notify("Signed out of YouTube")
+                }) { Text("Sign Out", color = Red) }
+            },
+            dismissButton = { TextButton(onClick = { confirmSignOut = false }) { Text("Cancel") } },
+        )
+    }
+}
+
+/** "Checked 4 min ago · 23 channels", or what's wrong. */
+private fun checkStatusText(status: Standalone.CheckStatus, now: Long = System.currentTimeMillis()): String {
+    val errors = status.channelErrors.size
+    return when {
+        status.isChecking -> "Checking now…"
+        status.failedCheckStreak >= Standalone.FAILING_STREAK && status.lastCheck?.errors?.isNotEmpty() == true ->
+            "Checks are failing: ${status.lastCheck.errors.first()}"
+        status.backoffUntil > now -> "YouTube asked Stow to slow down. It'll try again later."
+        status.channelCount == 0 -> "Add channels to check them for new videos"
+        status.lastCheck?.offline == true && status.lastCheck.finishedAt >= status.lastReadAt -> listOf(
+            "Couldn't reach YouTube " + Format.ago(java.util.Date(status.lastCheck.finishedAt), now).replaceFirstChar { it.lowercase() },
+            Format.count(status.channelCount, "channel"),
+        ).joinToString(" · ")
+        status.lastReadAt <= 0 -> "Not checked yet"
+        else -> listOfNotNull(
+            "Checked " + Format.ago(java.util.Date(status.lastReadAt), now).replaceFirstChar { it.lowercase() },
+            Format.count(status.channelCount, "channel"),
+            (if (errors == 1) "1 channel had errors" else "$errors channels had errors").takeIf { errors > 0 },
+        ).joinToString(" · ")
+    }
+}
 
 /** The app's version and whether there's a newer one (tap: check now, or see the update). */
 @Composable
